@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Fruit Catcher Controller</title>
+  <style>
+    :root {
+      --bg: #08121f;
+      --panel: #132238;
+      --panel-strong: #1b3351;
+      --text: #f4f8fc;
+      --muted: #9cb0c7;
+      --accent: #63f59a;
+      --accent-strong: #34d274;
+      --danger: #ff6b6b;
+      --shadow: rgba(0, 0, 0, 0.35);
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top, rgba(99, 245, 154, 0.18), transparent 34%),
+        linear-gradient(180deg, #0d1728 0%, #08121f 55%, #060d17 100%);
+    }
+
+    main {
+      width: min(100%, 480px);
+      margin: 0 auto;
+      padding: 24px 20px 32px;
+    }
+
+    .panel {
+      background: linear-gradient(180deg, rgba(19, 34, 56, 0.98), rgba(11, 22, 37, 0.95));
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 24px;
+      padding: 20px;
+      box-shadow: 0 24px 50px var(--shadow);
+      margin-bottom: 18px;
+    }
+
+    h1, h2, p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: 32px;
+      line-height: 1.05;
+      margin-bottom: 10px;
+    }
+
+    .lead {
+      font-size: 15px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .room-form {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    input {
+      width: 100%;
+      border: 0;
+      border-radius: 16px;
+      padding: 16px 18px;
+      font-size: 24px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      color: var(--text);
+      background: var(--panel-strong);
+      outline: none;
+    }
+
+    button {
+      border: 0;
+      border-radius: 18px;
+      font-size: 18px;
+      font-weight: 700;
+      color: #03110a;
+      background: var(--accent);
+      padding: 16px 20px;
+      min-height: 64px;
+      box-shadow: inset 0 -4px 0 rgba(0, 0, 0, 0.16);
+    }
+
+    button.secondary {
+      color: var(--text);
+      background: #27476d;
+    }
+
+    button.danger {
+      color: white;
+      background: #d74b61;
+    }
+
+    button:disabled {
+      opacity: 0.55;
+    }
+
+    .status {
+      margin-top: 14px;
+      font-size: 14px;
+      color: var(--muted);
+      min-height: 20px;
+    }
+
+    .controls {
+      display: grid;
+      gap: 14px;
+    }
+
+    .primary-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .move-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .control-btn {
+      font-size: 22px;
+      min-height: 88px;
+      color: white;
+      background: #23405f;
+    }
+
+    .control-btn.primary {
+      color: #03110a;
+      background: var(--accent);
+    }
+
+    .tilt {
+      display: grid;
+      gap: 10px;
+    }
+
+    .tilt small {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="panel">
+      <h1>Fruit Catcher</h1>
+      <p class="lead">Join the TV by room code, then use touch controls or tilt to move the basket.</p>
+      <div class="room-form">
+        <input id="roomCodeInput" maxlength="6" placeholder="ROOM" autocomplete="off">
+        <button id="joinButton">Join</button>
+      </div>
+      <div id="status" class="status">Disconnected</div>
+    </section>
+
+    <section class="panel controls">
+      <div class="primary-row">
+        <button id="startButton" class="control-btn primary" disabled>Start</button>
+        <button id="pauseButton" class="control-btn danger" disabled>Pause</button>
+      </div>
+      <div class="move-row">
+        <button id="leftButton" class="control-btn" disabled>Left</button>
+        <button id="rightButton" class="control-btn" disabled>Right</button>
+      </div>
+      <button id="catchButton" class="control-btn secondary" disabled>Catch</button>
+    </section>
+
+    <section class="panel tilt">
+      <h2>Tilt Control</h2>
+      <small>On iPhone, tap enable and allow motion access. Tilt sends live left and right movement while you hold the phone.</small>
+      <button id="tiltButton" class="secondary">Enable Tilt</button>
+      <div id="tiltStatus" class="status">Tilt inactive</div>
+    </section>
+  </main>
+
+  <script src="./config.js"></script>
+  <script>
+    const config = window.FRUIT_CATCHER_CONFIG || {};
+    const gatewayWsUrl = config.gatewayWsUrl || "ws://localhost:3000";
+
+    const roomCodeInput = document.getElementById("roomCodeInput");
+    const joinButton = document.getElementById("joinButton");
+    const statusEl = document.getElementById("status");
+    const tiltStatusEl = document.getElementById("tiltStatus");
+    const tiltButton = document.getElementById("tiltButton");
+
+    const controlButtons = {
+      start: document.getElementById("startButton"),
+      pause: document.getElementById("pauseButton"),
+      left: document.getElementById("leftButton"),
+      right: document.getElementById("rightButton"),
+      catch: document.getElementById("catchButton")
+    };
+
+    const params = new URLSearchParams(window.location.search);
+    const prefilledRoomCode = (params.get("roomCode") || "").toUpperCase();
+    if (prefilledRoomCode) {
+      roomCodeInput.value = prefilledRoomCode;
+    }
+
+    let ws;
+    let joinedRoomCode = "";
+    let tiltEnabled = false;
+
+    function setControlsEnabled(enabled) {
+      Object.values(controlButtons).forEach((button) => {
+        button.disabled = !enabled;
+      });
+    }
+
+    function setStatus(text, color) {
+      statusEl.textContent = text;
+      statusEl.style.color = color || "#9cb0c7";
+    }
+
+    function setTiltStatus(text, color) {
+      tiltStatusEl.textContent = text;
+      tiltStatusEl.style.color = color || "#9cb0c7";
+    }
+
+    function normalizeRoomCode(value) {
+      return value.replace(/[^a-z0-9]/gi, "").toUpperCase().slice(0, 6);
+    }
+
+    function send(payload) {
+      if (!ws || ws.readyState !== WebSocket.OPEN || !joinedRoomCode) {
+        return;
+      }
+
+      ws.send(JSON.stringify({
+        ...payload,
+        roomCode: joinedRoomCode
+      }));
+    }
+
+    function connect() {
+      ws = new WebSocket(gatewayWsUrl);
+      setStatus("Connecting...", "#ffd166");
+
+      ws.addEventListener("open", () => {
+        setStatus("Connected. Enter a room code.", "#63f59a");
+      });
+
+      ws.addEventListener("message", (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.type === "joined_room") {
+          joinedRoomCode = data.roomCode;
+          setControlsEnabled(true);
+          setStatus(`Joined room ${data.roomCode}`, "#63f59a");
+          return;
+        }
+
+        if (data.type === "join_error") {
+          joinedRoomCode = "";
+          setControlsEnabled(false);
+          setStatus(data.message, "#ff9a7a");
+          return;
+        }
+
+        if (data.type === "room_closed") {
+          joinedRoomCode = "";
+          setControlsEnabled(false);
+          setStatus("TV disconnected. Rejoin with a new room code.", "#ff9a7a");
+        }
+      });
+
+      ws.addEventListener("close", () => {
+        joinedRoomCode = "";
+        setControlsEnabled(false);
+        setStatus("Connection lost. Reconnecting...", "#ffd166");
+        setTimeout(connect, 2000);
+      });
+
+      ws.addEventListener("error", () => {
+        setStatus("WebSocket error", "#ff9a7a");
+      });
+    }
+
+    function sendControl(action, extra = {}) {
+      send({
+        type: "control",
+        action,
+        ...extra
+      });
+    }
+
+    function bindHold(button, pressedAction, releasedAction) {
+      const start = (event) => {
+        event.preventDefault();
+        sendControl(pressedAction);
+      };
+
+      const end = (event) => {
+        event.preventDefault();
+        sendControl(releasedAction);
+      };
+
+      ["pointerdown"].forEach((type) => button.addEventListener(type, start));
+      ["pointerup", "pointercancel", "pointerleave"].forEach((type) => button.addEventListener(type, end));
+    }
+
+    async function enableTilt() {
+      if (typeof DeviceOrientationEvent === "undefined") {
+        setTiltStatus("Tilt not supported on this device.", "#ff9a7a");
+        return;
+      }
+
+      if (typeof DeviceOrientationEvent.requestPermission === "function") {
+        try {
+          const permission = await DeviceOrientationEvent.requestPermission();
+          if (permission !== "granted") {
+            setTiltStatus("Motion access denied.", "#ff9a7a");
+            return;
+          }
+        } catch (_error) {
+          setTiltStatus("Motion permission failed.", "#ff9a7a");
+          return;
+        }
+      }
+
+      if (!tiltEnabled) {
+        window.addEventListener("deviceorientation", handleTilt);
+      }
+
+      tiltEnabled = true;
+      setTiltStatus("Tilt active", "#63f59a");
+    }
+
+    function handleTilt(event) {
+      if (!tiltEnabled || !joinedRoomCode) {
+        return;
+      }
+
+      if (typeof event.gamma !== "number") {
+        return;
+      }
+
+      sendControl("tilt", {
+        gamma: Math.round(event.gamma)
+      });
+    }
+
+    roomCodeInput.addEventListener("input", () => {
+      roomCodeInput.value = normalizeRoomCode(roomCodeInput.value);
+    });
+
+    joinButton.addEventListener("click", () => {
+      const roomCode = normalizeRoomCode(roomCodeInput.value);
+      roomCodeInput.value = roomCode;
+
+      if (!roomCode) {
+        setStatus("Enter a valid room code.", "#ff9a7a");
+        return;
+      }
+
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        setStatus("Gateway is not connected yet.", "#ff9a7a");
+        return;
+      }
+
+      ws.send(JSON.stringify({
+        type: "join_room",
+        roomCode
+      }));
+    });
+
+    controlButtons.start.addEventListener("click", () => sendControl("start"));
+    controlButtons.pause.addEventListener("click", () => sendControl("pause"));
+    controlButtons.catch.addEventListener("click", () => sendControl("catch"));
+
+    bindHold(controlButtons.left, "left_down", "left_up");
+    bindHold(controlButtons.right, "right_down", "right_up");
+
+    tiltButton.addEventListener("click", enableTilt);
+
+    setControlsEnabled(false);
+    connect();
+  </script>
+</body>
+</html>

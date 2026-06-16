@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920, height=1080, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Fruit Catcher</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      background-color: #1a1a2e;
+      font-family: Arial, sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    canvas {
+      display: block;
+      width: 1920px;
+      height: 1080px;
+    }
+
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background: rgba(0, 0, 0, 0.82);
+      color: white;
+      text-align: center;
+      z-index: 10;
+    }
+
+    .hidden { display: none !important; }
+
+    h1 {
+      font-size: 100px;
+      margin: 0 0 20px 0;
+      color: #00ff88;
+      text-shadow: 0 0 20px #00ff88;
+    }
+
+    h2 {
+      font-size: 60px;
+      margin: 0 0 30px 0;
+      color: #fff;
+    }
+
+    p {
+      font-size: 36px;
+      margin: 10px 0;
+      max-width: 1480px;
+      line-height: 1.35;
+    }
+
+    .highlight {
+      color: #ffcf5a;
+      font-weight: bold;
+    }
+
+    #hud {
+      position: absolute;
+      top: 40px;
+      left: 50px;
+      font-size: 50px;
+      color: #fff;
+      text-shadow: 2px 2px 4px #000;
+      z-index: 5;
+      display: flex;
+      gap: 60px;
+    }
+
+    #connection-status {
+      position: absolute;
+      top: 40px;
+      right: 50px;
+      font-size: 32px;
+      color: #aaa;
+      z-index: 6;
+      text-shadow: 2px 2px 4px #000;
+      text-align: right;
+    }
+
+    #privacy-link {
+      position: absolute;
+      bottom: 20px;
+      right: 30px;
+      font-size: 20px;
+      color: #666;
+      text-decoration: none;
+      z-index: 5;
+    }
+
+    .pairing {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 44px;
+      align-items: center;
+      margin-top: 36px;
+      padding: 32px;
+      border-radius: 28px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    #qr-code {
+      width: 280px;
+      height: 280px;
+      border-radius: 18px;
+      background: white;
+      padding: 14px;
+      object-fit: contain;
+    }
+
+    .pairing-copy {
+      text-align: left;
+    }
+
+    .room-code {
+      font-size: 110px;
+      font-weight: bold;
+      letter-spacing: 0.2em;
+      margin: 12px 0 20px;
+      color: #ffffff;
+    }
+
+    .pairing-copy .url {
+      font-size: 28px;
+      color: #b6c3d6;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <div id="hud" class="hidden">
+    <div>Score: <span id="score-val">0</span></div>
+    <div>Lives: <span id="lives-val">❤️❤️❤️</span></div>
+  </div>
+
+  <div id="connection-status">Gateway: Connecting...</div>
+
+  <div id="start-screen" class="overlay">
+    <h1>Fruit Catcher</h1>
+    <p>Use the TV remote, a gamepad, or join from your phone.</p>
+    <div class="pairing">
+      <img id="qr-code" alt="Controller QR code">
+      <div class="pairing-copy">
+        <p>Phone room code</p>
+        <div id="room-code" class="room-code">------</div>
+        <p>Scan the QR code or open the controller and enter the room code.</p>
+        <p class="url" id="controller-url">Waiting for gateway...</p>
+      </div>
+    </div>
+    <p>Press <span class="highlight">OK / Enter</span> on the TV remote, <span class="highlight">Start</span> on gamepad, or <span class="highlight">Start</span> on phone.</p>
+  </div>
+
+  <div id="pause-screen" class="overlay hidden">
+    <h2>PAUSED</h2>
+    <p>Press <span class="highlight">P / OK</span> or phone <span class="highlight">Pause</span> to resume.</p>
+  </div>
+
+  <div id="exit-screen" class="overlay hidden">
+    <h2>Exit Game?</h2>
+    <p>Press <span class="highlight">OK / Enter</span> to exit.</p>
+    <p>Press <span class="highlight">Back</span> to keep playing.</p>
+  </div>
+
+  <div id="gameover-screen" class="overlay hidden">
+    <h1>Game Over!</h1>
+    <p>Final Score: <span id="final-score" class="highlight">0</span></p>
+    <p>Press <span class="highlight">OK / Enter</span> or phone <span class="highlight">Start</span> to play again.</p>
+  </div>
+
+  <a href="#" id="privacy-link">Privacy Policy</a>
+
+  <canvas id="gameCanvas" width="1920" height="1080"></canvas>
+
+  <script src="./config.js"></script>
+  <script>
+    const config = window.FRUIT_CATCHER_CONFIG || {};
+    const GATEWAY_HTTP_URL = config.gatewayHttpUrl || "http://localhost:3000";
+    const GATEWAY_WS_URL = config.gatewayWsUrl || "ws://localhost:3000";
+    const CONTROLLER_URL = config.controllerUrl || "http://localhost:4173";
+
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    const ui = {
+      start: document.getElementById("start-screen"),
+      pause: document.getElementById("pause-screen"),
+      exit: document.getElementById("exit-screen"),
+      gameover: document.getElementById("gameover-screen"),
+      hud: document.getElementById("hud"),
+      score: document.getElementById("score-val"),
+      lives: document.getElementById("lives-val"),
+      finalScore: document.getElementById("final-score"),
+      connection: document.getElementById("connection-status"),
+      roomCode: document.getElementById("room-code"),
+      controllerUrl: document.getElementById("controller-url"),
+      qrCode: document.getElementById("qr-code")
+    };
+
+    let state = "START";
+    let score = 0;
+    let lives = 3;
+    let fruits = [];
+    let roomCode = "";
+    let ws;
+
+    const fruitEmojis = ["🍎", "🍌", "🍊", "🍓", "🍑", "🍍", "🥝"];
+
+    const basket = {
+      x: 960,
+      y: 950,
+      width: 160,
+      height: 80,
+      speed: 20
+    };
+
+    const keys = {
+      left: false,
+      right: false
+    };
+
+    function setGatewayStatus(text, color) {
+      ui.connection.innerText = text;
+      ui.connection.style.color = color || "#aaa";
+    }
+
+    function buildControllerJoinUrl(currentRoomCode) {
+      const url = new URL(CONTROLLER_URL);
+      url.searchParams.set("roomCode", currentRoomCode);
+      return url.toString();
+    }
+
+    function updatePairing(currentRoomCode) {
+      roomCode = currentRoomCode;
+      ui.roomCode.innerText = currentRoomCode || "------";
+
+      if (!currentRoomCode) {
+        ui.controllerUrl.innerText = "Waiting for gateway...";
+        ui.qrCode.removeAttribute("src");
+        return;
+      }
+
+      const joinUrl = buildControllerJoinUrl(currentRoomCode);
+      ui.controllerUrl.innerText = joinUrl;
+      ui.qrCode.src = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(joinUrl)}`;
+    }
+
+    function connectWebSocket() {
+      ws = new WebSocket(GATEWAY_WS_URL);
+      setGatewayStatus("Gateway: Connecting...", "#ffaa00");
+
+      ws.onopen = () => {
+        setGatewayStatus("Gateway: Connected", "#00ff88");
+        ws.send(JSON.stringify({ type: "create_room" }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.type === "room_created") {
+            updatePairing(data.roomCode);
+            return;
+          }
+
+          if (data.type === "controller_joined") {
+            setGatewayStatus(`Gateway: Phone joined ${data.roomCode}`, "#00ff88");
+            return;
+          }
+
+          if (data.type === "controller_disconnected") {
+            setGatewayStatus("Gateway: Phone disconnected", "#ffaa00");
+            return;
+          }
+
+          if (data.type === "control") {
+            handlePhoneControl(data);
+          }
+        } catch (err) {
+          console.error("Bad controller message:", err);
+        }
+      };
+
+      ws.onclose = () => {
+        updatePairing("");
+        setGatewayStatus("Gateway: Reconnecting...", "#ffaa00");
+        setTimeout(connectWebSocket, 2000);
+      };
+
+      ws.onerror = () => {
+        setGatewayStatus("Gateway: Connection error", "#ff0055");
+      };
+    }
+
+    function handlePhoneControl(data) {
+      const action = data.action;
+
+      if (action === "left_down") keys.left = true;
+      if (action === "left_up") keys.left = false;
+
+      if (action === "right_down") keys.right = true;
+      if (action === "right_up") keys.right = false;
+
+      if (action === "left") {
+        basket.x -= 80;
+        clampBasket();
+      }
+
+      if (action === "right") {
+        basket.x += 80;
+        clampBasket();
+      }
+
+      if (action === "tilt") {
+        if (typeof data.gamma === "number") {
+          if (data.gamma < -8) {
+            keys.left = true;
+            keys.right = false;
+          } else if (data.gamma > 8) {
+            keys.right = true;
+            keys.left = false;
+          } else {
+            keys.left = false;
+            keys.right = false;
+          }
+        }
+      }
+
+      if (action === "stop") {
+        keys.left = false;
+        keys.right = false;
+      }
+
+      if (action === "start") {
+        if (state === "START" || state === "GAMEOVER") startGame();
+      }
+
+      if (action === "pause") {
+        if (state === "PLAYING" || state === "PAUSED") togglePause();
+      }
+
+      if (action === "catch") {
+        basket.width = 230;
+        setTimeout(() => {
+          basket.width = 160;
+        }, 250);
+      }
+
+      if (action === "exit") {
+        if (state === "PLAYING" || state === "PAUSED") showExitDialog();
+        else if (state === "EXITING") exitApp();
+      }
+
+      if (action === "back") {
+        if (state === "EXITING") hideExitDialog();
+      }
+    }
+
+    function clampBasket() {
+      const half = basket.width / 2;
+      if (basket.x < half) basket.x = half;
+      if (basket.x > 1920 - half) basket.x = 1920 - half;
+    }
+
+    document.addEventListener("keydown", (e) => {
+      e.preventDefault();
+
+      if (state === "START" || state === "GAMEOVER") {
+        if (e.key === "Enter" || e.key === " ") startGame();
+        if (e.key === "Backspace" || e.key === "Escape") exitApp();
+      } else if (state === "PLAYING") {
+        if (e.key === "ArrowLeft") keys.left = true;
+        if (e.key === "ArrowRight") keys.right = true;
+        if (e.key === "p" || e.key === "P" || e.key === "Enter") togglePause();
+        if (e.key === "Backspace" || e.key === "Escape") showExitDialog();
+      } else if (state === "PAUSED") {
+        if (e.key === "Enter" || e.key === " " || e.key === "p" || e.key === "P") togglePause();
+        if (e.key === "Backspace" || e.key === "Escape") showExitDialog();
+      } else if (state === "EXITING") {
+        if (e.key === "Enter" || e.key === " ") exitApp();
+        if (e.key === "Backspace" || e.key === "Escape") hideExitDialog();
+      }
+    });
+
+    document.addEventListener("keyup", (e) => {
+      e.preventDefault();
+
+      if (e.key === "ArrowLeft") keys.left = false;
+      if (e.key === "ArrowRight") keys.right = false;
+    });
+
+    document.addEventListener("contextmenu", (e) => e.preventDefault());
+
+    function pollGamepad() {
+      const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+      if (!gamepads[0]) return;
+
+      const gp = gamepads[0];
+
+      if (gp.axes[0] < -0.5 || gp.buttons[14] && gp.buttons[14].pressed) {
+        keys.left = true;
+        keys.right = false;
+      } else if (gp.axes[0] > 0.5 || gp.buttons[15] && gp.buttons[15].pressed) {
+        keys.right = true;
+        keys.left = false;
+      } else {
+        keys.left = false;
+        keys.right = false;
+      }
+
+      if ((gp.buttons[0] && gp.buttons[0].pressed) || (gp.buttons[9] && gp.buttons[9].pressed)) {
+        if (state === "START" || state === "GAMEOVER") startGame();
+        else if (state === "PLAYING" || state === "PAUSED") togglePause();
+        else if (state === "EXITING") exitApp();
+      }
+
+      if (gp.buttons[1] && gp.buttons[1].pressed) {
+        if (state === "PLAYING" || state === "PAUSED") showExitDialog();
+        else if (state === "EXITING") hideExitDialog();
+      }
+    }
+
+    function startGame() {
+      state = "PLAYING";
+      score = 0;
+      lives = 3;
+      fruits = [];
+      basket.x = 960;
+      basket.width = 160;
+      keys.left = false;
+      keys.right = false;
+      updateHUD();
+
+      ui.start.classList.add("hidden");
+      ui.pause.classList.add("hidden");
+      ui.gameover.classList.add("hidden");
+      ui.exit.classList.add("hidden");
+      ui.hud.classList.remove("hidden");
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    function togglePause() {
+      if (state === "PLAYING") {
+        state = "PAUSED";
+        ui.pause.classList.remove("hidden");
+      } else if (state === "PAUSED") {
+        state = "PLAYING";
+        ui.pause.classList.add("hidden");
+        requestAnimationFrame(gameLoop);
+      }
+    }
+
+    function showExitDialog() {
+      state = "EXITING";
+      ui.exit.classList.remove("hidden");
+    }
+
+    function hideExitDialog() {
+      state = "PLAYING";
+      ui.exit.classList.add("hidden");
+      requestAnimationFrame(gameLoop);
+    }
+
+    function exitApp() {
+      if (window.webOS && window.webOS.platformBack) {
+        window.webOS.platformBack();
+      } else {
+        window.close();
+      }
+    }
+
+    function gameOver() {
+      state = "GAMEOVER";
+      ui.finalScore.innerText = score;
+      ui.hud.classList.add("hidden");
+      ui.gameover.classList.remove("hidden");
+    }
+
+    function updateHUD() {
+      ui.score.innerText = score;
+      ui.lives.innerText = "❤️".repeat(lives);
+    }
+
+    function spawnFruit() {
+      if (Math.random() < 0.03) {
+        fruits.push({
+          x: Math.random() * (1920 - 60),
+          y: -60,
+          size: 60,
+          speed: 6 + Math.random() * 6,
+          emoji: fruitEmojis[Math.floor(Math.random() * fruitEmojis.length)]
+        });
+      }
+    }
+
+    function update() {
+      pollGamepad();
+
+      if (keys.left) basket.x -= basket.speed;
+      if (keys.right) basket.x += basket.speed;
+
+      clampBasket();
+      spawnFruit();
+
+      for (let i = fruits.length - 1; i >= 0; i -= 1) {
+        const f = fruits[i];
+        f.y += f.speed;
+
+        if (
+          f.x < basket.x + basket.width / 2 &&
+          f.x + f.size > basket.x - basket.width / 2 &&
+          f.y < basket.y + basket.height &&
+          f.y + f.size > basket.y
+        ) {
+          score += 10;
+          updateHUD();
+          fruits.splice(i, 1);
+        } else if (f.y > 1080) {
+          fruits.splice(i, 1);
+          lives -= 1;
+          updateHUD();
+
+          if (lives <= 0) gameOver();
+        }
+      }
+    }
+
+    function draw() {
+      ctx.fillStyle = "#1a1a2e";
+      ctx.fillRect(0, 0, 1920, 1080);
+
+      ctx.fillStyle = "#16213e";
+      ctx.fillRect(0, 1030, 1920, 50);
+
+      ctx.fillStyle = "#e94560";
+      ctx.beginPath();
+      ctx.arc(basket.x, basket.y + 20, basket.width / 2, 0, Math.PI, false);
+      ctx.fill();
+
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(basket.x - basket.width / 2 - 15, basket.y, basket.width + 30, 20);
+
+      ctx.font = "60px Arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      for (let i = 0; i < fruits.length; i += 1) {
+        const f = fruits[i];
+        ctx.fillText(f.emoji, f.x + f.size / 2, f.y + f.size / 2);
+      }
+    }
+
+    function gameLoop() {
+      if (state !== "PLAYING") return;
+
+      update();
+      draw();
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    updatePairing("");
+    connectWebSocket();
+    draw();
+  </script>
+</body>
+</html>

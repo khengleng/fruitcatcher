@@ -1,0 +1,11 @@
+{
+  "id": "com.fruitcatcher.game",
+  "version": "1.0.0",
+  "vendor": "Fruit Catcher",
+  "type": "web",
+  "main": "index.html",
+  "title": "Fruit Catcher",
+  "icon": "OffceTV.png",
+  "resolution": "1920x1080",
+  "bgColor": "#1a1a2e"
+}

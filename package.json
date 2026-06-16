@@ -1,0 +1,12 @@
+{
+  "name": "fruitcatcher-monorepo",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "start": "npm --workspace apps/gateway start",
+    "dev:gateway": "npm --workspace apps/gateway run dev"
+  }
+}
