@@ -210,7 +210,7 @@
       </div>
       <p id="questionText" class="question">Join a room to begin.</p>
       <div id="answers" class="answers"></div>
-      <div class="footer-actions">
+      <div id="hostActions" class="footer-actions" hidden>
         <button id="startButton" disabled>Start Quiz</button>
         <button id="nextButton" class="secondary" disabled>Next</button>
       </div>
@@ -236,19 +236,54 @@
     const answersEl = document.getElementById("answers");
     const explanationEl = document.getElementById("explanation");
     const leaderboardEl = document.getElementById("leaderboard");
+    const hostActionsEl = document.getElementById("hostActions");
     const startButton = document.getElementById("startButton");
     const nextButton = document.getElementById("nextButton");
+    const sessionStorageKey = "fruitcatcher-controller-session-v2";
 
     const params = new URLSearchParams(window.location.search);
     const prefilledRoomCode = (params.get("roomCode") || "").toUpperCase();
-    if (prefilledRoomCode) {
-      roomCodeInput.value = prefilledRoomCode;
-    }
 
     let ws;
     let joinedRoomCode = "";
     let latestState = null;
     let joinedPlayerId = "";
+    let joinInFlight = false;
+    let reconnectTimer = null;
+
+    function makeClientId() {
+      return `C${Math.random().toString(36).slice(2, 12)}${Date.now().toString(36)}`.toUpperCase();
+    }
+
+    function loadSavedSession() {
+      try {
+        const raw = window.localStorage.getItem(sessionStorageKey);
+        if (!raw) {
+          return { clientId: makeClientId(), playerName: "", roomCode: "" };
+        }
+
+        const parsed = JSON.parse(raw);
+        return {
+          clientId: parsed.clientId || makeClientId(),
+          playerName: parsed.playerName || "",
+          roomCode: parsed.roomCode || ""
+        };
+      } catch (error) {
+        return { clientId: makeClientId(), playerName: "", roomCode: "" };
+      }
+    }
+
+    const savedSession = loadSavedSession();
+
+    function saveSession(patch) {
+      Object.assign(savedSession, patch);
+      window.localStorage.setItem(sessionStorageKey, JSON.stringify(savedSession));
+    }
+
+    if (savedSession.playerName) {
+      playerNameInput.value = savedSession.playerName;
+    }
+    roomCodeInput.value = prefilledRoomCode || savedSession.roomCode || "";
 
     function getCurriculumLabel(value) {
       return value === "cambodia_moeys" ? "Cambodia MoEYS" : "International";
@@ -289,6 +324,11 @@
       statusEl.style.color = color || "#9fb2c9";
     }
 
+    function setJoinFormLocked(locked) {
+      playerNameInput.disabled = locked;
+      roomCodeInput.disabled = locked;
+    }
+
     function send(payload) {
       if (!ws || ws.readyState !== WebSocket.OPEN || !joinedRoomCode) {
         return;
@@ -302,8 +342,44 @@
 
     function updateButtons() {
       const status = latestState?.status || "LOBBY";
-      startButton.disabled = !(joinedRoomCode && (status === "LOBBY" || status === "FINISHED"));
-      nextButton.disabled = !(joinedRoomCode && status === "REVIEWING");
+      const canHostAdvance = joinedRoomCode && !joinedPlayerId && (status === "LOBBY" || status === "FINISHED");
+      hostActionsEl.hidden = true;
+      startButton.disabled = !canHostAdvance;
+      nextButton.disabled = true;
+      joinButton.disabled = joinInFlight || Boolean(joinedRoomCode);
+      setJoinFormLocked(Boolean(joinedRoomCode));
+    }
+
+    function attemptJoin(roomCode, playerName) {
+      if (!ws || ws.readyState !== WebSocket.OPEN || joinInFlight || joinedRoomCode) {
+        return false;
+      }
+
+      const normalizedRoomCode = normalizeRoomCode(roomCode);
+      const normalizedPlayerName = normalizePlayerName(playerName);
+
+      if (!normalizedRoomCode) {
+        setStatus("Enter a valid room code.", "#ff9b7d");
+        return false;
+      }
+
+      roomCodeInput.value = normalizedRoomCode;
+      playerNameInput.value = normalizedPlayerName;
+      saveSession({
+        playerName: normalizedPlayerName,
+        roomCode: normalizedRoomCode
+      });
+
+      joinInFlight = true;
+      joinButton.textContent = "Joining...";
+      updateButtons();
+      ws.send(JSON.stringify({
+        type: "join_room",
+        roomCode: normalizedRoomCode,
+        playerName: normalizedPlayerName,
+        clientId: savedSession.clientId
+      }));
+      return true;
     }
 
     function renderLeaderboard() {
@@ -369,6 +445,7 @@
         explanationEl.textContent = "";
         answersEl.innerHTML = "";
         leaderboardEl.innerHTML = "";
+        joinButton.textContent = "Join";
         updateButtons();
         return;
       }
@@ -384,6 +461,7 @@
       scoreMetaEl.textContent = latestState.player
         ? `${latestState.player.name}: ${latestState.player.score}`
         : `Players ${latestState.playerCount || 0}`;
+      joinButton.textContent = joinedRoomCode ? "Joined" : "Join";
 
       if (latestState.status === "LOADING") {
         questionTextEl.textContent = "Loading next question...";
@@ -417,17 +495,25 @@
 
       ws.addEventListener("open", () => {
         setStatus("Connected. Enter a room code.", "#69e6a6");
+        if (savedSession.roomCode) {
+          attemptJoin(savedSession.roomCode, savedSession.playerName || playerNameInput.value);
+        }
       });
 
       ws.addEventListener("message", (event) => {
         const data = JSON.parse(event.data);
 
         if (data.type === "joined_room") {
+          joinInFlight = false;
           joinedRoomCode = data.roomCode;
           joinedPlayerId = data.playerId || "";
           if (data.playerName) {
             playerNameInput.value = data.playerName;
           }
+          saveSession({
+            playerName: data.playerName || playerNameInput.value,
+            roomCode: data.roomCode
+          });
           latestState = data.state || latestState;
           setStatus(`Joined room ${data.roomCode} as ${data.playerName || "student"}`, "#69e6a6");
           renderState();
@@ -441,6 +527,7 @@
         }
 
         if (data.type === "join_error") {
+          joinInFlight = false;
           joinedRoomCode = "";
           joinedPlayerId = "";
           latestState = null;
@@ -450,21 +537,25 @@
         }
 
         if (data.type === "room_closed") {
+          joinInFlight = false;
           joinedRoomCode = "";
           joinedPlayerId = "";
           latestState = null;
+          saveSession({ roomCode: "" });
           setStatus("TV disconnected. Rejoin with a new room code.", "#ff9b7d");
           renderState();
         }
       });
 
       ws.addEventListener("close", () => {
+        joinInFlight = false;
         joinedRoomCode = "";
         joinedPlayerId = "";
         latestState = null;
         setStatus("Connection lost. Reconnecting...", "#ffd166");
         renderState();
-        setTimeout(connect, 2000);
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = window.setTimeout(connect, 2000);
       });
 
       ws.addEventListener("error", () => {
@@ -481,26 +572,17 @@
     });
 
     joinButton.addEventListener("click", () => {
-      const roomCode = normalizeRoomCode(roomCodeInput.value);
-      roomCodeInput.value = roomCode;
-
-      if (!roomCode) {
-        setStatus("Enter a valid room code.", "#ff9b7d");
-        return;
-      }
-
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         setStatus("Gateway is not connected yet.", "#ff9b7d");
         return;
       }
 
-      const playerName = normalizePlayerName(playerNameInput.value);
+      if (joinedRoomCode) {
+        setStatus(`Already joined room ${joinedRoomCode}.`, "#69e6a6");
+        return;
+      }
 
-      ws.send(JSON.stringify({
-        type: "join_room",
-        roomCode,
-        playerName
-      }));
+      attemptJoin(roomCodeInput.value, playerNameInput.value);
     });
 
     startButton.addEventListener("click", () => {

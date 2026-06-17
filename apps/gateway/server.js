@@ -30,6 +30,7 @@ const SUPPORTED_DIFFICULTY_MODES = ["easy", "standard", "challenge"];
 const SUPPORTED_QUESTION_SOURCES = ["openai_fallback", "fallback_only"];
 const MIN_GRADE_LEVEL = 2;
 const MAX_GRADE_LEVEL = 12;
+const MAX_ROOM_PLAYERS = 40;
 
 const defaultGameConfig = {
   brandTitle: process.env.BRAND_TITLE || "LyHuor Learning",
@@ -982,6 +983,13 @@ function createPlayerId() {
   return `P${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
 }
 
+function normalizeClientId(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[^a-z0-9_-]/gi, "")
+    .slice(0, 48);
+}
+
 function getOrCreatePlayerName(room, requestedName) {
   const trimmed = String(requestedName || "").trim();
   if (trimmed) {
@@ -1503,6 +1511,7 @@ wss.on("connection", (ws) => {
         rooms.set(roomCode, {
           tv: ws,
           players: new Map(),
+          clientIds: new Map(),
           hostPlayerId,
           playerSequence: 1,
           status: "LOBBY",
@@ -1520,6 +1529,7 @@ wss.on("connection", (ws) => {
         room.players.set(hostPlayerId, {
           playerId: hostPlayerId,
           name: "TV Remote",
+          clientId: "tv-remote",
           ws: null,
           isHost: true,
           score: 0,
@@ -1541,6 +1551,7 @@ wss.on("connection", (ws) => {
       if (data.type === "join_room") {
         const roomCode = String(data.roomCode || "").trim().toUpperCase();
         const room = rooms.get(roomCode);
+        const clientId = normalizeClientId(data.clientId);
 
         if (!room) {
           send(ws, {
@@ -1550,16 +1561,80 @@ wss.on("connection", (ws) => {
           return;
         }
 
+        if (ws.meta.playerId && ws.meta.roomCode === roomCode && room.players.has(ws.meta.playerId)) {
+          const existingPlayer = room.players.get(ws.meta.playerId);
+          if (existingPlayer) {
+            existingPlayer.ws = ws;
+            send(ws, {
+              type: "joined_room",
+              roomCode,
+              playerId: existingPlayer.playerId,
+              playerName: existingPlayer.name,
+              state: buildRoomState(roomCode, ws)
+            });
+            broadcastRoomState(roomCode);
+            return;
+          }
+        }
+
+        if (clientId && room.clientIds && room.clientIds.has(clientId)) {
+          const existingPlayerId = room.clientIds.get(clientId);
+          const existingPlayer = existingPlayerId ? room.players.get(existingPlayerId) : null;
+
+          if (existingPlayer) {
+            const requestedName = String(data.playerName || "").trim();
+            if (requestedName) {
+              existingPlayer.name = requestedName.slice(0, 24);
+            }
+            existingPlayer.ws = ws;
+            ws.meta.roomCode = roomCode;
+            ws.meta.role = "player";
+            ws.meta.playerId = existingPlayer.playerId;
+
+            send(ws, {
+              type: "joined_room",
+              roomCode,
+              playerId: existingPlayer.playerId,
+              playerName: existingPlayer.name,
+              state: buildRoomState(roomCode, ws)
+            });
+            broadcastRoomState(roomCode);
+            return;
+          }
+
+          room.clientIds.delete(clientId);
+        }
+
+        if (ws.meta.playerId && ws.meta.roomCode && ws.meta.roomCode !== roomCode) {
+          send(ws, {
+            type: "join_error",
+            message: "This phone is already joined to another room. Refresh to switch rooms."
+          });
+          return;
+        }
+
+        if (room.players.size >= MAX_ROOM_PLAYERS) {
+          send(ws, {
+            type: "join_error",
+            message: "Room is full. Please use another room."
+          });
+          return;
+        }
+
         const playerId = createPlayerId();
         const playerName = getOrCreatePlayerName(room, data.playerName);
         room.players.set(playerId, {
           playerId,
           name: playerName,
+          clientId: clientId || null,
           ws,
           score: 0,
           currentAnswer: null,
           answeredQuestionIndex: null
         });
+        if (clientId && room.clientIds) {
+          room.clientIds.set(clientId, playerId);
+        }
 
         ws.meta.roomCode = roomCode;
         ws.meta.role = "player";
