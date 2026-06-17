@@ -142,6 +142,11 @@
       background: #984450;
     }
 
+    .answer-btn.selected {
+      background: #8d6a12;
+      outline: 2px solid rgba(255, 211, 79, 0.5);
+    }
+
     .footer-actions {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -331,7 +336,7 @@
       for (const choice of question.choices) {
         const button = document.createElement("button");
         button.className = "answer-btn";
-        button.disabled = latestState.status !== "ANSWERING";
+        button.disabled = latestState.status !== "ANSWERING" || Boolean(latestState.player?.answered);
         button.innerHTML = `<b>${choice.id}</b>${choice.text}`;
 
         if (latestState.status === "REVIEWING") {
@@ -340,6 +345,8 @@
           } else if (choice.id === latestState.selectedChoice) {
             button.classList.add("wrong");
           }
+        } else if (choice.id === latestState.selectedChoice) {
+          button.classList.add("selected");
         }
 
         button.addEventListener("click", () => {

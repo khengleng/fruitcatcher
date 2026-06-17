@@ -1006,7 +1006,9 @@ function getLeaderboard(room) {
       playerId: player.playerId,
       name: player.name,
       score: player.score,
-      connected: Boolean(player.ws && player.ws.readyState === WebSocket.OPEN),
+      connected: player.isHost
+        ? Boolean(room.tv && room.tv.readyState === WebSocket.OPEN)
+        : Boolean(player.ws && player.ws.readyState === WebSocket.OPEN),
       lastAnswer: room.revealAnswer ? player.currentAnswer || null : null
     }))
     .sort((left, right) => {
@@ -1024,9 +1026,12 @@ function buildRoomState(roomCode, viewerWs = null) {
     return null;
   }
 
-  const viewerPlayer = viewerWs && viewerWs.meta && viewerWs.meta.playerId
-    ? room.players.get(viewerWs.meta.playerId) || null
-    : null;
+  let viewerPlayer = null;
+  if (viewerWs === room.tv && room.hostPlayerId) {
+    viewerPlayer = room.players.get(room.hostPlayerId) || null;
+  } else if (viewerWs && viewerWs.meta && viewerWs.meta.playerId) {
+    viewerPlayer = room.players.get(viewerWs.meta.playerId) || null;
+  }
 
   const question = room.currentQuestion
     ? {
@@ -1040,7 +1045,10 @@ function buildRoomState(roomCode, viewerWs = null) {
     status: room.status,
     config: gameConfig,
     playerCount: room.players.size,
-    connectedPlayerCount: [...room.players.values()].filter((player) => player.ws && player.ws.readyState === WebSocket.OPEN).length,
+    connectedPlayerCount:
+      [...room.players.values()].filter((player) => player.isHost
+        ? Boolean(room.tv && room.tv.readyState === WebSocket.OPEN)
+        : Boolean(player.ws && player.ws.readyState === WebSocket.OPEN)).length,
     questionIndex: room.questionIndex,
     questionsPerRound: gameConfig.questionsPerRound,
     score: room.score,
@@ -1343,7 +1351,9 @@ function submitPlayerAnswer(roomCode, playerId, choice) {
   room.answerCount += 1;
   broadcastRoomState(roomCode);
 
-  const connectedPlayers = [...room.players.values()].filter((entry) => entry.ws && entry.ws.readyState === WebSocket.OPEN);
+  const connectedPlayers = [...room.players.values()].filter((entry) => entry.isHost
+    ? Boolean(room.tv && room.tv.readyState === WebSocket.OPEN)
+    : Boolean(entry.ws && entry.ws.readyState === WebSocket.OPEN));
   if (connectedPlayers.length > 0 && connectedPlayers.every((entry) => entry.answeredQuestionIndex === room.questionIndex)) {
     revealQuestion(roomCode);
   }
@@ -1446,7 +1456,7 @@ async function handleAction(roomCode, action, payload = {}) {
 
   if (action.startsWith("answer_")) {
     if (payload.fromTv) {
-      revealQuestion(roomCode);
+      submitPlayerAnswer(roomCode, room.hostPlayerId, action.split("_")[1].toUpperCase());
       return;
     }
 
@@ -1456,7 +1466,7 @@ async function handleAction(roomCode, action, payload = {}) {
 
   if (action === "answer" && payload.choice) {
     if (payload.fromTv) {
-      revealQuestion(roomCode);
+      submitPlayerAnswer(roomCode, room.hostPlayerId, String(payload.choice).toUpperCase());
       return;
     }
 
@@ -1489,9 +1499,11 @@ wss.on("connection", (ws) => {
 
       if (data.type === "create_room") {
         const roomCode = makeUniqueRoomCode();
+        const hostPlayerId = createPlayerId();
         rooms.set(roomCode, {
           tv: ws,
           players: new Map(),
+          hostPlayerId,
           playerSequence: 1,
           status: "LOBBY",
           questionIndex: 0,
@@ -1502,6 +1514,17 @@ wss.on("connection", (ws) => {
           timerId: null,
           history: [],
           answerCount: 0
+        });
+
+        const room = rooms.get(roomCode);
+        room.players.set(hostPlayerId, {
+          playerId: hostPlayerId,
+          name: "TV Remote",
+          ws: null,
+          isHost: true,
+          score: 0,
+          currentAnswer: null,
+          answeredQuestionIndex: null
         });
 
         ws.meta.roomCode = roomCode;

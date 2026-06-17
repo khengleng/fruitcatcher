@@ -232,6 +232,45 @@
       line-height: 1.5;
       color: #aebfd6;
     }
+
+    .participant-card {
+      border-radius: 26px;
+      padding: 24px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .participant-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .participant-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.06);
+      font-size: 24px;
+      color: #f5f7fb;
+    }
+
+    .participant-rank {
+      color: #ffd34f;
+      width: 40px;
+      display: inline-block;
+    }
+
+    .participant-name {
+      flex: 1;
+    }
+
+    .participant-score {
+      font-weight: bold;
+      color: #91ffbf;
+    }
   </style>
 </head>
 <body>
@@ -263,8 +302,9 @@
 
       <aside class="panel side-panel">
         <div class="score-card">
-          <p class="eyebrow">Score</p>
+          <p class="eyebrow">Leader</p>
           <p id="scoreValue" class="score-value">0</p>
+          <p id="leaderName" class="helper">No players yet</p>
           <p id="playerSummary" class="helper">0 players joined</p>
         </div>
 
@@ -276,8 +316,12 @@
           <p id="controllerUrl" class="controller-url">Waiting for gateway...</p>
         </div>
 
+        <div class="participant-card">
+          <p class="eyebrow">Participants</p>
+          <div id="leaderboard" class="participant-list"></div>
+        </div>
+
         <div class="controls-guide">
-          <div id="leaderboard" style="margin-bottom:18px;"></div>
           Remote / gamepad:
           <br>OK / Enter = Start or Next
           <br>Arrow keys = Select A, B, C, D
@@ -307,6 +351,7 @@
       answers: document.getElementById("answers"),
       explanation: document.getElementById("explanation"),
       scoreValue: document.getElementById("scoreValue"),
+      leaderName: document.getElementById("leaderName"),
       playerSummary: document.getElementById("playerSummary"),
       roomCode: document.getElementById("roomCode"),
       qrCode: document.getElementById("qr-code"),
@@ -487,24 +532,21 @@
         return;
       }
 
-      const title = document.createElement("div");
-      title.style.fontSize = "24px";
-      title.style.color = "#dbe6f4";
-      title.style.marginBottom = "8px";
-      title.innerText = "Leaderboard";
-      ui.leaderboard.appendChild(title);
-
-      for (const player of leaderboard) {
+      leaderboard.forEach((player, index) => {
         const row = document.createElement("div");
-        row.style.display = "flex";
-        row.style.justifyContent = "space-between";
-        row.style.gap = "12px";
-        row.style.padding = "8px 0";
-        row.style.fontSize = "22px";
-        row.style.color = player.connected ? "#f5f7fb" : "#8fa5c0";
-        row.innerHTML = `<span>${player.name}</span><span>${player.score}</span>`;
+        row.className = "participant-row";
+        if (!player.connected) {
+          row.style.opacity = "0.6";
+        }
+        const answerBadge = state.status === "REVIEWING" && player.lastAnswer
+          ? ` (${player.lastAnswer})`
+          : "";
+        row.innerHTML =
+          `<span class="participant-rank">${index + 1}.</span>` +
+          `<span class="participant-name">${player.name}${answerBadge}</span>` +
+          `<span class="participant-score">${player.score}</span>`;
         ui.leaderboard.appendChild(row);
-      }
+      });
     }
 
     function renderState() {
@@ -515,6 +557,7 @@
         ui.questionPrompt.innerText = "Waiting for gateway...";
         ui.explanation.innerText = "Once the TV gets a room code, scan the QR code and press OK / Enter to start.";
         ui.scoreValue.innerText = "0";
+        ui.leaderName.innerText = "No players yet";
         ui.playerSummary.innerText = "0 players joined";
         ui.answers.innerHTML = "";
         ui.leaderboard.innerHTML = "";
@@ -527,11 +570,14 @@
       ui.brandTitle.innerText = state.config.brandTitle;
       ui.brandCaption.innerText = state.config.brandCaption;
       const copy = getUiCopy(state.config);
+      const leaderboard = state.leaderboard || [];
+      const leader = leaderboard[0] || null;
       ui.questionMeta.innerText = `Question ${Math.min(state.questionIndex + 1, state.questionsPerRound)} / ${state.questionsPerRound} | ${state.status}`;
       ui.subjectMeta.innerText =
         `${getCurriculumLabel(state.config.curriculum)} | ${getLanguageLabel(state.config.language)} | ` +
         `${getSubjectLabel(state.config.subject)} | Grade ${state.config.gradeLevel || 6} | ${getDifficultyLabel(state.config.difficultyMode)}`;
-      ui.scoreValue.innerText = String(state.score);
+      ui.scoreValue.innerText = leader ? String(leader.score) : "0";
+      ui.leaderName.innerText = leader ? leader.name : "No players yet";
       ui.playerSummary.innerText = `${state.connectedPlayerCount || 0} connected / ${state.playerCount || 0} joined | ${state.answerCount || 0} answered`;
 
       if (state.status === "LOADING") {
@@ -545,7 +591,9 @@
           : copy.chooseAnswer;
         renderAnswers();
       } else if (state.status === "FINISHED") {
-        ui.questionPrompt.innerText = `Quiz complete. Final score: ${state.score} out of ${state.questionsPerRound}.`;
+        ui.questionPrompt.innerText = leader
+          ? `Quiz complete. Winner: ${leader.name} with ${leader.score} point${leader.score === 1 ? "" : "s"}.`
+          : "Quiz complete.";
         ui.explanation.innerText = copy.finished;
         ui.answers.innerHTML = "";
       } else {
