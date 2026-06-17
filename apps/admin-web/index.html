@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LyHuor Learning Admin</title>
+  <style>
+    :root {
+      --bg: #f6f3ea;
+      --panel: #fffaf0;
+      --ink: #1b1a17;
+      --muted: #6b665d;
+      --line: #d9cfbf;
+      --accent: #d9562b;
+      --accent-dark: #9d3517;
+      --success: #1f8f56;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      color: var(--ink);
+      background:
+        linear-gradient(180deg, rgba(217, 86, 43, 0.08), transparent 30%),
+        linear-gradient(135deg, #f8f3ea 0%, #efe4d2 100%);
+    }
+
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+
+    .hero {
+      margin-bottom: 24px;
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent-dark);
+      font-size: 13px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(34px, 6vw, 58px);
+      line-height: 0.95;
+    }
+
+    .subtitle {
+      margin: 14px 0 0;
+      max-width: 640px;
+      font-size: 18px;
+      line-height: 1.55;
+      color: var(--muted);
+    }
+
+    .panel {
+      background: rgba(255, 250, 240, 0.96);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: 0 18px 48px rgba(34, 20, 10, 0.08);
+      margin-bottom: 20px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 18px;
+    }
+
+    label {
+      display: grid;
+      gap: 8px;
+      font-size: 15px;
+      color: var(--muted);
+    }
+
+    input,
+    select {
+      width: 100%;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: white;
+      font: inherit;
+      color: var(--ink);
+    }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 20px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 14px 20px;
+      font: inherit;
+      font-weight: bold;
+      cursor: pointer;
+      background: var(--accent);
+      color: white;
+    }
+
+    button.secondary {
+      background: #ddd1bc;
+      color: var(--ink);
+    }
+
+    .status {
+      min-height: 24px;
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .row {
+      display: grid;
+      gap: 18px;
+      grid-template-columns: 1.2fr 1fr;
+    }
+
+    @media (max-width: 760px) {
+      .row {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="hero">
+      <p class="eyebrow">Railway Admin</p>
+      <h1>LyHuor Learning Control Room</h1>
+      <p class="subtitle">Manage live curriculum, language, grade, and difficulty for Grade 2 through Grade 12. Save once, and the TV plus phone controller switch modes from the gateway without a new deployment.</p>
+    </section>
+
+    <section class="panel">
+      <div class="row">
+        <label>
+          Admin token
+          <input id="adminToken" type="password" placeholder="Enter ADMIN_TOKEN">
+        </label>
+        <label>
+          Gateway URL
+          <input id="gatewayUrl" type="text" readonly>
+        </label>
+      </div>
+      <div class="actions">
+        <button id="loadButton" class="secondary">Load current settings</button>
+      </div>
+      <div id="authStatus" class="status"></div>
+    </section>
+
+    <section class="panel">
+      <div class="grid">
+        <label>
+          Brand title
+          <input id="brandTitle" type="text">
+        </label>
+        <label>
+          Brand caption
+          <input id="brandCaption" type="text">
+        </label>
+        <label>
+          Curriculum
+          <select id="curriculum">
+            <option value="international">International</option>
+            <option value="cambodia_moeys">Cambodia MoEYS</option>
+          </select>
+        </label>
+        <label>
+          Language
+          <select id="language">
+            <option value="english">English</option>
+            <option value="khmer">Khmer</option>
+            <option value="bilingual">Bilingual Khmer-English</option>
+          </select>
+        </label>
+        <label>
+          Subject
+          <select id="subject">
+            <option value="math">Math</option>
+            <option value="general_science">General Science</option>
+            <option value="biology">Biology</option>
+            <option value="chemistry">Chemistry</option>
+            <option value="physics">Physics</option>
+            <option value="english">English</option>
+          </select>
+        </label>
+        <label>
+          Grade level
+          <select id="gradeLevel">
+            <option value="2">Grade 2</option>
+            <option value="3">Grade 3</option>
+            <option value="4">Grade 4</option>
+            <option value="5">Grade 5</option>
+            <option value="6">Grade 6</option>
+            <option value="7">Grade 7</option>
+            <option value="8">Grade 8</option>
+            <option value="9">Grade 9</option>
+            <option value="10">Grade 10</option>
+            <option value="11">Grade 11</option>
+            <option value="12">Grade 12</option>
+          </select>
+        </label>
+        <label>
+          Difficulty mode
+          <select id="difficultyMode">
+            <option value="easy">Easy</option>
+            <option value="standard">Standard</option>
+            <option value="challenge">Challenge</option>
+          </select>
+        </label>
+        <label>
+          Question source
+          <select id="questionSource">
+            <option value="openai_fallback">OpenAI + fallback</option>
+            <option value="fallback_only">Fallback only</option>
+          </select>
+        </label>
+        <label>
+          Questions per round
+          <input id="questionsPerRound" type="number" min="3" max="20">
+        </label>
+        <label>
+          Seconds per question
+          <input id="questionTimerSec" type="number" min="10" max="90">
+        </label>
+      </div>
+      <div class="actions">
+        <button id="saveButton">Save live settings</button>
+        <button id="resetButton" class="secondary">Reload from gateway</button>
+      </div>
+      <div id="saveStatus" class="status"></div>
+    </section>
+  </main>
+
+  <script src="./config.js"></script>
+  <script>
+    const appConfig = window.FRUIT_CATCHER_ADMIN_CONFIG || {};
+    const gatewayUrl = appConfig.gatewayHttpUrl || "http://localhost:3000";
+
+    const fields = {
+      adminToken: document.getElementById("adminToken"),
+      gatewayUrl: document.getElementById("gatewayUrl"),
+      brandTitle: document.getElementById("brandTitle"),
+      brandCaption: document.getElementById("brandCaption"),
+      curriculum: document.getElementById("curriculum"),
+      language: document.getElementById("language"),
+      subject: document.getElementById("subject"),
+      gradeLevel: document.getElementById("gradeLevel"),
+      difficultyMode: document.getElementById("difficultyMode"),
+      questionSource: document.getElementById("questionSource"),
+      questionsPerRound: document.getElementById("questionsPerRound"),
+      questionTimerSec: document.getElementById("questionTimerSec")
+    };
+
+    const authStatus = document.getElementById("authStatus");
+    const saveStatus = document.getElementById("saveStatus");
+
+    fields.gatewayUrl.value = gatewayUrl;
+    fields.adminToken.value = localStorage.getItem("fruitcatcher_admin_token") || "";
+
+    function setStatus(el, text, color) {
+      el.textContent = text;
+      el.style.color = color || "#6b665d";
+    }
+
+    function getHeaders() {
+      const token = fields.adminToken.value.trim();
+      localStorage.setItem("fruitcatcher_admin_token", token);
+
+      if (!token) {
+        throw new Error("Admin token is required.");
+      }
+
+      return {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      };
+    }
+
+    function fillForm(config) {
+      fields.brandTitle.value = config.brandTitle || "";
+      fields.brandCaption.value = config.brandCaption || "";
+      fields.curriculum.value = config.curriculum || "international";
+      fields.language.value = config.language || "english";
+      fields.subject.value = config.subject || "math";
+      fields.gradeLevel.value = String(config.gradeLevel || 6);
+      fields.difficultyMode.value = config.difficultyMode || "standard";
+      fields.questionSource.value = config.questionSource || "openai_fallback";
+      fields.questionsPerRound.value = config.questionsPerRound ?? "";
+      fields.questionTimerSec.value = config.questionTimerSec ?? "";
+    }
+
+    async function loadConfig() {
+      setStatus(authStatus, "Loading settings...", "#9d3517");
+
+      const response = await fetch(`${gatewayUrl}/admin/config`, {
+        headers: getHeaders()
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        const message = response.status === 401
+          ? "Unauthorized. Check the admin token."
+          : errorBody.error || `Load failed: ${response.status}`;
+        throw new Error(message);
+      }
+
+      const config = await response.json();
+      fillForm(config);
+      setStatus(authStatus, "Settings loaded.", "#1f8f56");
+      setStatus(saveStatus, "", "#6b665d");
+    }
+
+    async function saveConfig() {
+      setStatus(saveStatus, "Saving live settings...", "#9d3517");
+
+      const payload = {
+        brandTitle: fields.brandTitle.value,
+        brandCaption: fields.brandCaption.value,
+        curriculum: fields.curriculum.value,
+        language: fields.language.value,
+        subject: fields.subject.value,
+        gradeLevel: Number(fields.gradeLevel.value),
+        difficultyMode: fields.difficultyMode.value,
+        questionSource: fields.questionSource.value,
+        questionsPerRound: Number(fields.questionsPerRound.value),
+        questionTimerSec: Number(fields.questionTimerSec.value)
+      };
+
+      const response = await fetch(`${gatewayUrl}/admin/config`, {
+        method: "PUT",
+        headers: getHeaders(),
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        const message = response.status === 401
+          ? "Unauthorized. Check the admin token."
+          : errorBody.error || `Save failed: ${response.status}`;
+        throw new Error(message);
+      }
+
+      const result = await response.json();
+      fillForm(result.config);
+      setStatus(saveStatus, "Live settings saved.", "#1f8f56");
+    }
+
+    document.getElementById("loadButton").addEventListener("click", async () => {
+      try {
+        await loadConfig();
+      } catch (error) {
+        setStatus(authStatus, error.message, "#9d3517");
+      }
+    });
+
+    document.getElementById("resetButton").addEventListener("click", async () => {
+      try {
+        await loadConfig();
+      } catch (error) {
+        setStatus(saveStatus, error.message, "#9d3517");
+      }
+    });
+
+    document.getElementById("saveButton").addEventListener("click", async () => {
+      try {
+        await saveConfig();
+      } catch (error) {
+        setStatus(saveStatus, error.message, "#9d3517");
+      }
+    });
+  </script>
+</body>
+</html>

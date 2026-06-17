@@ -1,5 +1,5 @@
 window.FRUIT_CATCHER_CONFIG = {
-  gatewayHttpUrl: "http://localhost:3000",
-  gatewayWsUrl: "ws://localhost:3000",
+  gatewayHttpUrl: "https://gateway-production-bb7c.up.railway.app",
+  gatewayWsUrl: "wss://gateway-production-bb7c.up.railway.app",
   controllerUrl: "https://mytv.cambobia.com"
 };

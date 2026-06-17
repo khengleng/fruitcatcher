@@ -3,185 +3,291 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=1920, height=1080, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Fruit Catcher</title>
+  <title>LyHuor Learning</title>
   <style>
     * { box-sizing: border-box; }
 
-    body, html {
+    html, body {
+      width: 1920px;
+      height: 1080px;
       margin: 0;
-      padding: 0;
-      width: 1920px;
-      height: 1080px;
       overflow: hidden;
-      background-color: #1a1a2e;
       font-family: Arial, sans-serif;
-      user-select: none;
-      -webkit-user-select: none;
+      color: #f5f7fb;
+      background:
+        radial-gradient(circle at top, rgba(105, 230, 166, 0.18), transparent 30%),
+        linear-gradient(180deg, #0f1b2d 0%, #09111c 100%);
     }
 
-    canvas {
-      display: block;
-      width: 1920px;
-      height: 1080px;
+    .shell {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      padding: 36px 48px;
     }
 
-    .overlay {
-      position: absolute;
-      inset: 0;
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 24px;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 82px;
+      line-height: 0.94;
+      color: #69e6a6;
+      text-shadow: 0 0 22px rgba(105, 230, 166, 0.22);
+    }
+
+    .brand p {
+      margin: 14px 0 0;
+      font-size: 34px;
+      color: #dbe6f4;
+    }
+
+    .status-stack {
+      text-align: right;
+      display: grid;
+      gap: 10px;
+    }
+
+    .status-chip {
+      padding: 12px 18px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      font-size: 26px;
+      color: #c7d4e6;
+    }
+
+    .status-chip.live {
+      color: #91ffbf;
+      border-color: rgba(145, 255, 191, 0.28);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1.65fr 0.9fr;
+      gap: 28px;
+      height: calc(100% - 170px);
+      margin-top: 26px;
+    }
+
+    .panel {
+      border-radius: 32px;
+      background: rgba(12, 22, 37, 0.94);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
+    }
+
+    .question-panel {
+      padding: 34px;
       display: flex;
       flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      background: rgba(0, 0, 0, 0.82);
-      color: white;
-      text-align: center;
-      z-index: 10;
+      justify-content: space-between;
     }
 
-    .hidden { display: none !important; }
-
-    h1 {
-      font-size: 100px;
-      margin: 0 0 20px 0;
-      color: #00ff88;
-      text-shadow: 0 0 20px #00ff88;
-    }
-
-    h2 {
-      font-size: 60px;
-      margin: 0 0 30px 0;
-      color: #fff;
-    }
-
-    p {
-      font-size: 36px;
-      margin: 10px 0;
-      max-width: 1480px;
-      line-height: 1.35;
-    }
-
-    .highlight {
-      color: #ffcf5a;
-      font-weight: bold;
-    }
-
-    #hud {
-      position: absolute;
-      top: 40px;
-      left: 50px;
-      font-size: 50px;
-      color: #fff;
-      text-shadow: 2px 2px 4px #000;
-      z-index: 5;
+    .meta {
       display: flex;
-      gap: 60px;
+      gap: 18px;
+      flex-wrap: wrap;
+      font-size: 28px;
+      color: #aebfd6;
+      margin-bottom: 22px;
     }
 
-    #connection-status {
-      position: absolute;
-      top: 40px;
-      right: 50px;
-      font-size: 32px;
-      color: #aaa;
-      z-index: 6;
-      text-shadow: 2px 2px 4px #000;
-      text-align: right;
+    .prompt {
+      font-size: 50px;
+      line-height: 1.3;
+      margin: 0;
+      min-height: 280px;
     }
 
-    #privacy-link {
-      position: absolute;
-      bottom: 20px;
-      right: 30px;
-      font-size: 20px;
-      color: #666;
-      text-decoration: none;
-      z-index: 5;
-    }
-
-    .pairing {
+    .answers {
       display: grid;
-      grid-template-columns: 280px 1fr;
-      gap: 44px;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-top: 28px;
+    }
+
+    .choice {
+      min-height: 160px;
+      border-radius: 26px;
+      padding: 22px 24px;
+      background: #213a5a;
+      border: 2px solid transparent;
+      display: flex;
+      gap: 18px;
+      align-items: flex-start;
+    }
+
+    .choice-label {
+      width: 54px;
+      height: 54px;
+      border-radius: 50%;
+      background: rgba(255, 211, 79, 0.16);
+      color: #ffd34f;
+      display: flex;
       align-items: center;
-      margin-top: 36px;
-      padding: 32px;
-      border-radius: 28px;
+      justify-content: center;
+      font-size: 28px;
+      font-weight: bold;
+      flex: 0 0 auto;
+    }
+
+    .choice-text {
+      font-size: 31px;
+      line-height: 1.35;
+      color: white;
+    }
+
+    .choice.correct {
+      background: #1d7f55;
+      border-color: rgba(145, 255, 191, 0.45);
+    }
+
+    .choice.wrong {
+      background: #8d4052;
+      border-color: rgba(255, 151, 151, 0.4);
+    }
+
+    .explanation {
+      margin-top: 26px;
+      padding: 18px 22px;
+      border-radius: 22px;
       background: rgba(255, 255, 255, 0.06);
+      color: #d8e1ed;
+      font-size: 28px;
+      line-height: 1.45;
+      min-height: 136px;
+    }
+
+    .side-panel {
+      padding: 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    .score-card, .room-card {
+      border-radius: 26px;
+      padding: 24px;
+      background: rgba(255, 255, 255, 0.05);
       border: 1px solid rgba(255, 255, 255, 0.08);
     }
 
-    #qr-code {
-      width: 280px;
-      height: 280px;
-      border-radius: 18px;
-      background: white;
-      padding: 14px;
-      object-fit: contain;
+    .eyebrow {
+      font-size: 24px;
+      color: #9eb3cc;
+      margin: 0 0 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
     }
 
-    .pairing-copy {
-      text-align: left;
+    .score-value, .room-code {
+      font-size: 92px;
+      font-weight: bold;
+      line-height: 1;
+      color: #ffd34f;
+      margin: 0;
     }
 
     .room-code {
-      font-size: 110px;
-      font-weight: bold;
-      letter-spacing: 0.2em;
-      margin: 12px 0 20px;
-      color: #ffffff;
+      letter-spacing: 0.18em;
+      color: white;
     }
 
-    .pairing-copy .url {
-      font-size: 28px;
-      color: #b6c3d6;
+    #qr-code {
+      width: 250px;
+      height: 250px;
+      border-radius: 20px;
+      background: white;
+      padding: 14px;
+      margin: 20px auto 10px;
+      display: block;
+      object-fit: contain;
+    }
+
+    .helper {
+      margin: 8px 0 0;
+      font-size: 25px;
+      line-height: 1.45;
+      color: #c7d5e8;
+      text-align: center;
+    }
+
+    .controller-url {
+      margin-top: 10px;
+      font-size: 22px;
+      color: #8fb0d3;
       word-break: break-all;
+      text-align: center;
+    }
+
+    .controls-guide {
+      margin-top: auto;
+      font-size: 25px;
+      line-height: 1.5;
+      color: #aebfd6;
     }
   </style>
 </head>
 <body>
-  <div id="hud" class="hidden">
-    <div>Score: <span id="score-val">0</span></div>
-    <div>Lives: <span id="lives-val">❤️❤️❤️</span></div>
-  </div>
-
-  <div id="connection-status">Gateway: Connecting...</div>
-
-  <div id="start-screen" class="overlay">
-    <h1>Fruit Catcher</h1>
-    <p>Use the TV remote, a gamepad, or join from your phone.</p>
-    <div class="pairing">
-      <img id="qr-code" alt="Controller QR code">
-      <div class="pairing-copy">
-        <p>Phone room code</p>
-        <div id="room-code" class="room-code">------</div>
-        <p>Scan the QR code or open the controller and enter the room code.</p>
-        <p class="url" id="controller-url">Waiting for gateway...</p>
+  <div class="shell">
+    <div class="topbar">
+      <div class="brand">
+        <h1 id="brandTitle">LyHuor Learning</h1>
+        <p id="brandCaption">Grades 2-12 Quiz Challenge</p>
+      </div>
+      <div class="status-stack">
+        <div id="gatewayStatus" class="status-chip">Gateway: Connecting...</div>
+        <div id="configBadge" class="status-chip">Config: local fallback</div>
       </div>
     </div>
-    <p>Press <span class="highlight">OK / Enter</span> on the TV remote, <span class="highlight">Start</span> on gamepad, or <span class="highlight">Start</span> on phone.</p>
+
+    <div class="layout">
+      <section class="panel question-panel">
+        <div>
+          <div class="meta">
+            <span id="questionMeta">Question 0 / 10</span>
+            <span id="subjectMeta">Subject: math | Grade 6</span>
+            <span id="timerMeta">Timer: --</span>
+          </div>
+          <p id="questionPrompt" class="prompt">Waiting for gateway...</p>
+          <div id="answers" class="answers"></div>
+          <div id="explanation" class="explanation">Press OK / Enter to start when the room is ready.</div>
+        </div>
+      </section>
+
+      <aside class="panel side-panel">
+        <div class="score-card">
+          <p class="eyebrow">Score</p>
+          <p id="scoreValue" class="score-value">0</p>
+          <p id="playerSummary" class="helper">0 players joined</p>
+        </div>
+
+        <div class="room-card">
+          <p class="eyebrow">Room Code</p>
+          <p id="roomCode" class="room-code">------</p>
+          <img id="qr-code" alt="Controller QR code">
+          <p class="helper">Scan the QR code or open the controller and join with the room code.</p>
+          <p id="controllerUrl" class="controller-url">Waiting for gateway...</p>
+        </div>
+
+        <div class="controls-guide">
+          <div id="leaderboard" style="margin-bottom:18px;"></div>
+          Remote / gamepad:
+          <br>OK / Enter = Start or Next
+          <br>Arrow keys = Select A, B, C, D
+          <br>Number keys 1-4 = Answer directly
+        </div>
+      </aside>
+    </div>
   </div>
 
-  <div id="pause-screen" class="overlay hidden">
-    <h2>PAUSED</h2>
-    <p>Press <span class="highlight">P / OK</span> or phone <span class="highlight">Pause</span> to resume.</p>
-  </div>
-
-  <div id="exit-screen" class="overlay hidden">
-    <h2>Exit Game?</h2>
-    <p>Press <span class="highlight">OK / Enter</span> to exit.</p>
-    <p>Press <span class="highlight">Back</span> to keep playing.</p>
-  </div>
-
-  <div id="gameover-screen" class="overlay hidden">
-    <h1>Game Over!</h1>
-    <p>Final Score: <span id="final-score" class="highlight">0</span></p>
-    <p>Press <span class="highlight">OK / Enter</span> or phone <span class="highlight">Start</span> to play again.</p>
-  </div>
-
-  <a href="#" id="privacy-link">Privacy Policy</a>
-
-  <canvas id="gameCanvas" width="1920" height="1080"></canvas>
-
+  <script src="./qrcode.js"></script>
   <script src="./config.js"></script>
   <script>
     const config = window.FRUIT_CATCHER_CONFIG || {};
@@ -189,49 +295,98 @@
     const GATEWAY_WS_URL = config.gatewayWsUrl || "ws://localhost:3000";
     const CONTROLLER_URL = config.controllerUrl || "http://localhost:4173";
 
-    const canvas = document.getElementById("gameCanvas");
-    const ctx = canvas.getContext("2d");
-
     const ui = {
-      start: document.getElementById("start-screen"),
-      pause: document.getElementById("pause-screen"),
-      exit: document.getElementById("exit-screen"),
-      gameover: document.getElementById("gameover-screen"),
-      hud: document.getElementById("hud"),
-      score: document.getElementById("score-val"),
-      lives: document.getElementById("lives-val"),
-      finalScore: document.getElementById("final-score"),
-      connection: document.getElementById("connection-status"),
-      roomCode: document.getElementById("room-code"),
-      controllerUrl: document.getElementById("controller-url"),
-      qrCode: document.getElementById("qr-code")
+      brandTitle: document.getElementById("brandTitle"),
+      brandCaption: document.getElementById("brandCaption"),
+      gatewayStatus: document.getElementById("gatewayStatus"),
+      configBadge: document.getElementById("configBadge"),
+      questionMeta: document.getElementById("questionMeta"),
+      subjectMeta: document.getElementById("subjectMeta"),
+      timerMeta: document.getElementById("timerMeta"),
+      questionPrompt: document.getElementById("questionPrompt"),
+      answers: document.getElementById("answers"),
+      explanation: document.getElementById("explanation"),
+      scoreValue: document.getElementById("scoreValue"),
+      playerSummary: document.getElementById("playerSummary"),
+      roomCode: document.getElementById("roomCode"),
+      qrCode: document.getElementById("qr-code"),
+      controllerUrl: document.getElementById("controllerUrl"),
+      leaderboard: document.getElementById("leaderboard")
     };
 
-    let state = "START";
-    let score = 0;
-    let lives = 3;
-    let fruits = [];
-    let roomCode = "";
     let ws;
+    let roomCode = "";
+    let latestState = null;
+    let configSource = "local";
+    let selectedChoice = "A";
+    let timerInterval = null;
 
-    const fruitEmojis = ["🍎", "🍌", "🍊", "🍓", "🍑", "🍍", "🥝"];
+    function getCurriculumLabel(value) {
+      return value === "cambodia_moeys" ? "Cambodia MoEYS" : "International";
+    }
 
-    const basket = {
-      x: 960,
-      y: 950,
-      width: 160,
-      height: 80,
-      speed: 20
-    };
+    function getLanguageLabel(value) {
+      if (value === "khmer") return "Khmer";
+      if (value === "bilingual") return "Bilingual";
+      return "English";
+    }
 
-    const keys = {
-      left: false,
-      right: false
-    };
+    function getDifficultyLabel(value) {
+      if (value === "challenge") return "Challenge";
+      if (value === "easy") return "Easy";
+      return "Standard";
+    }
+
+    function getSubjectLabel(value) {
+      if (value === "general_science") return "General Science";
+      if (value === "biology") return "Biology";
+      if (value === "chemistry") return "Chemistry";
+      if (value === "physics") return "Physics";
+      if (value === "math") return "Math";
+      if (value === "english") return "English";
+      return value;
+    }
+
+    function getUiLanguage(configState) {
+      return configState && configState.language === "khmer" ? "khmer" : "english";
+    }
+
+    function getUiCopy(configState) {
+      if (getUiLanguage(configState) === "khmer") {
+        return {
+          waitingGateway: "កំពុងរង់ចាំ Gateway...",
+          roomHint: "ពេលទូរទស្សន៍បានបន្ទប់ ស្កេន QR code ហើយចុច OK / Enter ដើម្បីចាប់ផ្តើម។",
+          pleaseWait: "សូមរង់ចាំ។",
+          chooseAnswer: "ប្រើទូរស័ព្ទ ឬ remote ទូរទស្សន៍ ដើម្បីជ្រើសរើស A, B, C ឬ D។",
+          finished: "សំណួរបញ្ចប់ហើយ។ ចុច OK / Enter ដើម្បីចាប់ផ្តើមជុំថ្មី។",
+          startPrompt: "ចុច OK / Enter ដើម្បីចាប់ផ្តើមកម្រងសំណួរ។",
+          startFromPhone: "អ្នកក៏អាចចាប់ផ្តើមពីទូរស័ព្ទបានដែរ។"
+        };
+      }
+
+      return {
+        waitingGateway: "Waiting for gateway...",
+        roomHint: "Once the TV gets a room code, scan the QR code and press OK / Enter to start.",
+        pleaseWait: "Please wait.",
+        chooseAnswer: "Use the phone or TV remote to choose A, B, C, or D.",
+        finished: "Press OK / Enter to start another round with fresh questions.",
+        startPrompt: "Press OK / Enter to start the quiz.",
+        startFromPhone: "You can also start from the phone controller."
+      };
+    }
 
     function setGatewayStatus(text, color) {
-      ui.connection.innerText = text;
-      ui.connection.style.color = color || "#aaa";
+      ui.gatewayStatus.innerText = text;
+      ui.gatewayStatus.style.color = color || "#c7d4e6";
+    }
+
+    function updateConfigBadge() {
+      const configState = latestState && latestState.config ? latestState.config : {};
+      ui.configBadge.classList.toggle("live", configSource === "gateway");
+      ui.configBadge.innerText =
+        `Config: ${configSource === "gateway" ? "gateway live" : "local fallback"} | ` +
+        `${getCurriculumLabel(configState.curriculum)} | ${getLanguageLabel(configState.language)} | ` +
+        `${getSubjectLabel(configState.subject || "math")} | Grade ${configState.gradeLevel || 6}`;
     }
 
     function buildControllerJoinUrl(currentRoomCode) {
@@ -240,339 +395,317 @@
       return url.toString();
     }
 
-    function updatePairing(currentRoomCode) {
-      roomCode = currentRoomCode;
-      ui.roomCode.innerText = currentRoomCode || "------";
+    function createQrCodeDataUrl(value) {
+      const qr = qrcode(0, "M");
+      qr.addData(value);
+      qr.make();
+      return qr.createDataURL(8, 2);
+    }
 
-      if (!currentRoomCode) {
+    function renderPairing() {
+      ui.roomCode.innerText = roomCode || "------";
+
+      if (!roomCode) {
         ui.controllerUrl.innerText = "Waiting for gateway...";
         ui.qrCode.removeAttribute("src");
         return;
       }
 
-      const joinUrl = buildControllerJoinUrl(currentRoomCode);
+      const joinUrl = buildControllerJoinUrl(roomCode);
       ui.controllerUrl.innerText = joinUrl;
-      ui.qrCode.src = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(joinUrl)}`;
+      ui.qrCode.src = createQrCodeDataUrl(joinUrl);
+    }
+
+    function sendTvAction(action, extra = {}) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      ws.send(JSON.stringify({
+        type: "tv_action",
+        action,
+        ...extra
+      }));
+    }
+
+    function clearCountdown() {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+    }
+
+    function startCountdown(deadlineAt) {
+      clearCountdown();
+
+      if (!deadlineAt) {
+        ui.timerMeta.innerText = "Timer: --";
+        return;
+      }
+
+      function tick() {
+        const seconds = Math.max(0, Math.ceil((deadlineAt - Date.now()) / 1000));
+        ui.timerMeta.innerText = `Timer: ${seconds}s`;
+      }
+
+      tick();
+      timerInterval = setInterval(tick, 250);
+    }
+
+    function renderAnswers() {
+      ui.answers.innerHTML = "";
+      const question = latestState && latestState.question ? latestState.question : null;
+
+      if (!question) {
+        return;
+      }
+
+      for (const choice of question.choices) {
+        const el = document.createElement("div");
+        el.className = "choice";
+
+        if (latestState.status === "REVIEWING") {
+          if (choice.id === latestState.correctChoice) {
+            el.classList.add("correct");
+          } else if (choice.id === latestState.selectedChoice) {
+            el.classList.add("wrong");
+          }
+        } else if (choice.id === selectedChoice) {
+          el.style.borderColor = "rgba(255, 211, 79, 0.65)";
+        }
+
+        el.innerHTML = `<div class="choice-label">${choice.id}</div><div class="choice-text">${choice.text}</div>`;
+        ui.answers.appendChild(el);
+      }
+    }
+
+    function renderLeaderboard(state) {
+      ui.leaderboard.innerHTML = "";
+      const leaderboard = state && state.leaderboard ? state.leaderboard.slice(0, 5) : [];
+
+      if (!leaderboard.length) {
+        return;
+      }
+
+      const title = document.createElement("div");
+      title.style.fontSize = "24px";
+      title.style.color = "#dbe6f4";
+      title.style.marginBottom = "8px";
+      title.innerText = "Leaderboard";
+      ui.leaderboard.appendChild(title);
+
+      for (const player of leaderboard) {
+        const row = document.createElement("div");
+        row.style.display = "flex";
+        row.style.justifyContent = "space-between";
+        row.style.gap = "12px";
+        row.style.padding = "8px 0";
+        row.style.fontSize = "22px";
+        row.style.color = player.connected ? "#f5f7fb" : "#8fa5c0";
+        row.innerHTML = `<span>${player.name}</span><span>${player.score}</span>`;
+        ui.leaderboard.appendChild(row);
+      }
+    }
+
+    function renderState() {
+      const state = latestState;
+      if (!state) {
+        ui.questionMeta.innerText = "Question 0 / 10";
+        ui.subjectMeta.innerText = "Subject: waiting";
+        ui.questionPrompt.innerText = "Waiting for gateway...";
+        ui.explanation.innerText = "Once the TV gets a room code, scan the QR code and press OK / Enter to start.";
+        ui.scoreValue.innerText = "0";
+        ui.playerSummary.innerText = "0 players joined";
+        ui.answers.innerHTML = "";
+        ui.leaderboard.innerHTML = "";
+        startCountdown(null);
+        updateConfigBadge();
+        renderPairing();
+        return;
+      }
+
+      ui.brandTitle.innerText = state.config.brandTitle;
+      ui.brandCaption.innerText = state.config.brandCaption;
+      const copy = getUiCopy(state.config);
+      ui.questionMeta.innerText = `Question ${Math.min(state.questionIndex + 1, state.questionsPerRound)} / ${state.questionsPerRound} | ${state.status}`;
+      ui.subjectMeta.innerText =
+        `${getCurriculumLabel(state.config.curriculum)} | ${getLanguageLabel(state.config.language)} | ` +
+        `${getSubjectLabel(state.config.subject)} | Grade ${state.config.gradeLevel || 6} | ${getDifficultyLabel(state.config.difficultyMode)}`;
+      ui.scoreValue.innerText = String(state.score);
+      ui.playerSummary.innerText = `${state.connectedPlayerCount || 0} connected / ${state.playerCount || 0} joined | ${state.answerCount || 0} answered`;
+
+      if (state.status === "LOADING") {
+        ui.questionPrompt.innerText = `Generating a new Grade ${state.config.gradeLevel || 6} ${getSubjectLabel(state.config.subject)} question...`;
+        ui.explanation.innerText = copy.pleaseWait;
+        ui.answers.innerHTML = "";
+      } else if (state.question) {
+        ui.questionPrompt.innerText = state.question.prompt;
+        ui.explanation.innerText = state.status === "REVIEWING"
+          ? `${state.shortExplanation} ${state.elaboration}`
+          : copy.chooseAnswer;
+        renderAnswers();
+      } else if (state.status === "FINISHED") {
+        ui.questionPrompt.innerText = `Quiz complete. Final score: ${state.score} out of ${state.questionsPerRound}.`;
+        ui.explanation.innerText = copy.finished;
+        ui.answers.innerHTML = "";
+      } else {
+        ui.questionPrompt.innerText = copy.startPrompt;
+        ui.explanation.innerText = copy.startFromPhone;
+        ui.answers.innerHTML = "";
+      }
+
+      renderLeaderboard(state);
+      startCountdown(state.status === "ANSWERING" ? state.deadlineAt : null);
+      updateConfigBadge();
+      renderPairing();
+    }
+
+    async function loadConfig() {
+      try {
+        const response = await fetch(`${GATEWAY_HTTP_URL}/config`);
+        if (!response.ok) {
+          throw new Error(`Config request failed: ${response.status}`);
+        }
+
+        const configData = await response.json();
+        latestState = latestState || {
+          status: "LOBBY",
+          score: 0,
+          questionIndex: 0,
+          questionsPerRound: configData.questionsPerRound,
+          config: configData
+        };
+        latestState.config = configData;
+        latestState.questionsPerRound = configData.questionsPerRound;
+        configSource = "gateway";
+        renderState();
+      } catch (error) {
+        configSource = "local";
+        updateConfigBadge();
+        console.error("Failed to load config:", error);
+      }
     }
 
     function connectWebSocket() {
       ws = new WebSocket(GATEWAY_WS_URL);
-      setGatewayStatus("Gateway: Connecting...", "#ffaa00");
+      setGatewayStatus("Gateway: Connecting...", "#ffd166");
 
       ws.onopen = () => {
-        setGatewayStatus("Gateway: Connected", "#00ff88");
+        setGatewayStatus("Gateway: Connected", "#69e6a6");
         ws.send(JSON.stringify({ type: "create_room" }));
       };
 
       ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
+        const data = JSON.parse(event.data);
 
-          if (data.type === "room_created") {
-            updatePairing(data.roomCode);
-            return;
-          }
+        if (data.type === "room_created") {
+          roomCode = data.roomCode;
+          latestState = data.state || latestState;
+          configSource = "gateway";
+          renderState();
+          return;
+        }
 
-          if (data.type === "controller_joined") {
-            setGatewayStatus(`Gateway: Phone joined ${data.roomCode}`, "#00ff88");
-            return;
-          }
-
-          if (data.type === "controller_disconnected") {
-            setGatewayStatus("Gateway: Phone disconnected", "#ffaa00");
-            return;
-          }
-
-          if (data.type === "control") {
-            handlePhoneControl(data);
-          }
-        } catch (err) {
-          console.error("Bad controller message:", err);
+        if (data.type === "room_state") {
+          latestState = data.state;
+          configSource = "gateway";
+          renderState();
+          return;
         }
       };
 
       ws.onclose = () => {
-        updatePairing("");
-        setGatewayStatus("Gateway: Reconnecting...", "#ffaa00");
+        roomCode = "";
+        setGatewayStatus("Gateway: Reconnecting...", "#ffd166");
         setTimeout(connectWebSocket, 2000);
+        renderPairing();
       };
 
       ws.onerror = () => {
-        setGatewayStatus("Gateway: Connection error", "#ff0055");
+        setGatewayStatus("Gateway: Connection error", "#ff8f8f");
       };
     }
 
-    function handlePhoneControl(data) {
-      const action = data.action;
-
-      if (action === "left_down") keys.left = true;
-      if (action === "left_up") keys.left = false;
-
-      if (action === "right_down") keys.right = true;
-      if (action === "right_up") keys.right = false;
-
-      if (action === "left") {
-        basket.x -= 80;
-        clampBasket();
+    function submitSelectedChoice() {
+      if (!latestState || latestState.status !== "ANSWERING") {
+        return;
       }
 
-      if (action === "right") {
-        basket.x += 80;
-        clampBasket();
-      }
+      sendTvAction("answer", { choice: selectedChoice });
+    }
 
-      if (action === "tilt") {
-        if (typeof data.gamma === "number") {
-          if (data.gamma < -8) {
-            keys.left = true;
-            keys.right = false;
-          } else if (data.gamma > 8) {
-            keys.right = true;
-            keys.left = false;
-          } else {
-            keys.left = false;
-            keys.right = false;
-          }
+    function moveSelection(direction) {
+      const order = ["A", "B", "C", "D"];
+      const index = order.indexOf(selectedChoice);
+      let nextIndex = index;
+
+      if (direction === "left" && (index === 1 || index === 3)) nextIndex -= 1;
+      if (direction === "right" && (index === 0 || index === 2)) nextIndex += 1;
+      if (direction === "up" && index >= 2) nextIndex -= 2;
+      if (direction === "down" && index <= 1) nextIndex += 2;
+
+      selectedChoice = order[nextIndex];
+      renderState();
+    }
+
+    document.addEventListener("keydown", (event) => {
+      event.preventDefault();
+
+      if (event.key === "Enter" || event.key === " ") {
+        if (latestState && latestState.status === "ANSWERING") {
+          submitSelectedChoice();
+        } else {
+          sendTvAction("next");
         }
+        return;
       }
 
-      if (action === "stop") {
-        keys.left = false;
-        keys.right = false;
+      if (event.key === "1") selectedChoice = "A";
+      if (event.key === "2") selectedChoice = "B";
+      if (event.key === "3") selectedChoice = "C";
+      if (event.key === "4") selectedChoice = "D";
+
+      if (["1", "2", "3", "4"].includes(event.key) && latestState && latestState.status === "ANSWERING") {
+        submitSelectedChoice();
+        return;
       }
 
-      if (action === "start") {
-        if (state === "START" || state === "GAMEOVER") startGame();
-      }
-
-      if (action === "pause") {
-        if (state === "PLAYING" || state === "PAUSED") togglePause();
-      }
-
-      if (action === "catch") {
-        basket.width = 230;
-        setTimeout(() => {
-          basket.width = 160;
-        }, 250);
-      }
-
-      if (action === "exit") {
-        if (state === "PLAYING" || state === "PAUSED") showExitDialog();
-        else if (state === "EXITING") exitApp();
-      }
-
-      if (action === "back") {
-        if (state === "EXITING") hideExitDialog();
-      }
-    }
-
-    function clampBasket() {
-      const half = basket.width / 2;
-      if (basket.x < half) basket.x = half;
-      if (basket.x > 1920 - half) basket.x = 1920 - half;
-    }
-
-    document.addEventListener("keydown", (e) => {
-      e.preventDefault();
-
-      if (state === "START" || state === "GAMEOVER") {
-        if (e.key === "Enter" || e.key === " ") startGame();
-        if (e.key === "Backspace" || e.key === "Escape") exitApp();
-      } else if (state === "PLAYING") {
-        if (e.key === "ArrowLeft") keys.left = true;
-        if (e.key === "ArrowRight") keys.right = true;
-        if (e.key === "p" || e.key === "P" || e.key === "Enter") togglePause();
-        if (e.key === "Backspace" || e.key === "Escape") showExitDialog();
-      } else if (state === "PAUSED") {
-        if (e.key === "Enter" || e.key === " " || e.key === "p" || e.key === "P") togglePause();
-        if (e.key === "Backspace" || e.key === "Escape") showExitDialog();
-      } else if (state === "EXITING") {
-        if (e.key === "Enter" || e.key === " ") exitApp();
-        if (e.key === "Backspace" || e.key === "Escape") hideExitDialog();
-      }
+      if (event.key === "ArrowLeft") moveSelection("left");
+      if (event.key === "ArrowRight") moveSelection("right");
+      if (event.key === "ArrowUp") moveSelection("up");
+      if (event.key === "ArrowDown") moveSelection("down");
     });
-
-    document.addEventListener("keyup", (e) => {
-      e.preventDefault();
-
-      if (e.key === "ArrowLeft") keys.left = false;
-      if (e.key === "ArrowRight") keys.right = false;
-    });
-
-    document.addEventListener("contextmenu", (e) => e.preventDefault());
 
     function pollGamepad() {
       const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
-      if (!gamepads[0]) return;
-
       const gp = gamepads[0];
-
-      if (gp.axes[0] < -0.5 || gp.buttons[14] && gp.buttons[14].pressed) {
-        keys.left = true;
-        keys.right = false;
-      } else if (gp.axes[0] > 0.5 || gp.buttons[15] && gp.buttons[15].pressed) {
-        keys.right = true;
-        keys.left = false;
-      } else {
-        keys.left = false;
-        keys.right = false;
+      if (!gp) {
+        requestAnimationFrame(pollGamepad);
+        return;
       }
 
       if ((gp.buttons[0] && gp.buttons[0].pressed) || (gp.buttons[9] && gp.buttons[9].pressed)) {
-        if (state === "START" || state === "GAMEOVER") startGame();
-        else if (state === "PLAYING" || state === "PAUSED") togglePause();
-        else if (state === "EXITING") exitApp();
-      }
-
-      if (gp.buttons[1] && gp.buttons[1].pressed) {
-        if (state === "PLAYING" || state === "PAUSED") showExitDialog();
-        else if (state === "EXITING") hideExitDialog();
-      }
-    }
-
-    function startGame() {
-      state = "PLAYING";
-      score = 0;
-      lives = 3;
-      fruits = [];
-      basket.x = 960;
-      basket.width = 160;
-      keys.left = false;
-      keys.right = false;
-      updateHUD();
-
-      ui.start.classList.add("hidden");
-      ui.pause.classList.add("hidden");
-      ui.gameover.classList.add("hidden");
-      ui.exit.classList.add("hidden");
-      ui.hud.classList.remove("hidden");
-
-      requestAnimationFrame(gameLoop);
-    }
-
-    function togglePause() {
-      if (state === "PLAYING") {
-        state = "PAUSED";
-        ui.pause.classList.remove("hidden");
-      } else if (state === "PAUSED") {
-        state = "PLAYING";
-        ui.pause.classList.add("hidden");
-        requestAnimationFrame(gameLoop);
-      }
-    }
-
-    function showExitDialog() {
-      state = "EXITING";
-      ui.exit.classList.remove("hidden");
-    }
-
-    function hideExitDialog() {
-      state = "PLAYING";
-      ui.exit.classList.add("hidden");
-      requestAnimationFrame(gameLoop);
-    }
-
-    function exitApp() {
-      if (window.webOS && window.webOS.platformBack) {
-        window.webOS.platformBack();
-      } else {
-        window.close();
-      }
-    }
-
-    function gameOver() {
-      state = "GAMEOVER";
-      ui.finalScore.innerText = score;
-      ui.hud.classList.add("hidden");
-      ui.gameover.classList.remove("hidden");
-    }
-
-    function updateHUD() {
-      ui.score.innerText = score;
-      ui.lives.innerText = "❤️".repeat(lives);
-    }
-
-    function spawnFruit() {
-      if (Math.random() < 0.03) {
-        fruits.push({
-          x: Math.random() * (1920 - 60),
-          y: -60,
-          size: 60,
-          speed: 6 + Math.random() * 6,
-          emoji: fruitEmojis[Math.floor(Math.random() * fruitEmojis.length)]
-        });
-      }
-    }
-
-    function update() {
-      pollGamepad();
-
-      if (keys.left) basket.x -= basket.speed;
-      if (keys.right) basket.x += basket.speed;
-
-      clampBasket();
-      spawnFruit();
-
-      for (let i = fruits.length - 1; i >= 0; i -= 1) {
-        const f = fruits[i];
-        f.y += f.speed;
-
-        if (
-          f.x < basket.x + basket.width / 2 &&
-          f.x + f.size > basket.x - basket.width / 2 &&
-          f.y < basket.y + basket.height &&
-          f.y + f.size > basket.y
-        ) {
-          score += 10;
-          updateHUD();
-          fruits.splice(i, 1);
-        } else if (f.y > 1080) {
-          fruits.splice(i, 1);
-          lives -= 1;
-          updateHUD();
-
-          if (lives <= 0) gameOver();
+        if (latestState && latestState.status === "ANSWERING") {
+          submitSelectedChoice();
+        } else {
+          sendTvAction("next");
         }
       }
+
+      if (gp.buttons[14] && gp.buttons[14].pressed) moveSelection("left");
+      if (gp.buttons[15] && gp.buttons[15].pressed) moveSelection("right");
+      if (gp.buttons[12] && gp.buttons[12].pressed) moveSelection("up");
+      if (gp.buttons[13] && gp.buttons[13].pressed) moveSelection("down");
+
+      requestAnimationFrame(pollGamepad);
     }
 
-    function draw() {
-      ctx.fillStyle = "#1a1a2e";
-      ctx.fillRect(0, 0, 1920, 1080);
-
-      ctx.fillStyle = "#16213e";
-      ctx.fillRect(0, 1030, 1920, 50);
-
-      ctx.fillStyle = "#e94560";
-      ctx.beginPath();
-      ctx.arc(basket.x, basket.y + 20, basket.width / 2, 0, Math.PI, false);
-      ctx.fill();
-
-      ctx.fillStyle = "#fff";
-      ctx.fillRect(basket.x - basket.width / 2 - 15, basket.y, basket.width + 30, 20);
-
-      ctx.font = "60px Arial";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-
-      for (let i = 0; i < fruits.length; i += 1) {
-        const f = fruits[i];
-        ctx.fillText(f.emoji, f.x + f.size / 2, f.y + f.size / 2);
-      }
-    }
-
-    function gameLoop() {
-      if (state !== "PLAYING") return;
-
-      update();
-      draw();
-
-      requestAnimationFrame(gameLoop);
-    }
-
-    updatePairing("");
+    updateConfigBadge();
+    renderPairing();
+    renderState();
+    loadConfig();
     connectWebSocket();
-    draw();
+    requestAnimationFrame(pollGamepad);
   </script>
 </body>
 </html>

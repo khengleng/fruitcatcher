@@ -7,6 +7,16 @@
   ],
   "scripts": {
     "start": "npm --workspace apps/gateway start",
-    "dev:gateway": "npm --workspace apps/gateway run dev"
+    "dev:gateway": "npm --workspace apps/gateway run dev",
+    "dev:controller": "npm --workspace apps/controller-web run dev",
+    "dev:admin": "npm --workspace apps/admin-web run dev",
+    "check:gateway": "node --check apps/gateway/server.js",
+    "check:controller": "node --check apps/controller-web/server.js",
+    "check:admin": "node --check apps/admin-web/server.js",
+    "check": "npm run check:gateway && npm run check:controller && npm run check:admin"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "qrcode-generator": "^2.0.4"
   }
 }

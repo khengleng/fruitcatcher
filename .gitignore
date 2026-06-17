@@ -3,5 +3,6 @@ node_modules/
 *.ipk
 logs/
 *.log
+apps/gateway/data/
 .DS_Store
 Thumbs.db
