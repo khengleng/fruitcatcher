@@ -727,6 +727,37 @@
             <button id="cancelGroupButton" class="secondary">Cancel</button>
           </div>
         </div>
+
+        <div id="groupDetail" class="detail" hidden style="margin-top:18px;">
+          <div class="detail-card">
+            <h3 id="groupDetailTitle">Group</h3>
+            <p id="groupDetailMeta" class="muted"></p>
+            <div class="settings-grid" style="margin-top:14px;">
+              <label>
+                Add Student
+                <select id="groupStudentSelect"></select>
+              </label>
+            </div>
+            <div class="actions">
+              <button id="addGroupMemberButton" class="success small">Add Student</button>
+              <button id="deleteGroupButton" class="danger small">Delete Group</button>
+              <button id="closeGroupDetailButton" class="secondary small">Close</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  <th>Client ID</th>
+                  <th>Added</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="groupMembersBody"></tbody>
+            </table>
+          </div>
+        </div>
       </section>
 
       <section id="activeSessionsPanel" class="panel" hidden>
@@ -1486,6 +1517,9 @@
 
     // Groups Functions
     let allGroups = [];
+    let activeGroup = null;
+    let activeGroupMembers = [];
+    let availableGroupStudents = [];
 
     async function loadGroups() {
       try {
@@ -1509,7 +1543,7 @@
         appendCell(row, group.description || "-");
         appendCell(row, group.member_count || 0);
         appendCell(row, formatDate(group.created_at));
-        appendButtonCell(row, "View", () => alert(`Group management coming soon`));
+        appendButtonCell(row, "Manage", () => loadGroupDetail(group.id));
         tbody.appendChild(row);
       }
       
@@ -1543,6 +1577,124 @@
         setStatus(authStatus, "Group created successfully.", "#1f7a4d");
         document.getElementById("groupFormModal").hidden = true;
         await loadGroups();
+      } catch (error) {
+        setStatus(authStatus, error.message, "#a33d3d");
+      }
+    }
+
+    async function loadGroupDetail(groupId) {
+      try {
+        setStatus(authStatus, "Loading group details...", "#85321e");
+        const data = await api(`/admin/groups/${encodeURIComponent(groupId)}`);
+        activeGroup = data.group;
+        activeGroupMembers = data.members || [];
+        availableGroupStudents = data.availableStudents || [];
+        renderGroupDetail();
+        setStatus(authStatus, `Loaded ${activeGroup.name}.`, "#1f7a4d");
+      } catch (error) {
+        setStatus(authStatus, error.message, "#a33d3d");
+      }
+    }
+
+    function renderGroupDetail() {
+      const panel = document.getElementById("groupDetail");
+      const title = document.getElementById("groupDetailTitle");
+      const meta = document.getElementById("groupDetailMeta");
+      const select = document.getElementById("groupStudentSelect");
+      const tbody = document.getElementById("groupMembersBody");
+
+      if (!activeGroup) {
+        panel.hidden = true;
+        return;
+      }
+
+      panel.hidden = false;
+      title.textContent = activeGroup.name;
+      meta.textContent = `${activeGroup.description || "No description"} | ${activeGroupMembers.length} member(s)`;
+      select.innerHTML = "";
+
+      for (const student of availableGroupStudents) {
+        const option = document.createElement("option");
+        option.value = student.id;
+        option.textContent = `${student.display_name} (${student.client_id})`;
+        select.appendChild(option);
+      }
+
+      if (!availableGroupStudents.length) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "No available students";
+        select.appendChild(option);
+      }
+
+      tbody.innerHTML = "";
+      for (const member of activeGroupMembers) {
+        const row = document.createElement("tr");
+        appendCell(row, member.display_name);
+        appendCell(row, member.client_id);
+        appendCell(row, formatDate(member.added_at));
+        appendButtonCell(row, "Remove", () => removeGroupMember(member.id));
+        tbody.appendChild(row);
+      }
+
+      if (!activeGroupMembers.length) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 4;
+        cell.style.textAlign = "center";
+        cell.style.padding = "24px";
+        cell.style.color = "var(--muted)";
+        cell.textContent = "No students in this group yet.";
+        row.appendChild(cell);
+        tbody.appendChild(row);
+      }
+    }
+
+    async function addGroupMember() {
+      if (!activeGroup) return;
+      const studentId = document.getElementById("groupStudentSelect").value;
+      if (!studentId) {
+        setStatus(authStatus, "Select a student first.", "#a33d3d");
+        return;
+      }
+
+      try {
+        await api(`/admin/groups/${encodeURIComponent(activeGroup.id)}/members`, {
+          method: "POST",
+          body: JSON.stringify({ student_id: studentId })
+        });
+        await loadGroupDetail(activeGroup.id);
+        await loadGroups();
+      } catch (error) {
+        setStatus(authStatus, error.message, "#a33d3d");
+      }
+    }
+
+    async function removeGroupMember(studentId) {
+      if (!activeGroup || !confirm("Remove this student from the group?")) return;
+
+      try {
+        await api(`/admin/groups/${encodeURIComponent(activeGroup.id)}/members/${encodeURIComponent(studentId)}`, {
+          method: "DELETE"
+        });
+        await loadGroupDetail(activeGroup.id);
+        await loadGroups();
+      } catch (error) {
+        setStatus(authStatus, error.message, "#a33d3d");
+      }
+    }
+
+    async function deleteActiveGroup() {
+      if (!activeGroup || !confirm(`Delete group "${activeGroup.name}"? Members are removed from this group only.`)) return;
+
+      try {
+        await api(`/admin/groups/${encodeURIComponent(activeGroup.id)}`, { method: "DELETE" });
+        activeGroup = null;
+        activeGroupMembers = [];
+        availableGroupStudents = [];
+        renderGroupDetail();
+        await loadGroups();
+        setStatus(authStatus, "Group deleted.", "#1f7a4d");
       } catch (error) {
         setStatus(authStatus, error.message, "#a33d3d");
       }
@@ -1827,6 +1979,14 @@
     document.getElementById("saveGroupButton").addEventListener("click", saveGroup);
     document.getElementById("cancelGroupButton").addEventListener("click", () => {
       document.getElementById("groupFormModal").hidden = true;
+    });
+    document.getElementById("addGroupMemberButton").addEventListener("click", addGroupMember);
+    document.getElementById("deleteGroupButton").addEventListener("click", deleteActiveGroup);
+    document.getElementById("closeGroupDetailButton").addEventListener("click", () => {
+      activeGroup = null;
+      activeGroupMembers = [];
+      availableGroupStudents = [];
+      renderGroupDetail();
     });
 
     // Active Sessions event listeners

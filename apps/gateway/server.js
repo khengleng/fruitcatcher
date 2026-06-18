@@ -2424,6 +2424,50 @@ app.get("/admin/groups", requireAdmin, async (req, res) => {
   res.json({ groups: result?.rows || [] });
 });
 
+app.get("/admin/groups/:id", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  await runAdminAction(res, async () => {
+    const groupId = normalizeAdminId(req.params.id, "group id");
+    const [groupResult, membersResult, availableResult] = await Promise.all([
+      dbQueryRequired("SELECT * FROM student_groups WHERE id = $1", [groupId]),
+      dbQueryRequired(
+        `SELECT st.id, st.display_name, st.client_id, st.updated_at, m.added_at
+         FROM student_group_members m
+         JOIN students st ON st.id = m.student_id
+         WHERE m.group_id = $1
+         ORDER BY st.display_name`,
+        [groupId]
+      ),
+      dbQueryRequired(
+        `SELECT st.id, st.display_name, st.client_id, st.updated_at
+         FROM students st
+         WHERE st.client_id NOT LIKE 'tv:%'
+           AND NOT EXISTS (
+             SELECT 1 FROM student_group_members m
+             WHERE m.group_id = $1 AND m.student_id = st.id
+           )
+         ORDER BY st.updated_at DESC
+         LIMIT 200`,
+        [groupId]
+      )
+    ]);
+
+    if (!groupResult.rows[0]) {
+      res.status(404).json({ error: "Group not found" });
+      return;
+    }
+
+    res.json({
+      group: groupResult.rows[0],
+      members: membersResult.rows,
+      availableStudents: availableResult.rows
+    });
+  });
+});
+
 app.post("/admin/groups", requireAdmin, async (req, res) => {
   if (!requireDatabase(res)) {
     return;
@@ -2446,6 +2490,23 @@ app.post("/admin/groups", requireAdmin, async (req, res) => {
   });
 });
 
+app.delete("/admin/groups/:id", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  await runAdminAction(res, async () => {
+    const groupId = normalizeAdminId(req.params.id, "group id");
+    const result = await dbQueryRequired("DELETE FROM student_groups WHERE id = $1", [groupId]);
+    if (result.rowCount === 0) {
+      res.status(404).json({ error: "Group not found" });
+      return;
+    }
+    await logAuditAction("group.delete", "student_groups", groupId, null, req);
+    res.json({ ok: true });
+  });
+});
+
 app.post("/admin/groups/:id/members", requireAdmin, async (req, res) => {
   if (!requireDatabase(res)) {
     return;
@@ -2465,6 +2526,23 @@ app.post("/admin/groups/:id/members", requireAdmin, async (req, res) => {
     await logAuditAction("group.member.add", "student_groups", groupId, { student_id: studentId, inserted: result.rowCount }, req);
     
     res.json({ ok: true, inserted: result.rowCount });
+  });
+});
+
+app.delete("/admin/groups/:id/members/:studentId", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  await runAdminAction(res, async () => {
+    const groupId = normalizeAdminId(req.params.id, "group id");
+    const studentId = normalizeAdminId(req.params.studentId, "student id");
+    const result = await dbQueryRequired(
+      "DELETE FROM student_group_members WHERE group_id = $1 AND student_id = $2",
+      [groupId, studentId]
+    );
+    await logAuditAction("group.member.remove", "student_groups", groupId, { student_id: studentId, removed: result.rowCount }, req);
+    res.json({ ok: true, removed: result.rowCount });
   });
 });
 
