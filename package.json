@@ -13,6 +13,7 @@
     "check:gateway": "node --check apps/gateway/server.js",
     "check:controller": "node --check apps/controller-web/server.js",
     "check:admin": "node --check apps/admin-web/server.js",
-    "check": "npm run check:gateway && npm run check:controller && npm run check:admin"
+    "check": "npm run check:gateway && npm run check:controller && npm run check:admin",
+    "test": "node --test tests/*.test.js"
   }
 }

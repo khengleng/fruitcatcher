@@ -1361,6 +1361,39 @@ async function getActiveStudentBlock(studentId) {
   return result?.rows?.[0] || null;
 }
 
+async function loadStudentAnswerHistory(studentId, limit = 10) {
+  if (!db || !studentId) {
+    return [];
+  }
+
+  const result = await dbQuery(
+    `SELECT a.choice,
+            a.is_correct,
+            q.question_index,
+            q.prompt,
+            q.correct_choice,
+            q.short_explanation,
+            q.elaboration
+     FROM student_answers a
+     JOIN quiz_questions q ON q.id = a.question_id
+     WHERE a.student_id = $1
+     ORDER BY a.created_at DESC
+     LIMIT $2`,
+    [studentId, limit]
+  );
+
+  return (result?.rows || []).reverse().map((row) => ({
+    questionIndex: row.question_index,
+    prompt: row.prompt,
+    choice: row.choice,
+    correctChoice: row.correct_choice,
+    isCorrect: Boolean(row.is_correct),
+    shortExplanation: row.short_explanation || "",
+    elaboration: row.elaboration || "",
+    scoreAfter: null
+  }));
+}
+
 async function persistSessionCreated(room) {
   if (!db || !room) {
     return null;
@@ -1416,6 +1449,9 @@ async function persistParticipant(room, player) {
 
   const studentId = await upsertStudent(player.clientId || `${room.roomCode}:${player.playerId}`, player.name);
   player.studentId = studentId;
+  if (!player.answerHistory || player.answerHistory.length === 0) {
+    player.answerHistory = await loadStudentAnswerHistory(studentId);
+  }
   await dbQuery(
     `INSERT INTO session_participants (
       session_id, student_id, player_id, display_name, is_host, score, joined_at, last_seen_at
