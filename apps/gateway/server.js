@@ -1,8 +1,10 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
+const { Pool } = require("pg");
 
 const app = express();
 const server = http.createServer(app);
@@ -12,10 +14,19 @@ const PORT = Number(process.env.PORT || 3000);
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5.4-mini";
+const DATABASE_URL = process.env.DATABASE_URL || "";
 const CONFIG_PATH = process.env.CONFIG_PATH || path.join(__dirname, "data", "game-config.json");
 const APP_VERSION = process.env.APP_VERSION || "1.0.0";
 const startedAt = new Date().toISOString();
 const rooms = new Map();
+const db = DATABASE_URL
+  ? new Pool({
+      connectionString: DATABASE_URL,
+      ssl: process.env.PGSSLMODE === "disable" || /localhost|127\.0\.0\.1/.test(DATABASE_URL)
+        ? false
+        : { rejectUnauthorized: false }
+    })
+  : null;
 const SUPPORTED_SUBJECTS = [
   "math",
   "general_science",
@@ -886,6 +897,381 @@ function persistConfig(nextConfig) {
   }
 }
 
+function createId() {
+  return crypto.randomUUID();
+}
+
+async function dbQuery(text, params = []) {
+  if (!db) {
+    return null;
+  }
+
+  try {
+    return await db.query(text, params);
+  } catch (error) {
+    console.error("Database query failed:", error);
+    return null;
+  }
+}
+
+async function initDatabase() {
+  if (!db) {
+    return false;
+  }
+
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS admin_settings (
+      key TEXT PRIMARY KEY,
+      value JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS students (
+      id TEXT PRIMARY KEY,
+      client_id TEXT UNIQUE NOT NULL,
+      display_name TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS quiz_sessions (
+      id TEXT PRIMARY KEY,
+      room_code TEXT NOT NULL,
+      status TEXT NOT NULL,
+      curriculum TEXT NOT NULL,
+      language TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      grade_level INTEGER NOT NULL,
+      difficulty_mode TEXT NOT NULL,
+      question_source TEXT NOT NULL,
+      questions_per_round INTEGER NOT NULL,
+      question_timer_sec INTEGER NOT NULL,
+      config JSONB NOT NULL,
+      started_at TIMESTAMPTZ,
+      ended_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS session_participants (
+      session_id TEXT NOT NULL REFERENCES quiz_sessions(id) ON DELETE CASCADE,
+      student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      player_id TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      is_host BOOLEAN NOT NULL DEFAULT FALSE,
+      score INTEGER NOT NULL DEFAULT 0,
+      joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (session_id, student_id)
+    )
+  `);
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS quiz_questions (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES quiz_sessions(id) ON DELETE CASCADE,
+      question_index INTEGER NOT NULL,
+      curriculum TEXT NOT NULL,
+      language TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      grade_level INTEGER NOT NULL,
+      difficulty_mode TEXT NOT NULL,
+      source TEXT NOT NULL,
+      model TEXT,
+      prompt TEXT NOT NULL,
+      choices JSONB NOT NULL,
+      correct_choice TEXT NOT NULL,
+      short_explanation TEXT NOT NULL,
+      elaboration TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (session_id, question_index)
+    )
+  `);
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS student_answers (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES quiz_sessions(id) ON DELETE CASCADE,
+      question_id TEXT NOT NULL REFERENCES quiz_questions(id) ON DELETE CASCADE,
+      student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      player_id TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      choice TEXT,
+      is_correct BOOLEAN NOT NULL,
+      response_ms INTEGER,
+      answered_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (session_id, question_id, student_id)
+    )
+  `);
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS student_progress (
+      student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      curriculum TEXT NOT NULL,
+      language TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      grade_level INTEGER NOT NULL,
+      total_sessions INTEGER NOT NULL DEFAULT 0,
+      total_questions INTEGER NOT NULL DEFAULT 0,
+      correct_answers INTEGER NOT NULL DEFAULT 0,
+      last_session_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (student_id, curriculum, language, subject, grade_level)
+    )
+  `);
+  await dbQuery("CREATE INDEX IF NOT EXISTS idx_quiz_sessions_created_at ON quiz_sessions(created_at DESC)");
+  await dbQuery("CREATE INDEX IF NOT EXISTS idx_answers_student_created ON student_answers(student_id, created_at DESC)");
+  await dbQuery("CREATE INDEX IF NOT EXISTS idx_progress_subject_grade ON student_progress(subject, grade_level)");
+  return true;
+}
+
+async function loadDbConfig() {
+  const result = await dbQuery("SELECT value FROM admin_settings WHERE key = $1", ["game_config"]);
+  return result && result.rows[0] ? result.rows[0].value : null;
+}
+
+async function persistDbConfig(nextConfig) {
+  await dbQuery(
+    `INSERT INTO admin_settings (key, value, updated_at)
+     VALUES ($1, $2::jsonb, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+    ["game_config", JSON.stringify(nextConfig)]
+  );
+}
+
+function sanitizeStudentName(value) {
+  const trimmed = String(value || "").replace(/\s+/g, " ").trim();
+  return (trimmed || "Student").slice(0, 48);
+}
+
+async function upsertStudent(clientId, displayName) {
+  if (!db || !clientId) {
+    return null;
+  }
+
+  const existing = await dbQuery(
+    `SELECT id FROM students WHERE client_id = $1`,
+    [clientId]
+  );
+  const studentId = existing && existing.rows[0] ? existing.rows[0].id : createId();
+  await dbQuery(
+    `INSERT INTO students (id, client_id, display_name, updated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (client_id) DO UPDATE
+       SET display_name = EXCLUDED.display_name, updated_at = NOW()
+     RETURNING id`,
+    [studentId, clientId, sanitizeStudentName(displayName)]
+  );
+  return studentId;
+}
+
+async function persistSessionCreated(room) {
+  if (!db || !room) {
+    return null;
+  }
+
+  const sessionId = createId();
+  await dbQuery(
+    `INSERT INTO quiz_sessions (
+      id, room_code, status, curriculum, language, subject, grade_level,
+      difficulty_mode, question_source, questions_per_round, question_timer_sec,
+      config, created_at, updated_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, NOW(), NOW())`,
+    [
+      sessionId,
+      room.roomCode,
+      room.status,
+      gameConfig.curriculum,
+      gameConfig.language,
+      gameConfig.subject,
+      gameConfig.gradeLevel,
+      gameConfig.difficultyMode,
+      gameConfig.questionSource,
+      gameConfig.questionsPerRound,
+      gameConfig.questionTimerSec,
+      JSON.stringify(gameConfig)
+    ]
+  );
+  return sessionId;
+}
+
+async function persistSessionStatus(room, status) {
+  if (!db || !room || !room.sessionId) {
+    return;
+  }
+
+  const startedAt = status === "LOADING" || status === "ANSWERING" || status === "REVIEWING"
+    ? "COALESCE(started_at, NOW())"
+    : "started_at";
+  const endedAt = status === "FINISHED" || status === "CLOSED" ? "NOW()" : "ended_at";
+  await dbQuery(
+    `UPDATE quiz_sessions
+     SET status = $2, updated_at = NOW(), started_at = ${startedAt}, ended_at = ${endedAt}
+     WHERE id = $1`,
+    [room.sessionId, status]
+  );
+}
+
+async function persistParticipant(room, player) {
+  if (!db || !room || !room.sessionId || !player) {
+    return;
+  }
+
+  const studentId = await upsertStudent(player.clientId || `${room.roomCode}:${player.playerId}`, player.name);
+  player.studentId = studentId;
+  await dbQuery(
+    `INSERT INTO session_participants (
+      session_id, student_id, player_id, display_name, is_host, score, joined_at, last_seen_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+    ON CONFLICT (session_id, student_id) DO UPDATE
+      SET player_id = EXCLUDED.player_id,
+          display_name = EXCLUDED.display_name,
+          is_host = EXCLUDED.is_host,
+          score = EXCLUDED.score,
+          last_seen_at = NOW()`,
+    [room.sessionId, studentId, player.playerId, sanitizeStudentName(player.name), Boolean(player.isHost), player.score || 0]
+  );
+}
+
+async function persistQuestion(room) {
+  if (!db || !room || !room.sessionId || !room.currentQuestion) {
+    return null;
+  }
+
+  const questionId = createId();
+  const result = await dbQuery(
+    `INSERT INTO quiz_questions (
+      id, session_id, question_index, curriculum, language, subject, grade_level,
+      difficulty_mode, source, model, prompt, choices, correct_choice,
+      short_explanation, elaboration
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15)
+    ON CONFLICT (session_id, question_index) DO UPDATE
+      SET prompt = EXCLUDED.prompt,
+          choices = EXCLUDED.choices,
+          correct_choice = EXCLUDED.correct_choice,
+          short_explanation = EXCLUDED.short_explanation,
+          elaboration = EXCLUDED.elaboration
+    RETURNING id`,
+    [
+      questionId,
+      room.sessionId,
+      room.questionIndex,
+      gameConfig.curriculum,
+      gameConfig.language,
+      room.currentQuestion.subject || gameConfig.subject,
+      gameConfig.gradeLevel,
+      gameConfig.difficultyMode,
+      room.currentQuestion.source || "openai",
+      room.currentQuestion.model || OPENAI_MODEL,
+      room.currentQuestion.question,
+      JSON.stringify(room.currentQuestion.choices),
+      room.currentQuestion.correctChoice,
+      room.currentQuestion.shortExplanation,
+      room.currentQuestion.elaboration
+    ]
+  );
+  return result?.rows[0]?.id || questionId;
+}
+
+async function persistRevealResults(room) {
+  if (!db || !room || !room.sessionId || !room.currentQuestionId || !room.currentQuestion) {
+    return;
+  }
+
+  for (const player of room.players.values()) {
+    if (player.isHost && !player.currentAnswer) {
+      continue;
+    }
+
+    if (!player.isHost && player.activeQuestionIndex !== room.questionIndex && !player.currentAnswer) {
+      continue;
+    }
+
+    await persistParticipant(room, player);
+    const isCorrect = player.currentAnswer === room.currentQuestion.correctChoice;
+    await dbQuery(
+      `INSERT INTO student_answers (
+        id, session_id, question_id, student_id, player_id, display_name,
+        choice, is_correct, response_ms, answered_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      ON CONFLICT (session_id, question_id, student_id) DO UPDATE
+        SET choice = EXCLUDED.choice,
+            is_correct = EXCLUDED.is_correct,
+            response_ms = EXCLUDED.response_ms,
+            answered_at = EXCLUDED.answered_at,
+            display_name = EXCLUDED.display_name`,
+      [
+        createId(),
+        room.sessionId,
+        room.currentQuestionId,
+        player.studentId,
+        player.playerId,
+        sanitizeStudentName(player.name),
+        player.currentAnswer || null,
+        isCorrect,
+        player.answerResponseMs || null,
+        player.answerSubmittedAt || null
+      ]
+    );
+    await dbQuery(
+      `UPDATE session_participants
+       SET score = $3, display_name = $4, last_seen_at = NOW()
+       WHERE session_id = $1 AND student_id = $2`,
+      [room.sessionId, player.studentId, player.score || 0, sanitizeStudentName(player.name)]
+    );
+    await dbQuery(
+      `INSERT INTO student_progress (
+        student_id, curriculum, language, subject, grade_level,
+        total_sessions, total_questions, correct_answers, last_session_at, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, 1, 1, $6, NOW(), NOW())
+      ON CONFLICT (student_id, curriculum, language, subject, grade_level) DO UPDATE
+        SET total_questions = student_progress.total_questions + 1,
+            correct_answers = student_progress.correct_answers + EXCLUDED.correct_answers,
+            last_session_at = NOW(),
+            updated_at = NOW()`,
+      [
+        player.studentId,
+        gameConfig.curriculum,
+        gameConfig.language,
+        room.currentQuestion.subject || gameConfig.subject,
+        gameConfig.gradeLevel,
+        isCorrect ? 1 : 0
+      ]
+    );
+  }
+}
+
+async function markProgressSession(room) {
+  if (!db || !room || !room.sessionId) {
+    return;
+  }
+
+  for (const player of room.players.values()) {
+    if (player.isHost || !player.studentId) {
+      continue;
+    }
+
+    await dbQuery(
+      `INSERT INTO student_progress (
+        student_id, curriculum, language, subject, grade_level,
+        total_sessions, total_questions, correct_answers, last_session_at, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, 1, 0, 0, NOW(), NOW())
+      ON CONFLICT (student_id, curriculum, language, subject, grade_level) DO UPDATE
+        SET total_sessions = student_progress.total_sessions + 1,
+            last_session_at = NOW(),
+            updated_at = NOW()`,
+      [player.studentId, gameConfig.curriculum, gameConfig.language, gameConfig.subject, gameConfig.gradeLevel]
+    );
+  }
+}
+
 app.use(express.json());
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -910,6 +1296,7 @@ app.get("/health", (_req, res) => {
     adminConfigured: Boolean(ADMIN_TOKEN),
     openaiConfigured: Boolean(OPENAI_API_KEY),
     openaiModel: OPENAI_MODEL,
+    databaseConfigured: Boolean(db),
     configPath: CONFIG_PATH,
     configPersisted: fs.existsSync(CONFIG_PATH)
   });
@@ -947,6 +1334,11 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+function finiteNumber(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function sanitizeConfig(input) {
   const nextConfig = {
     brandTitle: String(input.brandTitle ?? defaultGameConfig.brandTitle).trim() || defaultGameConfig.brandTitle,
@@ -954,11 +1346,11 @@ function sanitizeConfig(input) {
     curriculum: String(input.curriculum ?? defaultGameConfig.curriculum).trim().toLowerCase() || defaultGameConfig.curriculum,
     language: String(input.language ?? defaultGameConfig.language).trim().toLowerCase() || defaultGameConfig.language,
     subject: String(input.subject ?? defaultGameConfig.subject).trim().toLowerCase() || defaultGameConfig.subject,
-    gradeLevel: Number(input.gradeLevel ?? defaultGameConfig.gradeLevel),
+    gradeLevel: finiteNumber(input.gradeLevel ?? defaultGameConfig.gradeLevel, defaultGameConfig.gradeLevel),
     difficultyMode: String(input.difficultyMode ?? defaultGameConfig.difficultyMode).trim().toLowerCase() || defaultGameConfig.difficultyMode,
     questionSource: String(input.questionSource ?? defaultGameConfig.questionSource).trim().toLowerCase() || defaultGameConfig.questionSource,
-    questionsPerRound: Number(input.questionsPerRound ?? defaultGameConfig.questionsPerRound),
-    questionTimerSec: Number(input.questionTimerSec ?? defaultGameConfig.questionTimerSec)
+    questionsPerRound: finiteNumber(input.questionsPerRound ?? defaultGameConfig.questionsPerRound, defaultGameConfig.questionsPerRound),
+    questionTimerSec: finiteNumber(input.questionTimerSec ?? defaultGameConfig.questionTimerSec, defaultGameConfig.questionTimerSec)
   };
 
   nextConfig.curriculum = SUPPORTED_CURRICULUMS.includes(nextConfig.curriculum) ? nextConfig.curriculum : "international";
@@ -1108,15 +1500,199 @@ app.get("/admin/config", requireAdmin, (_req, res) => {
   res.json(gameConfig);
 });
 
-app.put("/admin/config", requireAdmin, (req, res) => {
+app.put("/admin/config", requireAdmin, async (req, res) => {
   const nextConfig = sanitizeConfig(req.body || {});
   Object.assign(gameConfig, nextConfig);
   const persisted = persistConfig(gameConfig);
+  await persistDbConfig(gameConfig);
   broadcastConfig();
   res.json({
     ok: true,
     persisted,
     config: gameConfig
+  });
+});
+
+function getReportLimit(value, fallback = 25) {
+  const parsed = Number(value || fallback);
+  return Math.min(100, Math.max(1, Math.round(parsed)));
+}
+
+function requireDatabase(res) {
+  if (!db) {
+    res.status(503).json({
+      error: "Postgres is not configured. Add DATABASE_URL to the gateway service."
+    });
+    return false;
+  }
+
+  return true;
+}
+
+app.get("/admin/reports/overview", requireAdmin, async (_req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  const [sessions, students, answers, progress] = await Promise.all([
+    dbQuery("SELECT COUNT(*)::int AS count FROM quiz_sessions"),
+    dbQuery("SELECT COUNT(*)::int AS count FROM students WHERE client_id NOT LIKE 'tv:%'"),
+    dbQuery("SELECT COUNT(*)::int AS total, COALESCE(SUM(CASE WHEN is_correct THEN 1 ELSE 0 END), 0)::int AS correct FROM student_answers"),
+    dbQuery(`
+      SELECT subject, grade_level, SUM(total_questions)::int AS total_questions,
+             SUM(correct_answers)::int AS correct_answers
+      FROM student_progress
+      GROUP BY subject, grade_level
+      ORDER BY grade_level, subject
+      LIMIT 12
+    `)
+  ]);
+
+  const totalAnswers = answers?.rows[0]?.total || 0;
+  const correctAnswers = answers?.rows[0]?.correct || 0;
+  res.json({
+    databaseConfigured: true,
+    sessions: sessions?.rows[0]?.count || 0,
+    students: students?.rows[0]?.count || 0,
+    answers: totalAnswers,
+    accuracy: totalAnswers ? Math.round((correctAnswers / totalAnswers) * 100) : 0,
+    progress: progress?.rows || []
+  });
+});
+
+app.get("/admin/reports/sessions", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  const limit = getReportLimit(req.query.limit);
+  const result = await dbQuery(
+    `SELECT s.id, s.room_code, s.status, s.curriculum, s.language, s.subject,
+            s.grade_level, s.difficulty_mode, s.question_source, s.created_at,
+            s.started_at, s.ended_at,
+            COUNT(DISTINCT p.student_id)::int AS participants,
+            COUNT(a.id)::int AS answers,
+            COALESCE(SUM(CASE WHEN a.is_correct THEN 1 ELSE 0 END), 0)::int AS correct_answers
+     FROM quiz_sessions s
+     LEFT JOIN session_participants p ON p.session_id = s.id AND p.is_host = FALSE
+     LEFT JOIN student_answers a ON a.session_id = s.id
+     GROUP BY s.id
+     ORDER BY s.created_at DESC
+     LIMIT $1`,
+    [limit]
+  );
+  res.json({ sessions: result?.rows || [] });
+});
+
+app.get("/admin/reports/students", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  const limit = getReportLimit(req.query.limit);
+  const result = await dbQuery(
+    `SELECT st.id, st.display_name, st.client_id, st.created_at, st.updated_at,
+            COALESCE(SUM(sp.total_sessions), 0)::int AS total_sessions,
+            COALESCE(SUM(sp.total_questions), 0)::int AS total_questions,
+            COALESCE(SUM(sp.correct_answers), 0)::int AS correct_answers,
+            MAX(sp.last_session_at) AS last_session_at
+     FROM students st
+     LEFT JOIN student_progress sp ON sp.student_id = st.id
+     WHERE st.client_id NOT LIKE 'tv:%'
+     GROUP BY st.id
+     ORDER BY last_session_at DESC NULLS LAST, st.updated_at DESC
+     LIMIT $1`,
+    [limit]
+  );
+  res.json({ students: result?.rows || [] });
+});
+
+app.get("/admin/reports/sessions/:sessionId", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  const sessionId = String(req.params.sessionId || "");
+  const [session, participants, questions, answers] = await Promise.all([
+    dbQuery("SELECT * FROM quiz_sessions WHERE id = $1", [sessionId]),
+    dbQuery(
+      `SELECT p.*, st.display_name AS student_name
+       FROM session_participants p
+       JOIN students st ON st.id = p.student_id
+       WHERE p.session_id = $1
+       ORDER BY p.score DESC, p.display_name`,
+      [sessionId]
+    ),
+    dbQuery(
+      `SELECT id, question_index, subject, grade_level, prompt, choices,
+              correct_choice, short_explanation, elaboration, source, model, created_at
+       FROM quiz_questions
+       WHERE session_id = $1
+       ORDER BY question_index`,
+      [sessionId]
+    ),
+    dbQuery(
+      `SELECT a.*, q.question_index, q.prompt, q.correct_choice, q.short_explanation, q.elaboration
+       FROM student_answers a
+       JOIN quiz_questions q ON q.id = a.question_id
+       WHERE a.session_id = $1
+       ORDER BY q.question_index, a.display_name`,
+      [sessionId]
+    )
+  ]);
+
+  if (!session?.rows[0]) {
+    res.status(404).json({ error: "Session not found" });
+    return;
+  }
+
+  res.json({
+    session: session.rows[0],
+    participants: participants?.rows || [],
+    questions: questions?.rows || [],
+    answers: answers?.rows || []
+  });
+});
+
+app.get("/admin/reports/students/:studentId", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  const studentId = String(req.params.studentId || "");
+  const [student, progress, answers] = await Promise.all([
+    dbQuery("SELECT id, display_name, client_id, created_at, updated_at FROM students WHERE id = $1", [studentId]),
+    dbQuery(
+      `SELECT curriculum, language, subject, grade_level, total_sessions,
+              total_questions, correct_answers, last_session_at, updated_at
+       FROM student_progress
+       WHERE student_id = $1
+       ORDER BY grade_level, subject, curriculum, language`,
+      [studentId]
+    ),
+    dbQuery(
+      `SELECT a.choice, a.is_correct, a.response_ms, a.answered_at,
+              s.room_code, s.curriculum, s.language, s.subject, s.grade_level,
+              q.question_index, q.prompt, q.correct_choice, q.short_explanation, q.elaboration
+       FROM student_answers a
+       JOIN quiz_sessions s ON s.id = a.session_id
+       JOIN quiz_questions q ON q.id = a.question_id
+       WHERE a.student_id = $1
+       ORDER BY a.created_at DESC
+       LIMIT 100`,
+      [studentId]
+    )
+  ]);
+
+  if (!student?.rows[0]) {
+    res.status(404).json({ error: "Student not found" });
+    return;
+  }
+
+  res.json({
+    student: student.rows[0],
+    progress: progress?.rows || [],
+    answers: answers?.rows || []
   });
 });
 
@@ -1166,6 +1742,7 @@ function cleanupRoom(roomCode, ws) {
         roomCode
       });
     }
+    void persistSessionStatus(room, "CLOSED");
     rooms.delete(roomCode);
     return;
   }
@@ -1174,6 +1751,7 @@ function cleanupRoom(roomCode, ws) {
     const player = room.players.get(ws.meta.playerId);
     if (player && player.ws === ws) {
       player.ws = null;
+      void persistParticipant(room, player);
       broadcastRoomState(roomCode);
     }
   }
@@ -1287,11 +1865,15 @@ Requirements:
 }
 
 async function generateQuestion(room) {
-  if (gameConfig.questionSource === "fallback_only") {
+  if (gameConfig.questionSource === "fallback_only" || !OPENAI_API_KEY) {
     const fallbackOnlyQuestion = getFallbackQuestion(room);
     room.history.push(normalizePrompt(fallbackOnlyQuestion.question));
     room.history = room.history.slice(-20);
-    return fallbackOnlyQuestion;
+    return {
+      ...fallbackOnlyQuestion,
+      source: "fallback",
+      model: null
+    };
   }
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -1305,7 +1887,11 @@ async function generateQuestion(room) {
 
       room.history.push(normalizedQuestion);
       room.history = room.history.slice(-20);
-      return question;
+      return {
+        ...question,
+        source: "openai",
+        model: OPENAI_MODEL
+      };
     } catch (error) {
       console.error("OpenAI quiz generation failed:", error);
 
@@ -1314,7 +1900,11 @@ async function generateQuestion(room) {
         const normalizedFallback = normalizePrompt(fallback.question);
         room.history.push(normalizedFallback);
         room.history = room.history.slice(-20);
-        return fallback;
+        return {
+          ...fallback,
+          source: "fallback",
+          model: null
+        };
       }
     }
   }
@@ -1338,6 +1928,8 @@ function revealQuestion(roomCode) {
     }
   }
   room.score = roundScore;
+  void persistRevealResults(room);
+  void persistSessionStatus(room, room.status);
 
   broadcastRoomState(roomCode);
 }
@@ -1354,14 +1946,21 @@ function submitPlayerAnswer(roomCode, playerId, choice) {
     return;
   }
 
-  player.currentAnswer = choice;
+  const normalizedChoice = String(choice || "").toUpperCase();
+  if (!["A", "B", "C", "D"].includes(normalizedChoice)) {
+    return;
+  }
+
+  player.currentAnswer = normalizedChoice;
   player.answeredQuestionIndex = room.questionIndex;
+  player.activeQuestionIndex = room.questionIndex;
+  player.answerSubmittedAt = new Date();
+  player.answerResponseMs = room.questionStartedAt ? Math.max(0, Date.now() - room.questionStartedAt) : null;
   room.answerCount += 1;
   broadcastRoomState(roomCode);
 
-  const connectedPlayers = [...room.players.values()].filter((entry) => entry.isHost
-    ? Boolean(room.tv && room.tv.readyState === WebSocket.OPEN)
-    : Boolean(entry.ws && entry.ws.readyState === WebSocket.OPEN));
+  const connectedPlayers = [...room.players.values()].filter((entry) =>
+    !entry.isHost && Boolean(entry.ws && entry.ws.readyState === WebSocket.OPEN));
   if (connectedPlayers.length > 0 && connectedPlayers.every((entry) => entry.answeredQuestionIndex === room.questionIndex)) {
     revealQuestion(roomCode);
   }
@@ -1376,14 +1975,19 @@ async function loadNextQuestion(roomCode) {
   if (room.questionIndex >= gameConfig.questionsPerRound) {
     room.status = "FINISHED";
     room.currentQuestion = null;
+    room.currentQuestionId = null;
+    room.questionStartedAt = null;
     room.deadlineAt = null;
     room.revealAnswer = false;
+    void persistSessionStatus(room, room.status);
     broadcastRoomState(roomCode);
     return;
   }
 
   room.status = "LOADING";
   room.currentQuestion = null;
+  room.currentQuestionId = null;
+  room.questionStartedAt = null;
   room.deadlineAt = null;
   room.revealAnswer = false;
   room.answerCount = 0;
@@ -1391,12 +1995,21 @@ async function loadNextQuestion(roomCode) {
   for (const player of room.players.values()) {
     player.currentAnswer = null;
     player.answeredQuestionIndex = null;
+    player.answerSubmittedAt = null;
+    player.answerResponseMs = null;
+    player.activeQuestionIndex = player.isHost
+      ? room.questionIndex
+      : (player.ws && player.ws.readyState === WebSocket.OPEN ? room.questionIndex : null);
   }
+  void persistSessionStatus(room, room.status);
   broadcastRoomState(roomCode);
 
   room.currentQuestion = await generateQuestion(room);
+  room.currentQuestionId = await persistQuestion(room);
+  room.questionStartedAt = Date.now();
   room.deadlineAt = Date.now() + gameConfig.questionTimerSec * 1000;
   room.status = "ANSWERING";
+  void persistSessionStatus(room, room.status);
   broadcastRoomState(roomCode);
 
   room.timerId = setTimeout(() => {
@@ -1415,6 +2028,8 @@ async function startGame(roomCode) {
   room.questionIndex = 0;
   room.score = 0;
   room.currentQuestion = null;
+  room.currentQuestionId = null;
+  room.questionStartedAt = null;
   room.revealAnswer = false;
   room.deadlineAt = null;
   room.answerCount = 0;
@@ -1423,7 +2038,11 @@ async function startGame(roomCode) {
     player.score = 0;
     player.currentAnswer = null;
     player.answeredQuestionIndex = null;
+    player.answerSubmittedAt = null;
+    player.answerResponseMs = null;
+    player.activeQuestionIndex = null;
   }
+  void persistSessionStatus(room, room.status);
   broadcastRoomState(roomCode);
 
   await loadNextQuestion(roomCode);
@@ -1509,15 +2128,19 @@ wss.on("connection", (ws) => {
         const roomCode = makeUniqueRoomCode();
         const hostPlayerId = createPlayerId();
         rooms.set(roomCode, {
+          roomCode,
           tv: ws,
           players: new Map(),
           clientIds: new Map(),
+          sessionId: null,
           hostPlayerId,
           playerSequence: 1,
           status: "LOBBY",
           questionIndex: 0,
           score: 0,
           currentQuestion: null,
+          currentQuestionId: null,
+          questionStartedAt: null,
           revealAnswer: false,
           deadlineAt: null,
           timerId: null,
@@ -1534,8 +2157,13 @@ wss.on("connection", (ws) => {
           isHost: true,
           score: 0,
           currentAnswer: null,
-          answeredQuestionIndex: null
+          answeredQuestionIndex: null,
+          answerSubmittedAt: null,
+          answerResponseMs: null,
+          activeQuestionIndex: null
         });
+        room.sessionId = await persistSessionCreated(room);
+        await persistParticipant(room, room.players.get(hostPlayerId));
 
         ws.meta.roomCode = roomCode;
         ws.meta.role = "tv";
@@ -1565,6 +2193,10 @@ wss.on("connection", (ws) => {
           const existingPlayer = room.players.get(ws.meta.playerId);
           if (existingPlayer) {
             existingPlayer.ws = ws;
+            if (room.status === "ANSWERING") {
+              existingPlayer.activeQuestionIndex = room.questionIndex;
+            }
+            await persistParticipant(room, existingPlayer);
             send(ws, {
               type: "joined_room",
               roomCode,
@@ -1587,9 +2219,13 @@ wss.on("connection", (ws) => {
               existingPlayer.name = requestedName.slice(0, 24);
             }
             existingPlayer.ws = ws;
+            if (room.status === "ANSWERING") {
+              existingPlayer.activeQuestionIndex = room.questionIndex;
+            }
             ws.meta.roomCode = roomCode;
             ws.meta.role = "player";
             ws.meta.playerId = existingPlayer.playerId;
+            await persistParticipant(room, existingPlayer);
 
             send(ws, {
               type: "joined_room",
@@ -1630,11 +2266,15 @@ wss.on("connection", (ws) => {
           ws,
           score: 0,
           currentAnswer: null,
-          answeredQuestionIndex: null
+          answeredQuestionIndex: null,
+          answerSubmittedAt: null,
+          answerResponseMs: null,
+          activeQuestionIndex: room.status === "ANSWERING" ? room.questionIndex : null
         });
         if (clientId && room.clientIds) {
           room.clientIds.set(clientId, playerId);
         }
+        await persistParticipant(room, room.players.get(playerId));
 
         ws.meta.roomCode = roomCode;
         ws.meta.role = "player";
@@ -1710,14 +2350,35 @@ process.on("unhandledRejection", (error) => {
   console.error("Unhandled rejection:", error);
 });
 
-server.listen(PORT, "0.0.0.0", () => {
+async function startServer() {
+  const databaseReady = await initDatabase();
+  const dbConfig = await loadDbConfig();
+  if (dbConfig) {
+    Object.assign(gameConfig, sanitizeConfig(dbConfig));
+  } else if (databaseReady) {
+    await persistDbConfig(gameConfig);
+  }
+
+  server.listen(PORT, "0.0.0.0", () => {
+    if (!ADMIN_TOKEN) {
+      console.warn("ADMIN_TOKEN is not configured. Admin endpoints will reject all requests.");
+    }
+
+    if (!OPENAI_API_KEY) {
+      console.warn("OPENAI_API_KEY is not configured. Gateway will use fallback questions only.");
+    }
+
+    if (!db) {
+      console.warn("DATABASE_URL is not configured. Student progress will be in-memory only.");
+    }
+
+    console.log(`Gateway listening on port ${PORT}`);
+  });
+}
+
+startServer().catch((error) => {
+  console.error("Gateway startup failed:", error);
   if (!ADMIN_TOKEN) {
     console.warn("ADMIN_TOKEN is not configured. Admin endpoints will reject all requests.");
   }
-
-  if (!OPENAI_API_KEY) {
-    console.warn("OPENAI_API_KEY is not configured. Gateway will use fallback questions only.");
-  }
-
-  console.log(`Gateway listening on port ${PORT}`);
 });

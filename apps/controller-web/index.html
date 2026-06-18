@@ -397,7 +397,11 @@
           row.classList.add("self");
         }
 
-        row.innerHTML = `<span>${player.name}</span><span>${player.score}</span>`;
+        const nameEl = document.createElement("span");
+        const scoreEl = document.createElement("span");
+        nameEl.textContent = player.name;
+        scoreEl.textContent = String(player.score);
+        row.append(nameEl, scoreEl);
         leaderboardEl.appendChild(row);
       }
     }
@@ -413,7 +417,9 @@
         const button = document.createElement("button");
         button.className = "answer-btn";
         button.disabled = latestState.status !== "ANSWERING" || Boolean(latestState.player?.answered);
-        button.innerHTML = `<b>${choice.id}</b>${choice.text}`;
+        const label = document.createElement("b");
+        label.textContent = choice.id;
+        button.append(label, document.createTextNode(choice.text));
 
         if (latestState.status === "REVIEWING") {
           if (choice.id === latestState.correctChoice) {

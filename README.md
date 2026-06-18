@@ -4,10 +4,10 @@ This repository contains the production apps for the LyHuor Learning TV quiz sys
 
 - `apps/tv-webos`: LG webOS TV quiz client
 - `apps/controller-web`: mobile phone answer controller
-- `apps/gateway`: Express + WebSocket room gateway and quiz engine
-- `apps/admin-web`: Railway-hosted admin panel for live quiz settings
+- `apps/gateway`: Express + WebSocket room gateway, quiz engine, and Postgres persistence API
+- `apps/admin-web`: Railway-hosted admin panel for live quiz settings and student progress reports
 
-The gateway is the system of record for live configuration. Admin changes are pushed into the gateway immediately and active TV/controller sessions receive the updated config without redeploying the web apps.
+The gateway is the system of record for live configuration and persisted quiz results. Admin changes are pushed into the gateway immediately and active TV/controller sessions receive the updated config without redeploying the web apps.
 
 ## Local Development
 
@@ -73,7 +73,9 @@ Required behavior:
 - exposes `GET /config`
 - exposes protected `GET /admin/config`
 - exposes protected `PUT /admin/config`
+- exposes protected `GET /admin/reports/*`
 - manages room creation and phone pairing through WebSockets
+- stores quiz sessions, students, questions, answers, scores, and progress in Postgres when `DATABASE_URL` is configured
 
 Recommended gateway environment variables:
 
@@ -81,6 +83,7 @@ Recommended gateway environment variables:
 ADMIN_TOKEN=change-this-secret
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-5.4-mini
+DATABASE_URL=postgresql://...
 BRAND_TITLE=LyHuor Learning
 BRAND_CAPTION=Grades 2-12 Quiz Challenge
 QUIZ_SUBJECT=math
@@ -93,9 +96,25 @@ APP_VERSION=1.0.0
 
 Notes:
 
+- Attach Railway Postgres to the gateway service so Railway injects `DATABASE_URL`.
+- The gateway creates the required tables automatically on startup.
+- Without `DATABASE_URL`, the live TV quiz still works, but student progress and reports are not persisted.
 - `CONFIG_PATH` lets the gateway persist admin changes across restarts.
+- When Postgres is configured, admin settings are also stored in the `admin_settings` table.
 - If `OPENAI_API_KEY` is missing or quota is exhausted, the gateway falls back to the built-in question bank.
 - If `ADMIN_TOKEN` is missing, admin endpoints reject requests.
+
+### Postgres Data Model
+
+The gateway creates these tables:
+
+- `admin_settings`: saved live configuration.
+- `students`: stable phone/student identity from the controller client ID.
+- `quiz_sessions`: one TV room session with curriculum, language, grade, subject, and timing.
+- `session_participants`: students who joined each TV quiz session.
+- `quiz_questions`: generated or fallback questions, choices, correct answer, OpenAI explanation, and model/source.
+- `student_answers`: each student's answer, correctness, response time, and explanation context.
+- `student_progress`: aggregate progress by student, curriculum, language, subject, and grade.
 
 ### Controller Web
 
@@ -122,7 +141,14 @@ Bind the admin service to your public domain, for example:
 
 - `https://admintv.cambobia.com`
 
-Use the same `ADMIN_TOKEN` configured on the gateway when logging into the admin page.
+Use the same `ADMIN_TOKEN` configured on the gateway in the admin page. The admin page can:
+
+- manage live quiz settings
+- show overview metrics
+- list recent quiz sessions
+- inspect a session's questions, answers, scores, and OpenAI explanations
+- list students and their aggregate progress
+- inspect a student's recent answers and elaborations
 
 ## TV Configuration
 
@@ -191,4 +217,5 @@ What requires repackaging the TV app:
 
 - OpenAI-generated questions require valid API billing and quota.
 - On quota errors, the gateway logs a `429 insufficient_quota` error and falls back to local questions.
+- Student progress reports require Railway Postgres attached to the gateway service.
 - The TV app must stay compatible with LG webOS browser limitations, so avoid modern syntax that may not parse on-device without validation.

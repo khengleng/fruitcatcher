@@ -1,65 +1,28 @@
-const express = require('express');
-const session = require('express-session');
-const passport = require('passport');
-const LocalStrategy = require('passport-local').Strategy;
-const bcrypt = require('bcryptjs');
+const path = require("path");
+const express = require("express");
+const rateLimit = require("express-rate-limit");
 
-// Express setup
 const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+const port = Number(process.env.PORT || 3002);
 
-// Session middleware
-app.use(session({
-  secret: process.env.SESSION_SECRET,
-  resave: false,
-  saveUninitialized: false
-}));
+app.set("trust proxy", 1);
 
-// Passport middleware
-passport.use(new LocalStrategy(
-  async function(username, password, done) {
-    if (username === process.env.ADMIN_USERNAME && await bcrypt.compare(password, process.env.ADMIN_PASSWORD)) {
-      return done(null, { id: username });
-    } else {
-      return done(null, false);
-    }
-  }
-));
-
-passport.serializeUser(function(user, done) {
-  done(null, user.id);
+const pageLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 300,
+  standardHeaders: "draft-8",
+  legacyHeaders: false
 });
 
-passport.deserializeUser(function(id, done) {
-  done(null, { id: id });
-});
+app.use(pageLimiter);
 
-app.use(passport.initialize());
-app.use(passport.session());
-
-// Admin routes
-const requireAdmin = function(req, res, next) {
-  if (!req.isAuthenticated()) {
-    return res.status(401).json({ message: 'Not authorized' });
-  }
-  next();
-};
-
-app.post('/login', passport.authenticate('local', { successRedirect: '/admin', failureRedirect: '/login', failureMessage: true }));
-
-app.get('/admin', requireAdmin, (req, res) => {
-  res.send('Admin dashboard');
-});
-
-// Existing routes
 function inferGatewayHttpUrl(req) {
   if (process.env.GATEWAY_HTTP_URL) {
     return process.env.GATEWAY_HTTP_URL;
   }
 
-  const host = req.get("host");
-  const protocol = req.protocol || "http";
+  const host = req.get("host") || "localhost:3000";
+  const protocol = process.env.PUBLIC_PROTOCOL || req.protocol || "http";
   return `${protocol}://${host}`;
 }
 

@@ -6,14 +6,17 @@
   <title>LyHuor Learning Admin</title>
   <style>
     :root {
-      --bg: #f6f3ea;
-      --panel: #fffaf0;
-      --ink: #1b1a17;
-      --muted: #6b665d;
-      --line: #d9cfbf;
-      --accent: #d9562b;
-      --accent-dark: #9d3517;
-      --success: #1f8f56;
+      --bg: #f4f1ea;
+      --panel: #fffdf8;
+      --ink: #1f2522;
+      --muted: #687069;
+      --line: #d9d4c8;
+      --accent: #be4b2a;
+      --accent-dark: #85321e;
+      --good: #1f7a4d;
+      --warn: #a66a00;
+      --bad: #a33d3d;
+      --table: #fbf8f0;
     }
 
     * {
@@ -22,228 +25,379 @@
 
     body {
       margin: 0;
-      font-family: Georgia, "Times New Roman", serif;
       color: var(--ink);
-      background:
-        linear-gradient(180deg, rgba(217, 86, 43, 0.08), transparent 30%),
-        linear-gradient(135deg, #f8f3ea 0%, #efe4d2 100%);
+      background: linear-gradient(180deg, #f8f5ef 0%, #ece5d9 100%);
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
     main {
-      max-width: 960px;
+      width: min(1180px, 100%);
       margin: 0 auto;
-      padding: 32px 20px 64px;
+      padding: 28px 18px 54px;
     }
 
-    .hero {
-      margin-bottom: 24px;
+    header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
     }
 
-    .eyebrow {
-      margin: 0 0 10px;
-      color: var(--accent-dark);
-      font-size: 13px;
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
+    h1, h2, h3, p {
+      margin: 0;
     }
 
     h1 {
-      margin: 0;
-      font-size: clamp(34px, 6vw, 58px);
-      line-height: 0.95;
+      font-size: clamp(30px, 4vw, 48px);
+      line-height: 1;
     }
 
-    .subtitle {
-      margin: 14px 0 0;
-      max-width: 640px;
-      font-size: 18px;
-      line-height: 1.55;
+    h2 {
+      font-size: 22px;
+    }
+
+    h3 {
+      font-size: 16px;
+      margin-bottom: 10px;
+    }
+
+    .muted {
       color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .shell {
+      display: grid;
+      gap: 16px;
     }
 
     .panel {
-      background: rgba(255, 250, 240, 0.96);
+      background: var(--panel);
       border: 1px solid var(--line);
-      border-radius: 24px;
-      padding: 24px;
-      box-shadow: 0 18px 48px rgba(34, 20, 10, 0.08);
-      margin-bottom: 20px;
+      border-radius: 8px;
+      padding: 18px;
+      box-shadow: 0 12px 30px rgba(39, 30, 18, 0.07);
     }
 
-    .grid {
+    .auth-grid,
+    .settings-grid,
+    .metrics-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 18px;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 14px;
     }
 
     label {
       display: grid;
-      gap: 8px;
-      font-size: 15px;
+      gap: 7px;
       color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
     }
 
     input,
     select {
+      min-height: 44px;
       width: 100%;
-      padding: 14px 16px;
       border: 1px solid var(--line);
-      border-radius: 14px;
+      border-radius: 6px;
+      padding: 10px 12px;
       background: white;
-      font: inherit;
       color: var(--ink);
-    }
-
-    .actions {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin-top: 20px;
+      font: inherit;
     }
 
     button {
+      min-height: 42px;
       border: 0;
-      border-radius: 999px;
-      padding: 14px 20px;
-      font: inherit;
-      font-weight: bold;
-      cursor: pointer;
+      border-radius: 6px;
+      padding: 10px 14px;
       background: var(--accent);
       color: white;
+      font: inherit;
+      font-weight: 800;
+      cursor: pointer;
     }
 
     button.secondary {
-      background: #ddd1bc;
+      background: #ded7c9;
       color: var(--ink);
     }
 
-    .status {
-      min-height: 24px;
-      margin-top: 16px;
-      color: var(--muted);
-      font-size: 15px;
+    button.tab {
+      background: transparent;
+      color: var(--ink);
+      border: 1px solid var(--line);
     }
 
-    .row {
+    button.tab.active {
+      background: var(--ink);
+      color: white;
+      border-color: var(--ink);
+    }
+
+    .actions,
+    .tabs {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+
+    .status {
+      min-height: 22px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--table);
+      padding: 14px;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 6px;
+      font-size: 28px;
+      line-height: 1;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: white;
+    }
+
+    table {
+      width: 100%;
+      min-width: 760px;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--table);
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .detail {
       display: grid;
-      gap: 18px;
-      grid-template-columns: 1.2fr 1fr;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .detail-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: white;
+      padding: 14px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      border-radius: 999px;
+      padding: 3px 9px;
+      background: #eee8dc;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .ok {
+      color: var(--good);
+    }
+
+    .bad {
+      color: var(--bad);
+    }
+
+    [hidden] {
+      display: none !important;
     }
 
     @media (max-width: 760px) {
-      .row {
-        grid-template-columns: 1fr;
+      header {
+        align-items: start;
+        flex-direction: column;
+      }
+
+      main {
+        padding: 20px 12px 42px;
       }
     }
   </style>
 </head>
 <body>
   <main>
-    <section class="hero">
-      <p class="eyebrow">Railway Admin</p>
-      <h1>LyHuor Learning Control Room</h1>
-      <p class="subtitle">Manage live curriculum, language, grade, and difficulty for Grade 2 through Grade 12. Save once, and the TV plus phone controller switch modes from the gateway without a new deployment.</p>
-    </section>
+    <header>
+      <div>
+        <h1>LyHuor Learning Admin</h1>
+        <p class="muted">Manage live TV quiz settings and review persisted student progress from Postgres.</p>
+      </div>
+      <span id="dbBadge" class="pill">Database: unknown</span>
+    </header>
 
-    <section class="panel">
-      <div class="row">
-        <label>
-          Admin token
-          <input id="adminToken" type="password" placeholder="Enter ADMIN_TOKEN">
-        </label>
-        <label>
-          Gateway URL
-          <input id="gatewayUrl" type="text" readonly>
-        </label>
-      </div>
-      <div class="actions">
-        <button id="loadButton" class="secondary">Load current settings</button>
-      </div>
-      <div id="authStatus" class="status"></div>
-    </section>
+    <div class="shell">
+      <section class="panel">
+        <div class="auth-grid">
+          <label>
+            Admin token
+            <input id="adminToken" type="password" placeholder="Gateway ADMIN_TOKEN">
+          </label>
+          <label>
+            Gateway URL
+            <input id="gatewayUrl" type="text" readonly>
+          </label>
+        </div>
+        <div class="actions">
+          <button id="loadButton" class="secondary">Load Settings</button>
+          <button id="refreshReportsButton" class="secondary">Refresh Reports</button>
+        </div>
+        <div id="authStatus" class="status"></div>
+      </section>
 
-    <section class="panel">
-      <div class="grid">
-        <label>
-          Brand title
-          <input id="brandTitle" type="text">
-        </label>
-        <label>
-          Brand caption
-          <input id="brandCaption" type="text">
-        </label>
-        <label>
-          Curriculum
-          <select id="curriculum">
-            <option value="international">International</option>
-            <option value="cambodia_moeys">Cambodia MoEYS</option>
-          </select>
-        </label>
-        <label>
-          Language
-          <select id="language">
-            <option value="english">English</option>
-            <option value="khmer">Khmer</option>
-            <option value="bilingual">Bilingual Khmer-English</option>
-          </select>
-        </label>
-        <label>
-          Subject
-          <select id="subject">
-            <option value="math">Math</option>
-            <option value="general_science">General Science</option>
-            <option value="biology">Biology</option>
-            <option value="chemistry">Chemistry</option>
-            <option value="physics">Physics</option>
-            <option value="english">English</option>
-          </select>
-        </label>
-        <label>
-          Grade level
-          <select id="gradeLevel">
-            <option value="2">Grade 2</option>
-            <option value="3">Grade 3</option>
-            <option value="4">Grade 4</option>
-            <option value="5">Grade 5</option>
-            <option value="6">Grade 6</option>
-            <option value="7">Grade 7</option>
-            <option value="8">Grade 8</option>
-            <option value="9">Grade 9</option>
-            <option value="10">Grade 10</option>
-            <option value="11">Grade 11</option>
-            <option value="12">Grade 12</option>
-          </select>
-        </label>
-        <label>
-          Difficulty mode
-          <select id="difficultyMode">
-            <option value="easy">Easy</option>
-            <option value="standard">Standard</option>
-            <option value="challenge">Challenge</option>
-          </select>
-        </label>
-        <label>
-          Question source
-          <select id="questionSource">
-            <option value="openai_fallback">OpenAI + fallback</option>
-            <option value="fallback_only">Fallback only</option>
-          </select>
-        </label>
-        <label>
-          Questions per round
-          <input id="questionsPerRound" type="number" min="3" max="20">
-        </label>
-        <label>
-          Seconds per question
-          <input id="questionTimerSec" type="number" min="10" max="90">
-        </label>
-      </div>
-      <div class="actions">
-        <button id="saveButton">Save live settings</button>
-        <button id="resetButton" class="secondary">Reload from gateway</button>
-      </div>
-      <div id="saveStatus" class="status"></div>
-    </section>
+      <nav class="tabs">
+        <button class="tab active" data-tab="settings">Settings</button>
+        <button class="tab" data-tab="sessions">Quiz Sessions</button>
+        <button class="tab" data-tab="students">Students</button>
+      </nav>
+
+      <section id="settingsPanel" class="panel">
+        <h2>Live Quiz Settings</h2>
+        <p class="muted">These settings affect new questions and are broadcast to active TV and phone sessions.</p>
+        <div class="settings-grid" style="margin-top:14px;">
+          <label>Brand title<input id="brandTitle" type="text"></label>
+          <label>Brand caption<input id="brandCaption" type="text"></label>
+          <label>
+            Curriculum
+            <select id="curriculum">
+              <option value="international">International</option>
+              <option value="cambodia_moeys">Cambodia MoEYS</option>
+            </select>
+          </label>
+          <label>
+            Language
+            <select id="language">
+              <option value="english">English</option>
+              <option value="khmer">Khmer</option>
+              <option value="bilingual">Bilingual Khmer-English</option>
+            </select>
+          </label>
+          <label>
+            Subject
+            <select id="subject">
+              <option value="math">Math</option>
+              <option value="general_science">General Science</option>
+              <option value="biology">Biology</option>
+              <option value="chemistry">Chemistry</option>
+              <option value="physics">Physics</option>
+              <option value="english">English</option>
+            </select>
+          </label>
+          <label>
+            Grade level
+            <select id="gradeLevel">
+              <option value="2">Grade 2</option>
+              <option value="3">Grade 3</option>
+              <option value="4">Grade 4</option>
+              <option value="5">Grade 5</option>
+              <option value="6">Grade 6</option>
+              <option value="7">Grade 7</option>
+              <option value="8">Grade 8</option>
+              <option value="9">Grade 9</option>
+              <option value="10">Grade 10</option>
+              <option value="11">Grade 11</option>
+              <option value="12">Grade 12</option>
+            </select>
+          </label>
+          <label>
+            Difficulty mode
+            <select id="difficultyMode">
+              <option value="easy">Easy</option>
+              <option value="standard">Standard</option>
+              <option value="challenge">Challenge</option>
+            </select>
+          </label>
+          <label>
+            Question source
+            <select id="questionSource">
+              <option value="openai_fallback">OpenAI + fallback</option>
+              <option value="fallback_only">Fallback only</option>
+            </select>
+          </label>
+          <label>Questions per round<input id="questionsPerRound" type="number" min="3" max="20"></label>
+          <label>Seconds per question<input id="questionTimerSec" type="number" min="10" max="90"></label>
+        </div>
+        <div class="actions">
+          <button id="saveButton">Save Live Settings</button>
+          <button id="resetButton" class="secondary">Reload From Gateway</button>
+        </div>
+        <div id="saveStatus" class="status"></div>
+      </section>
+
+      <section id="sessionsPanel" class="panel" hidden>
+        <h2>Quiz Sessions</h2>
+        <div id="overview" class="metrics-grid" style="margin-top:14px;"></div>
+        <h3 style="margin-top:18px;">Recent Sessions</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Room</th>
+                <th>Mode</th>
+                <th>Participants</th>
+                <th>Accuracy</th>
+                <th>Created</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="sessionsBody"></tbody>
+          </table>
+        </div>
+        <div id="sessionDetail" class="detail"></div>
+      </section>
+
+      <section id="studentsPanel" class="panel" hidden>
+        <h2>Students</h2>
+        <div class="table-wrap" style="margin-top:14px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Sessions</th>
+                <th>Questions</th>
+                <th>Accuracy</th>
+                <th>Last Seen</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="studentsBody"></tbody>
+          </table>
+        </div>
+        <div id="studentDetail" class="detail"></div>
+      </section>
+    </div>
   </main>
 
   <script src="./config.js"></script>
@@ -268,27 +422,72 @@
 
     const authStatus = document.getElementById("authStatus");
     const saveStatus = document.getElementById("saveStatus");
+    const dbBadge = document.getElementById("dbBadge");
+    const overviewEl = document.getElementById("overview");
+    const sessionsBody = document.getElementById("sessionsBody");
+    const studentsBody = document.getElementById("studentsBody");
+    const sessionDetail = document.getElementById("sessionDetail");
+    const studentDetail = document.getElementById("studentDetail");
 
     fields.gatewayUrl.value = gatewayUrl;
     fields.adminToken.value = localStorage.getItem("fruitcatcher_admin_token") || "";
 
     function setStatus(el, text, color) {
       el.textContent = text;
-      el.style.color = color || "#6b665d";
+      el.style.color = color || "#687069";
     }
 
     function getHeaders() {
       const token = fields.adminToken.value.trim();
       localStorage.setItem("fruitcatcher_admin_token", token);
-
       if (!token) {
         throw new Error("Admin token is required.");
       }
-
       return {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${token}`
       };
+    }
+
+    async function api(path, options = {}) {
+      const response = await fetch(`${gatewayUrl}${path}`, {
+        ...options,
+        headers: {
+          ...getHeaders(),
+          ...(options.headers || {})
+        }
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error || body.message || `Request failed: ${response.status}`);
+      }
+      return body;
+    }
+
+    function formatDate(value) {
+      if (!value) return "-";
+      return new Date(value).toLocaleString();
+    }
+
+    function accuracy(correct, total) {
+      return total ? `${Math.round((Number(correct || 0) / Number(total)) * 100)}%` : "0%";
+    }
+
+    function appendCell(row, text) {
+      const cell = document.createElement("td");
+      cell.textContent = text == null ? "" : String(text);
+      row.appendChild(cell);
+      return cell;
+    }
+
+    function appendButtonCell(row, label, onClick) {
+      const cell = document.createElement("td");
+      const button = document.createElement("button");
+      button.className = "secondary";
+      button.textContent = label;
+      button.addEventListener("click", onClick);
+      cell.appendChild(button);
+      row.appendChild(cell);
     }
 
     function fillForm(config) {
@@ -305,29 +504,15 @@
     }
 
     async function loadConfig() {
-      setStatus(authStatus, "Loading settings...", "#9d3517");
-
-      const response = await fetch(`${gatewayUrl}/admin/config`, {
-        headers: getHeaders()
-      });
-
-      if (!response.ok) {
-        const errorBody = await response.json().catch(() => ({}));
-        const message = response.status === 401
-          ? "Unauthorized. Check the admin token."
-          : errorBody.error || `Load failed: ${response.status}`;
-        throw new Error(message);
-      }
-
-      const config = await response.json();
+      setStatus(authStatus, "Loading settings...", "#85321e");
+      const config = await api("/admin/config");
       fillForm(config);
-      setStatus(authStatus, "Settings loaded.", "#1f8f56");
-      setStatus(saveStatus, "", "#6b665d");
+      setStatus(authStatus, "Settings loaded.", "#1f7a4d");
+      setStatus(saveStatus, "");
     }
 
     async function saveConfig() {
-      setStatus(saveStatus, "Saving live settings...", "#9d3517");
-
+      setStatus(saveStatus, "Saving live settings...", "#85321e");
       const payload = {
         brandTitle: fields.brandTitle.value,
         brandCaption: fields.brandCaption.value,
@@ -340,31 +525,179 @@
         questionsPerRound: Number(fields.questionsPerRound.value),
         questionTimerSec: Number(fields.questionTimerSec.value)
       };
-
-      const response = await fetch(`${gatewayUrl}/admin/config`, {
+      const result = await api("/admin/config", {
         method: "PUT",
-        headers: getHeaders(),
         body: JSON.stringify(payload)
       });
+      fillForm(result.config);
+      setStatus(saveStatus, result.persisted ? "Live settings saved to gateway and database." : "Live settings saved to gateway.", "#1f7a4d");
+    }
 
-      if (!response.ok) {
-        const errorBody = await response.json().catch(() => ({}));
-        const message = response.status === 401
-          ? "Unauthorized. Check the admin token."
-          : errorBody.error || `Save failed: ${response.status}`;
-        throw new Error(message);
+    function renderOverview(data) {
+      overviewEl.innerHTML = "";
+      dbBadge.textContent = "Database: connected";
+      dbBadge.className = "pill ok";
+      [
+        ["Sessions", data.sessions],
+        ["Students", data.students],
+        ["Answers", data.answers],
+        ["Accuracy", `${data.accuracy || 0}%`]
+      ].forEach(([label, value]) => {
+        const card = document.createElement("div");
+        card.className = "metric";
+        const title = document.createElement("span");
+        title.textContent = label;
+        const number = document.createElement("strong");
+        number.textContent = String(value || 0);
+        card.append(title, number);
+        overviewEl.appendChild(card);
+      });
+    }
+
+    async function loadSessions() {
+      const [overview, sessions] = await Promise.all([
+        api("/admin/reports/overview"),
+        api("/admin/reports/sessions?limit=30")
+      ]);
+      renderOverview(overview);
+      sessionsBody.innerHTML = "";
+      for (const item of sessions.sessions || []) {
+        const row = document.createElement("tr");
+        appendCell(row, item.room_code);
+        appendCell(row, `${item.curriculum} / ${item.language} / ${item.subject} / G${item.grade_level}`);
+        appendCell(row, item.participants);
+        appendCell(row, accuracy(item.correct_answers, item.answers));
+        appendCell(row, formatDate(item.created_at));
+        appendButtonCell(row, "Open", () => loadSessionDetail(item.id));
+        sessionsBody.appendChild(row);
+      }
+    }
+
+    async function loadStudents() {
+      const data = await api("/admin/reports/students?limit=50");
+      studentsBody.innerHTML = "";
+      for (const student of data.students || []) {
+        const row = document.createElement("tr");
+        appendCell(row, student.display_name);
+        appendCell(row, student.total_sessions);
+        appendCell(row, student.total_questions);
+        appendCell(row, accuracy(student.correct_answers, student.total_questions));
+        appendCell(row, formatDate(student.last_session_at || student.updated_at));
+        appendButtonCell(row, "Open", () => loadStudentDetail(student.id));
+        studentsBody.appendChild(row);
+      }
+    }
+
+    async function loadSessionDetail(sessionId) {
+      const data = await api(`/admin/reports/sessions/${encodeURIComponent(sessionId)}`);
+      sessionDetail.innerHTML = "";
+
+      const summary = document.createElement("div");
+      summary.className = "detail-card";
+      const title = document.createElement("h3");
+      title.textContent = `Room ${data.session.room_code}`;
+      const meta = document.createElement("p");
+      meta.className = "muted";
+      meta.textContent = `${data.session.curriculum} | ${data.session.language} | ${data.session.subject} | Grade ${data.session.grade_level}`;
+      summary.append(title, meta);
+      sessionDetail.appendChild(summary);
+
+      for (const question of data.questions || []) {
+        const card = document.createElement("div");
+        card.className = "detail-card";
+        const titleEl = document.createElement("h3");
+        titleEl.textContent = `Question ${question.question_index + 1}: ${question.prompt}`;
+        const explain = document.createElement("p");
+        explain.className = "muted";
+        explain.textContent = `Correct: ${question.correct_choice}. ${question.short_explanation} ${question.elaboration}`;
+        card.append(titleEl, explain);
+
+        const related = (data.answers || []).filter((answer) => answer.question_index === question.question_index);
+        for (const answer of related) {
+          const line = document.createElement("p");
+          line.className = answer.is_correct ? "ok" : "bad";
+          line.textContent = `${answer.display_name}: ${answer.choice || "No answer"} (${answer.is_correct ? "correct" : "wrong"})`;
+          card.appendChild(line);
+        }
+        sessionDetail.appendChild(card);
+      }
+    }
+
+    async function loadStudentDetail(studentId) {
+      const data = await api(`/admin/reports/students/${encodeURIComponent(studentId)}`);
+      studentDetail.innerHTML = "";
+
+      const summary = document.createElement("div");
+      summary.className = "detail-card";
+      const title = document.createElement("h3");
+      title.textContent = data.student.display_name;
+      const meta = document.createElement("p");
+      meta.className = "muted";
+      meta.textContent = `Joined ${formatDate(data.student.created_at)} | Last updated ${formatDate(data.student.updated_at)}`;
+      summary.append(title, meta);
+      studentDetail.appendChild(summary);
+
+      for (const progress of data.progress || []) {
+        const card = document.createElement("div");
+        card.className = "detail-card";
+        const titleEl = document.createElement("h3");
+        titleEl.textContent = `${progress.curriculum} | ${progress.language} | ${progress.subject} | Grade ${progress.grade_level}`;
+        const metaEl = document.createElement("p");
+        metaEl.className = "muted";
+        metaEl.textContent = `${progress.total_sessions} sessions | ${progress.total_questions} questions | ${accuracy(progress.correct_answers, progress.total_questions)} accuracy`;
+        card.append(titleEl, metaEl);
+        studentDetail.appendChild(card);
       }
 
-      const result = await response.json();
-      fillForm(result.config);
-      setStatus(saveStatus, "Live settings saved.", "#1f8f56");
+      for (const answer of (data.answers || []).slice(0, 20)) {
+        const card = document.createElement("div");
+        card.className = "detail-card";
+        const titleEl = document.createElement("h3");
+        titleEl.textContent = `${answer.room_code} Q${answer.question_index + 1}: ${answer.prompt}`;
+        const metaEl = document.createElement("p");
+        metaEl.className = answer.is_correct ? "ok" : "bad";
+        metaEl.textContent = `Answer: ${answer.choice || "No answer"} | Correct: ${answer.correct_choice}`;
+        const explanation = document.createElement("p");
+        explanation.className = "muted";
+        explanation.textContent = `${answer.short_explanation} ${answer.elaboration}`;
+        card.append(titleEl, metaEl, explanation);
+        studentDetail.appendChild(card);
+      }
     }
+
+    async function refreshReports() {
+      setStatus(authStatus, "Loading reports...", "#85321e");
+      try {
+        await Promise.all([loadSessions(), loadStudents()]);
+        setStatus(authStatus, "Reports loaded.", "#1f7a4d");
+      } catch (error) {
+        dbBadge.textContent = "Database: unavailable";
+        dbBadge.className = "pill bad";
+        setStatus(authStatus, error.message, "#a33d3d");
+      }
+    }
+
+    function showTab(tabName) {
+      document.querySelectorAll("button.tab").forEach((button) => {
+        button.classList.toggle("active", button.dataset.tab === tabName);
+      });
+      document.getElementById("settingsPanel").hidden = tabName !== "settings";
+      document.getElementById("sessionsPanel").hidden = tabName !== "sessions";
+      document.getElementById("studentsPanel").hidden = tabName !== "students";
+      if (tabName !== "settings") {
+        refreshReports();
+      }
+    }
+
+    document.querySelectorAll("button.tab").forEach((button) => {
+      button.addEventListener("click", () => showTab(button.dataset.tab));
+    });
 
     document.getElementById("loadButton").addEventListener("click", async () => {
       try {
         await loadConfig();
       } catch (error) {
-        setStatus(authStatus, error.message, "#9d3517");
+        setStatus(authStatus, error.message, "#a33d3d");
       }
     });
 
@@ -372,7 +705,7 @@
       try {
         await loadConfig();
       } catch (error) {
-        setStatus(saveStatus, error.message, "#9d3517");
+        setStatus(saveStatus, error.message, "#a33d3d");
       }
     });
 
@@ -380,9 +713,11 @@
       try {
         await saveConfig();
       } catch (error) {
-        setStatus(saveStatus, error.message, "#9d3517");
+        setStatus(saveStatus, error.message, "#a33d3d");
       }
     });
+
+    document.getElementById("refreshReportsButton").addEventListener("click", refreshReports);
   </script>
 </body>
 </html>

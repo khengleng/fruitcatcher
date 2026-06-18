@@ -519,7 +519,14 @@
           el.style.borderColor = "rgba(255, 211, 79, 0.65)";
         }
 
-        el.innerHTML = `<div class="choice-label">${choice.id}</div><div class="choice-text">${choice.text}</div>`;
+        const label = document.createElement("div");
+        label.className = "choice-label";
+        label.innerText = choice.id;
+        const text = document.createElement("div");
+        text.className = "choice-text";
+        text.innerText = choice.text;
+        el.appendChild(label);
+        el.appendChild(text);
         ui.answers.appendChild(el);
       }
     }
@@ -541,10 +548,18 @@
         const answerBadge = state.status === "REVIEWING" && player.lastAnswer
           ? ` (${player.lastAnswer})`
           : "";
-        row.innerHTML =
-          `<span class="participant-rank">${index + 1}.</span>` +
-          `<span class="participant-name">${player.name}${answerBadge}</span>` +
-          `<span class="participant-score">${player.score}</span>`;
+        const rank = document.createElement("span");
+        rank.className = "participant-rank";
+        rank.innerText = `${index + 1}.`;
+        const name = document.createElement("span");
+        name.className = "participant-name";
+        name.innerText = `${player.name}${answerBadge}`;
+        const score = document.createElement("span");
+        score.className = "participant-score";
+        score.innerText = String(player.score);
+        row.appendChild(rank);
+        row.appendChild(name);
+        row.appendChild(score);
         ui.leaderboard.appendChild(row);
       });
     }
