@@ -19,6 +19,9 @@ const ADMIN_ALLOWED_ORIGINS = (process.env.ADMIN_ALLOWED_ORIGINS || "https://adm
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+const ADMIN_RATE_LIMIT_WINDOW_MS = Number(process.env.ADMIN_RATE_LIMIT_WINDOW_MS || 60 * 1000);
+const ADMIN_RATE_LIMIT_MAX = Number(process.env.ADMIN_RATE_LIMIT_MAX || 120);
+const ADMIN_LOGIN_RATE_LIMIT_MAX = Number(process.env.ADMIN_LOGIN_RATE_LIMIT_MAX || 10);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5.4-mini";
 const DATABASE_URL = process.env.DATABASE_URL || "";
@@ -26,6 +29,7 @@ const CONFIG_PATH = process.env.CONFIG_PATH || path.join(__dirname, "data", "gam
 const APP_VERSION = process.env.APP_VERSION || "1.0.0";
 const startedAt = new Date().toISOString();
 const rooms = new Map();
+const adminRateBuckets = new Map();
 const db = DATABASE_URL
   ? new Pool({
       connectionString: DATABASE_URL,
@@ -971,6 +975,48 @@ function verifyAdminSession(token) {
   }
 }
 
+function makeHttpError(statusCode, message) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+function requireValid(condition, message) {
+  if (!condition) {
+    throw makeHttpError(400, message);
+  }
+}
+
+function rateLimitAdmin(req, res, next) {
+  if (!req.path.startsWith("/admin")) {
+    next();
+    return;
+  }
+
+  const key = `${req.ip || req.socket?.remoteAddress || "unknown"}:${req.path === "/admin/login" ? "login" : "admin"}`;
+  const now = Date.now();
+  const max = req.path === "/admin/login" ? ADMIN_LOGIN_RATE_LIMIT_MAX : ADMIN_RATE_LIMIT_MAX;
+  const bucket = adminRateBuckets.get(key) || { count: 0, resetAt: now + ADMIN_RATE_LIMIT_WINDOW_MS };
+
+  if (now > bucket.resetAt) {
+    bucket.count = 0;
+    bucket.resetAt = now + ADMIN_RATE_LIMIT_WINDOW_MS;
+  }
+
+  bucket.count += 1;
+  adminRateBuckets.set(key, bucket);
+  res.setHeader("X-RateLimit-Limit", String(max));
+  res.setHeader("X-RateLimit-Remaining", String(Math.max(0, max - bucket.count)));
+  res.setHeader("X-RateLimit-Reset", String(Math.ceil(bucket.resetAt / 1000)));
+
+  if (bucket.count > max) {
+    res.status(429).json({ error: "Too many admin requests. Please wait and try again." });
+    return;
+  }
+
+  next();
+}
+
 async function dbQuery(text, params = []) {
   if (!db) {
     return null;
@@ -1543,6 +1589,7 @@ app.use((req, res, next) => {
 
   next();
 });
+app.use(rateLimitAdmin);
 
 app.get("/health", (_req, res) => {
   res.json({
@@ -1688,6 +1735,74 @@ function sanitizeConfig(input) {
   nextConfig.questionTimerSec = Math.min(90, Math.max(10, Math.round(nextConfig.questionTimerSec)));
 
   return nextConfig;
+}
+
+function normalizeAdminText(value, maxLength, fallback = "") {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return (text || fallback).slice(0, maxLength);
+}
+
+function normalizeAdminId(value, label = "id") {
+  const id = String(value || "").trim();
+  requireValid(/^[a-z0-9:_-]{1,80}$/i.test(id), `Invalid ${label}`);
+  return id;
+}
+
+function validateQuestionPayload(input, options = {}) {
+  const payload = input || {};
+  const curriculum = String(payload.curriculum ?? gameConfig.curriculum).trim().toLowerCase();
+  const language = String(payload.language ?? gameConfig.language).trim().toLowerCase();
+  const subject = String(payload.subject ?? gameConfig.subject).trim().toLowerCase();
+  const gradeLevel = Math.round(Number(payload.grade_level ?? payload.gradeLevel ?? gameConfig.gradeLevel));
+  const difficultyMode = String(payload.difficulty_mode ?? payload.difficultyMode ?? gameConfig.difficultyMode).trim().toLowerCase();
+  const prompt = normalizeAdminText(payload.prompt, 600);
+  const choices = Array.isArray(payload.choices) ? payload.choices : [];
+  const correctChoice = String(payload.correct_choice ?? payload.correctChoice ?? "").trim().toUpperCase();
+  const shortExplanation = normalizeAdminText(payload.short_explanation ?? payload.shortExplanation, 300);
+  const elaboration = normalizeAdminText(payload.elaboration, 1200);
+
+  requireValid(SUPPORTED_CURRICULUMS.includes(curriculum), "Unsupported curriculum");
+  requireValid(SUPPORTED_LANGUAGES.includes(language), "Unsupported language");
+  requireValid(SUPPORTED_SUBJECTS.includes(subject), "Unsupported subject");
+  requireValid(gradeLevel >= MIN_GRADE_LEVEL && gradeLevel <= MAX_GRADE_LEVEL, `Grade level must be ${MIN_GRADE_LEVEL}-${MAX_GRADE_LEVEL}`);
+  requireValid(SUPPORTED_DIFFICULTY_MODES.includes(difficultyMode), "Unsupported difficulty mode");
+  requireValid(prompt.length >= 5, "Question prompt is required");
+  requireValid(choices.length === 4, "Exactly four choices are required");
+  requireValid(["A", "B", "C", "D"].includes(correctChoice), "Correct choice must be A, B, C, or D");
+  requireValid(shortExplanation.length >= 3, "Short explanation is required");
+  requireValid(elaboration.length >= 3, "Elaboration is required");
+
+  const normalizedChoices = ["A", "B", "C", "D"].map((id) => {
+    const choice = choices.find((item) => String(item?.id || "").toUpperCase() === id);
+    const text = normalizeAdminText(choice?.text, 300);
+    requireValid(text.length > 0, `Choice ${id} text is required`);
+    return { id, text };
+  });
+
+  return {
+    curriculum,
+    language,
+    subject,
+    gradeLevel,
+    difficultyMode,
+    prompt,
+    choices: normalizedChoices,
+    correctChoice,
+    shortExplanation,
+    elaboration,
+    isActive: options.allowActiveFlag ? payload.is_active !== false : true
+  };
+}
+
+function validateExpiry(value) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  requireValid(!Number.isNaN(date.getTime()), "Invalid expiry date");
+  requireValid(date.getTime() > Date.now(), "Expiry date must be in the future");
+  return date.toISOString();
 }
 
 function send(ws, payload) {
@@ -1867,7 +1982,7 @@ async function runAdminAction(res, action) {
     await action();
   } catch (error) {
     console.error("Admin action failed:", error);
-    res.status(500).json({ error: "Database operation failed" });
+    res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : "Database operation failed" });
   }
 }
 
@@ -2044,6 +2159,7 @@ app.post("/admin/reports/sessions/cleanup", requireAdmin, async (req, res) => {
   }
 
   await runAdminAction(res, async () => {
+    requireValid(req.body?.confirm === "DELETE_OLD_SESSIONS", "Cleanup confirmation is required");
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
@@ -2098,7 +2214,7 @@ app.post("/admin/questions", requireAdmin, async (req, res) => {
   }
 
   await runAdminAction(res, async () => {
-    const { curriculum, language, subject, grade_level, difficulty_mode, prompt, choices, correct_choice, short_explanation, elaboration } = req.body;
+    const question = validateQuestionPayload(req.body);
     
     const questionId = createId();
     await dbQueryRequired(
@@ -2106,9 +2222,22 @@ app.post("/admin/questions", requireAdmin, async (req, res) => {
         id, curriculum, language, subject, grade_level, difficulty_mode,
         prompt, choices, correct_choice, short_explanation, elaboration, created_by
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12)`,
-      [questionId, curriculum, language, subject, grade_level, difficulty_mode, prompt, JSON.stringify(choices), correct_choice, short_explanation, elaboration, getAdminUsername(req)]
+      [
+        questionId,
+        question.curriculum,
+        question.language,
+        question.subject,
+        question.gradeLevel,
+        question.difficultyMode,
+        question.prompt,
+        JSON.stringify(question.choices),
+        question.correctChoice,
+        question.shortExplanation,
+        question.elaboration,
+        getAdminUsername(req)
+      ]
     );
-    await logAuditAction("question.create", "question_bank", questionId, { subject, grade_level }, req);
+    await logAuditAction("question.create", "question_bank", questionId, { subject: question.subject, grade_level: question.gradeLevel }, req);
     
     res.json({ ok: true, id: questionId });
   });
@@ -2120,21 +2249,44 @@ app.put("/admin/questions/:id", requireAdmin, async (req, res) => {
   }
 
   await runAdminAction(res, async () => {
-    const questionId = req.params.id;
-    const { prompt, choices, correct_choice, short_explanation, elaboration, is_active } = req.body;
+    const questionId = normalizeAdminId(req.params.id, "question id");
+    const question = validateQuestionPayload(req.body, { allowActiveFlag: true });
     
     const result = await dbQueryRequired(
       `UPDATE question_bank SET 
-        prompt = $2, choices = $3::jsonb, correct_choice = $4, 
-        short_explanation = $5, elaboration = $6, is_active = $7, updated_at = NOW()
+        curriculum = $2,
+        language = $3,
+        subject = $4,
+        grade_level = $5,
+        difficulty_mode = $6,
+        prompt = $7,
+        choices = $8::jsonb,
+        correct_choice = $9,
+        short_explanation = $10,
+        elaboration = $11,
+        is_active = $12,
+        updated_at = NOW()
        WHERE id = $1`,
-      [questionId, prompt, JSON.stringify(choices), correct_choice, short_explanation, elaboration, is_active !== false]
+      [
+        questionId,
+        question.curriculum,
+        question.language,
+        question.subject,
+        question.gradeLevel,
+        question.difficultyMode,
+        question.prompt,
+        JSON.stringify(question.choices),
+        question.correctChoice,
+        question.shortExplanation,
+        question.elaboration,
+        question.isActive
+      ]
     );
     if (result.rowCount === 0) {
       res.status(404).json({ error: "Question not found" });
       return;
     }
-    await logAuditAction("question.update", "question_bank", questionId, { is_active: is_active !== false }, req);
+    await logAuditAction("question.update", "question_bank", questionId, { is_active: question.isActive }, req);
     
     res.json({ ok: true });
   });
@@ -2146,7 +2298,7 @@ app.delete("/admin/questions/:id", requireAdmin, async (req, res) => {
   }
 
   await runAdminAction(res, async () => {
-    const questionId = req.params.id;
+    const questionId = normalizeAdminId(req.params.id, "question id");
     const result = await dbQueryRequired(`UPDATE question_bank SET is_active = FALSE WHERE id = $1`, [questionId]);
     if (result.rowCount === 0) {
       res.status(404).json({ error: "Question not found" });
@@ -2164,9 +2316,10 @@ app.put("/admin/students/:id", requireAdmin, async (req, res) => {
   }
 
   await runAdminAction(res, async () => {
-    const studentId = req.params.id;
+    const studentId = normalizeAdminId(req.params.id, "student id");
     const { display_name } = req.body;
     const nextName = sanitizeStudentName(display_name);
+    requireValid(nextName.length > 0, "Student name is required");
     
     const result = await dbQueryRequired(
       `UPDATE students SET display_name = $2, updated_at = NOW() WHERE id = $1`,
@@ -2188,16 +2341,18 @@ app.post("/admin/students/:id/block", requireAdmin, async (req, res) => {
   }
 
   await runAdminAction(res, async () => {
-    const studentId = req.params.id;
+    const studentId = normalizeAdminId(req.params.id, "student id");
     const { reason, expires_at } = req.body;
+    const blockReason = normalizeAdminText(reason, 300, "Blocked by admin");
+    const expiresAt = validateExpiry(expires_at);
     
     const blockId = createId();
     await dbQueryRequired(
       `INSERT INTO student_blocks (id, student_id, reason, blocked_by, expires_at)
        VALUES ($1, $2, $3, $4, $5)`,
-      [blockId, studentId, reason || "Blocked by admin", getAdminUsername(req), expires_at || null]
+      [blockId, studentId, blockReason, getAdminUsername(req), expiresAt]
     );
-    await logAuditAction("student.block", "students", studentId, { reason: reason || "Blocked by admin", expires_at: expires_at || null }, req);
+    await logAuditAction("student.block", "students", studentId, { reason: blockReason, expires_at: expiresAt }, req);
     
     res.json({ ok: true, blockId });
   });
@@ -2209,7 +2364,7 @@ app.delete("/admin/students/:id/block", requireAdmin, async (req, res) => {
   }
 
   await runAdminAction(res, async () => {
-    const studentId = req.params.id;
+    const studentId = normalizeAdminId(req.params.id, "student id");
     const result = await dbQueryRequired(`UPDATE student_blocks SET is_active = FALSE WHERE student_id = $1 AND is_active = TRUE`, [studentId]);
     await logAuditAction("student.unblock", "students", studentId, { unblocked: result.rowCount }, req);
     res.json({ ok: true, unblocked: result.rowCount });
@@ -2240,13 +2395,16 @@ app.post("/admin/groups", requireAdmin, async (req, res) => {
 
   await runAdminAction(res, async () => {
     const { name, description } = req.body;
+    const groupName = normalizeAdminText(name, 120);
+    const groupDescription = normalizeAdminText(description, 500);
+    requireValid(groupName.length > 0, "Group name is required");
     const groupId = createId();
     
     await dbQueryRequired(
       `INSERT INTO student_groups (id, name, description, created_by) VALUES ($1, $2, $3, $4)`,
-      [groupId, String(name || "").trim(), description || "", getAdminUsername(req)]
+      [groupId, groupName, groupDescription, getAdminUsername(req)]
     );
-    await logAuditAction("group.create", "student_groups", groupId, { name }, req);
+    await logAuditAction("group.create", "student_groups", groupId, { name: groupName }, req);
     
     res.json({ ok: true, groupId });
   });
@@ -2258,16 +2416,17 @@ app.post("/admin/groups/:id/members", requireAdmin, async (req, res) => {
   }
 
   await runAdminAction(res, async () => {
-    const groupId = req.params.id;
+    const groupId = normalizeAdminId(req.params.id, "group id");
     const { student_id } = req.body;
+    const studentId = normalizeAdminId(student_id, "student id");
     
     const result = await dbQueryRequired(
       `INSERT INTO student_group_members (group_id, student_id, added_by)
        VALUES ($1, $2, $3)
        ON CONFLICT DO NOTHING`,
-      [groupId, student_id, getAdminUsername(req)]
+      [groupId, studentId, getAdminUsername(req)]
     );
-    await logAuditAction("group.member.add", "student_groups", groupId, { student_id, inserted: result.rowCount }, req);
+    await logAuditAction("group.member.add", "student_groups", groupId, { student_id: studentId, inserted: result.rowCount }, req);
     
     res.json({ ok: true, inserted: result.rowCount });
   });

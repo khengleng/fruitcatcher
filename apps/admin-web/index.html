@@ -1236,7 +1236,10 @@
       
       try {
         setStatus(authStatus, "Deleting old sessions...", "#85321e");
-        await api("/admin/reports/sessions/cleanup", { method: "POST" });
+        await api("/admin/reports/sessions/cleanup", {
+          method: "POST",
+          body: JSON.stringify({ confirm: "DELETE_OLD_SESSIONS" })
+        });
         setStatus(authStatus, "Old sessions deleted successfully.", "#1f7a4d");
         await refreshReports();
       } catch (error) {
