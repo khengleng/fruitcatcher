@@ -914,19 +914,27 @@ async function dbQuery(text, params = []) {
   }
 }
 
+async function dbQueryRequired(text, params = []) {
+  if (!db) {
+    throw new Error("Postgres is not configured");
+  }
+
+  return db.query(text, params);
+}
+
 async function initDatabase() {
   if (!db) {
     return false;
   }
 
-  await dbQuery(`
+  await dbQueryRequired(`
     CREATE TABLE IF NOT EXISTS admin_settings (
       key TEXT PRIMARY KEY,
       value JSONB NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await dbQuery(`
+  await dbQueryRequired(`
     CREATE TABLE IF NOT EXISTS students (
       id TEXT PRIMARY KEY,
       client_id TEXT UNIQUE NOT NULL,
@@ -935,7 +943,7 @@ async function initDatabase() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await dbQuery(`
+  await dbQueryRequired(`
     CREATE TABLE IF NOT EXISTS quiz_sessions (
       id TEXT PRIMARY KEY,
       room_code TEXT NOT NULL,
@@ -955,7 +963,7 @@ async function initDatabase() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await dbQuery(`
+  await dbQueryRequired(`
     CREATE TABLE IF NOT EXISTS session_participants (
       session_id TEXT NOT NULL REFERENCES quiz_sessions(id) ON DELETE CASCADE,
       student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
@@ -968,7 +976,7 @@ async function initDatabase() {
       PRIMARY KEY (session_id, student_id)
     )
   `);
-  await dbQuery(`
+  await dbQueryRequired(`
     CREATE TABLE IF NOT EXISTS quiz_questions (
       id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL REFERENCES quiz_sessions(id) ON DELETE CASCADE,
@@ -989,7 +997,7 @@ async function initDatabase() {
       UNIQUE (session_id, question_index)
     )
   `);
-  await dbQuery(`
+  await dbQueryRequired(`
     CREATE TABLE IF NOT EXISTS student_answers (
       id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL REFERENCES quiz_sessions(id) ON DELETE CASCADE,
@@ -1005,7 +1013,7 @@ async function initDatabase() {
       UNIQUE (session_id, question_id, student_id)
     )
   `);
-  await dbQuery(`
+  await dbQueryRequired(`
     CREATE TABLE IF NOT EXISTS student_progress (
       student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
       curriculum TEXT NOT NULL,
@@ -1020,12 +1028,12 @@ async function initDatabase() {
       PRIMARY KEY (student_id, curriculum, language, subject, grade_level)
     )
   `);
-  await dbQuery("CREATE INDEX IF NOT EXISTS idx_quiz_sessions_created_at ON quiz_sessions(created_at DESC)");
-  await dbQuery("CREATE INDEX IF NOT EXISTS idx_answers_student_created ON student_answers(student_id, created_at DESC)");
-  await dbQuery("CREATE INDEX IF NOT EXISTS idx_progress_subject_grade ON student_progress(subject, grade_level)");
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_quiz_sessions_created_at ON quiz_sessions(created_at DESC)");
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_answers_student_created ON student_answers(student_id, created_at DESC)");
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_progress_subject_grade ON student_progress(subject, grade_level)");
   
   // Admin users table for multi-admin support
-  await dbQuery(`
+  await dbQueryRequired(`
     CREATE TABLE IF NOT EXISTS admin_users (
       id TEXT PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
@@ -1040,7 +1048,7 @@ async function initDatabase() {
   `);
   
   // Audit log table
-  await dbQuery(`
+  await dbQueryRequired(`
     CREATE TABLE IF NOT EXISTS audit_logs (
       id TEXT PRIMARY KEY,
       admin_id TEXT,
@@ -1054,11 +1062,11 @@ async function initDatabase() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await dbQuery("CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC)");
-  await dbQuery("CREATE INDEX IF NOT EXISTS idx_audit_logs_admin ON audit_logs(admin_id, created_at DESC)");
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC)");
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_audit_logs_admin ON audit_logs(admin_id, created_at DESC)");
   
   // Question bank table
-  await dbQuery(`
+  await dbQueryRequired(`
     CREATE TABLE IF NOT EXISTS question_bank (
       id TEXT PRIMARY KEY,
       curriculum TEXT NOT NULL,
@@ -1078,10 +1086,10 @@ async function initDatabase() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await dbQuery("CREATE INDEX IF NOT EXISTS idx_question_bank_lookup ON question_bank(subject, grade_level, is_active)");
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_question_bank_lookup ON question_bank(subject, grade_level, is_active)");
   
   // Student blocks table
-  await dbQuery(`
+  await dbQueryRequired(`
     CREATE TABLE IF NOT EXISTS student_blocks (
       id TEXT PRIMARY KEY,
       student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
@@ -1092,10 +1100,10 @@ async function initDatabase() {
       is_active BOOLEAN NOT NULL DEFAULT TRUE
     )
   `);
-  await dbQuery("CREATE INDEX IF NOT EXISTS idx_student_blocks_student ON student_blocks(student_id, is_active)");
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_student_blocks_student ON student_blocks(student_id, is_active)");
   
   // Student groups table
-  await dbQuery(`
+  await dbQueryRequired(`
     CREATE TABLE IF NOT EXISTS student_groups (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -1106,7 +1114,7 @@ async function initDatabase() {
     )
   `);
   
-  await dbQuery(`
+  await dbQueryRequired(`
     CREATE TABLE IF NOT EXISTS student_group_members (
       group_id TEXT NOT NULL REFERENCES student_groups(id) ON DELETE CASCADE,
       student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
@@ -1115,8 +1123,46 @@ async function initDatabase() {
       PRIMARY KEY (group_id, student_id)
     )
   `);
+  await runDatabaseMigrations();
   
   return true;
+}
+
+async function runDatabaseMigrations() {
+  const migrations = [
+    "ALTER TABLE students ADD COLUMN IF NOT EXISTS display_name TEXT",
+    "ALTER TABLE students ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+    "ALTER TABLE students ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+    "ALTER TABLE quiz_sessions ADD COLUMN IF NOT EXISTS config JSONB",
+    "ALTER TABLE quiz_sessions ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ",
+    "ALTER TABLE quiz_sessions ADD COLUMN IF NOT EXISTS ended_at TIMESTAMPTZ",
+    "ALTER TABLE session_participants ADD COLUMN IF NOT EXISTS is_host BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE session_participants ADD COLUMN IF NOT EXISTS score INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE session_participants ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+    "ALTER TABLE quiz_questions ADD COLUMN IF NOT EXISTS model TEXT",
+    "ALTER TABLE quiz_questions ADD COLUMN IF NOT EXISTS elaboration TEXT",
+    "ALTER TABLE student_answers ADD COLUMN IF NOT EXISTS response_ms INTEGER",
+    "ALTER TABLE student_answers ADD COLUMN IF NOT EXISTS answered_at TIMESTAMPTZ",
+    "ALTER TABLE question_bank ADD COLUMN IF NOT EXISTS curriculum TEXT",
+    "ALTER TABLE question_bank ADD COLUMN IF NOT EXISTS language TEXT",
+    "ALTER TABLE question_bank ADD COLUMN IF NOT EXISTS difficulty_mode TEXT",
+    "ALTER TABLE question_bank ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE",
+    "ALTER TABLE question_bank ADD COLUMN IF NOT EXISTS usage_count INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE question_bank ADD COLUMN IF NOT EXISTS created_by TEXT",
+    "ALTER TABLE question_bank ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+  ];
+
+  for (const migration of migrations) {
+    await dbQueryRequired(migration);
+  }
+
+  await dbQueryRequired(`
+    UPDATE question_bank
+    SET curriculum = COALESCE(curriculum, $1),
+        language = COALESCE(language, $2),
+        difficulty_mode = COALESCE(difficulty_mode, $3),
+        elaboration = COALESCE(elaboration, short_explanation, '')
+  `, [defaultGameConfig.curriculum, defaultGameConfig.language, defaultGameConfig.difficultyMode]);
 }
 
 async function loadDbConfig() {
@@ -1125,7 +1171,11 @@ async function loadDbConfig() {
 }
 
 async function persistDbConfig(nextConfig) {
-  await dbQuery(
+  if (!db) {
+    return;
+  }
+
+  await dbQueryRequired(
     `INSERT INTO admin_settings (key, value, updated_at)
      VALUES ($1, $2::jsonb, NOW())
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
@@ -1157,6 +1207,24 @@ async function upsertStudent(clientId, displayName) {
     [studentId, clientId, sanitizeStudentName(displayName)]
   );
   return studentId;
+}
+
+async function getActiveStudentBlock(studentId) {
+  if (!db || !studentId) {
+    return null;
+  }
+
+  const result = await dbQuery(
+    `SELECT reason, expires_at
+     FROM student_blocks
+     WHERE student_id = $1
+       AND is_active = TRUE
+       AND (expires_at IS NULL OR expires_at > NOW())
+     ORDER BY blocked_at DESC
+     LIMIT 1`,
+    [studentId]
+  );
+  return result?.rows?.[0] || null;
 }
 
 async function persistSessionCreated(room) {
@@ -1369,7 +1437,7 @@ app.use(express.json());
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Admin-Token");
-  res.setHeader("Access-Control-Allow-Methods", "GET, PUT, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
 
   if (req.method === "OPTIONS") {
     res.status(204).end();
@@ -1594,15 +1662,18 @@ app.get("/admin/config", requireAdmin, (_req, res) => {
 });
 
 app.put("/admin/config", requireAdmin, async (req, res) => {
-  const nextConfig = sanitizeConfig(req.body || {});
-  Object.assign(gameConfig, nextConfig);
-  const persisted = persistConfig(gameConfig);
-  await persistDbConfig(gameConfig);
-  broadcastConfig();
-  res.json({
-    ok: true,
-    persisted,
-    config: gameConfig
+  await runAdminAction(res, async () => {
+    const nextConfig = sanitizeConfig(req.body || {});
+    Object.assign(gameConfig, nextConfig);
+    const persisted = persistConfig(gameConfig);
+    await persistDbConfig(gameConfig);
+    await logAuditAction("config.update", "admin_settings", "game_config", nextConfig, req);
+    broadcastConfig();
+    res.json({
+      ok: true,
+      persisted,
+      config: gameConfig
+    });
   });
 });
 
@@ -1620,6 +1691,19 @@ function requireDatabase(res) {
   }
 
   return true;
+}
+
+function getAdminUsername(req) {
+  return req.get("x-admin-user") || "admin";
+}
+
+async function runAdminAction(res, action) {
+  try {
+    await action();
+  } catch (error) {
+    console.error("Admin action failed:", error);
+    res.status(500).json({ error: "Database operation failed" });
+  }
 }
 
 app.get("/admin/reports/overview", requireAdmin, async (_req, res) => {
@@ -1794,25 +1878,23 @@ app.post("/admin/reports/sessions/cleanup", requireAdmin, async (req, res) => {
     return;
   }
 
-  try {
+  await runAdminAction(res, async () => {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    const result = await dbQuery(
+    const result = await dbQueryRequired(
       `DELETE FROM quiz_sessions WHERE created_at < $1 RETURNING id`,
       [thirtyDaysAgo.toISOString()]
     );
 
     const deletedCount = result?.rows?.length || 0;
+    await logAuditAction("reports.cleanup", "quiz_sessions", null, { deletedCount }, req);
     res.json({
       ok: true,
       deleted: deletedCount,
       message: `Successfully deleted ${deletedCount} session(s) older than 30 days.`
     });
-  } catch (error) {
-    console.error("Failed to delete old sessions:", error);
-    res.status(500).json({ error: "Failed to delete old sessions" });
-  }
+  });
 });
 
 // Question Bank Management
@@ -1841,7 +1923,7 @@ app.get("/admin/questions", requireAdmin, async (req, res) => {
   query += ` ORDER BY created_at DESC LIMIT $${paramIndex}`;
   params.push(limit);
   
-  const result = await dbQuery(query, params);
+  const result = await dbQueryRequired(query, params);
   res.json({ questions: result?.rows || [] });
 });
 
@@ -1850,18 +1932,21 @@ app.post("/admin/questions", requireAdmin, async (req, res) => {
     return;
   }
 
-  const { curriculum, language, subject, grade_level, difficulty_mode, prompt, choices, correct_choice, short_explanation, elaboration } = req.body;
-  
-  const questionId = createId();
-  await dbQuery(
-    `INSERT INTO question_bank (
-      id, curriculum, language, subject, grade_level, difficulty_mode,
-      prompt, choices, correct_choice, short_explanation, elaboration, created_by
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12)`,
-    [questionId, curriculum, language, subject, grade_level, difficulty_mode, prompt, JSON.stringify(choices), correct_choice, short_explanation, elaboration, "admin"]
-  );
-  
-  res.json({ ok: true, id: questionId });
+  await runAdminAction(res, async () => {
+    const { curriculum, language, subject, grade_level, difficulty_mode, prompt, choices, correct_choice, short_explanation, elaboration } = req.body;
+    
+    const questionId = createId();
+    await dbQueryRequired(
+      `INSERT INTO question_bank (
+        id, curriculum, language, subject, grade_level, difficulty_mode,
+        prompt, choices, correct_choice, short_explanation, elaboration, created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12)`,
+      [questionId, curriculum, language, subject, grade_level, difficulty_mode, prompt, JSON.stringify(choices), correct_choice, short_explanation, elaboration, getAdminUsername(req)]
+    );
+    await logAuditAction("question.create", "question_bank", questionId, { subject, grade_level }, req);
+    
+    res.json({ ok: true, id: questionId });
+  });
 });
 
 app.put("/admin/questions/:id", requireAdmin, async (req, res) => {
@@ -1869,18 +1954,25 @@ app.put("/admin/questions/:id", requireAdmin, async (req, res) => {
     return;
   }
 
-  const questionId = req.params.id;
-  const { prompt, choices, correct_choice, short_explanation, elaboration, is_active } = req.body;
-  
-  await dbQuery(
-    `UPDATE question_bank SET 
-      prompt = $2, choices = $3::jsonb, correct_choice = $4, 
-      short_explanation = $5, elaboration = $6, is_active = $7, updated_at = NOW()
-     WHERE id = $1`,
-    [questionId, prompt, JSON.stringify(choices), correct_choice, short_explanation, elaboration, is_active !== false]
-  );
-  
-  res.json({ ok: true });
+  await runAdminAction(res, async () => {
+    const questionId = req.params.id;
+    const { prompt, choices, correct_choice, short_explanation, elaboration, is_active } = req.body;
+    
+    const result = await dbQueryRequired(
+      `UPDATE question_bank SET 
+        prompt = $2, choices = $3::jsonb, correct_choice = $4, 
+        short_explanation = $5, elaboration = $6, is_active = $7, updated_at = NOW()
+       WHERE id = $1`,
+      [questionId, prompt, JSON.stringify(choices), correct_choice, short_explanation, elaboration, is_active !== false]
+    );
+    if (result.rowCount === 0) {
+      res.status(404).json({ error: "Question not found" });
+      return;
+    }
+    await logAuditAction("question.update", "question_bank", questionId, { is_active: is_active !== false }, req);
+    
+    res.json({ ok: true });
+  });
 });
 
 app.delete("/admin/questions/:id", requireAdmin, async (req, res) => {
@@ -1888,9 +1980,16 @@ app.delete("/admin/questions/:id", requireAdmin, async (req, res) => {
     return;
   }
 
-  const questionId = req.params.id;
-  await dbQuery(`UPDATE question_bank SET is_active = FALSE WHERE id = $1`, [questionId]);
-  res.json({ ok: true });
+  await runAdminAction(res, async () => {
+    const questionId = req.params.id;
+    const result = await dbQueryRequired(`UPDATE question_bank SET is_active = FALSE WHERE id = $1`, [questionId]);
+    if (result.rowCount === 0) {
+      res.status(404).json({ error: "Question not found" });
+      return;
+    }
+    await logAuditAction("question.delete", "question_bank", questionId, null, req);
+    res.json({ ok: true });
+  });
 });
 
 // Student Management
@@ -1899,15 +1998,23 @@ app.put("/admin/students/:id", requireAdmin, async (req, res) => {
     return;
   }
 
-  const studentId = req.params.id;
-  const { display_name } = req.body;
-  
-  await dbQuery(
-    `UPDATE students SET display_name = $2, updated_at = NOW() WHERE id = $1`,
-    [studentId, sanitizeStudentName(display_name)]
-  );
-  
-  res.json({ ok: true });
+  await runAdminAction(res, async () => {
+    const studentId = req.params.id;
+    const { display_name } = req.body;
+    const nextName = sanitizeStudentName(display_name);
+    
+    const result = await dbQueryRequired(
+      `UPDATE students SET display_name = $2, updated_at = NOW() WHERE id = $1`,
+      [studentId, nextName]
+    );
+    if (result.rowCount === 0) {
+      res.status(404).json({ error: "Student not found" });
+      return;
+    }
+    await logAuditAction("student.update", "students", studentId, { display_name: nextName }, req);
+    
+    res.json({ ok: true });
+  });
 });
 
 app.post("/admin/students/:id/block", requireAdmin, async (req, res) => {
@@ -1915,17 +2022,20 @@ app.post("/admin/students/:id/block", requireAdmin, async (req, res) => {
     return;
   }
 
-  const studentId = req.params.id;
-  const { reason, expires_at } = req.body;
-  
-  const blockId = createId();
-  await dbQuery(
-    `INSERT INTO student_blocks (id, student_id, reason, blocked_by, expires_at)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [blockId, studentId, reason || "Blocked by admin", "admin", expires_at || null]
-  );
-  
-  res.json({ ok: true, blockId });
+  await runAdminAction(res, async () => {
+    const studentId = req.params.id;
+    const { reason, expires_at } = req.body;
+    
+    const blockId = createId();
+    await dbQueryRequired(
+      `INSERT INTO student_blocks (id, student_id, reason, blocked_by, expires_at)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [blockId, studentId, reason || "Blocked by admin", getAdminUsername(req), expires_at || null]
+    );
+    await logAuditAction("student.block", "students", studentId, { reason: reason || "Blocked by admin", expires_at: expires_at || null }, req);
+    
+    res.json({ ok: true, blockId });
+  });
 });
 
 app.delete("/admin/students/:id/block", requireAdmin, async (req, res) => {
@@ -1933,9 +2043,12 @@ app.delete("/admin/students/:id/block", requireAdmin, async (req, res) => {
     return;
   }
 
-  const studentId = req.params.id;
-  await dbQuery(`UPDATE student_blocks SET is_active = FALSE WHERE student_id = $1 AND is_active = TRUE`, [studentId]);
-  res.json({ ok: true });
+  await runAdminAction(res, async () => {
+    const studentId = req.params.id;
+    const result = await dbQueryRequired(`UPDATE student_blocks SET is_active = FALSE WHERE student_id = $1 AND is_active = TRUE`, [studentId]);
+    await logAuditAction("student.unblock", "students", studentId, { unblocked: result.rowCount }, req);
+    res.json({ ok: true, unblocked: result.rowCount });
+  });
 });
 
 // Student Groups
@@ -1944,7 +2057,7 @@ app.get("/admin/groups", requireAdmin, async (req, res) => {
     return;
   }
 
-  const result = await dbQuery(`
+  const result = await dbQueryRequired(`
     SELECT g.*, COUNT(m.student_id)::int AS member_count
     FROM student_groups g
     LEFT JOIN student_group_members m ON m.group_id = g.id
@@ -1960,15 +2073,18 @@ app.post("/admin/groups", requireAdmin, async (req, res) => {
     return;
   }
 
-  const { name, description } = req.body;
-  const groupId = createId();
-  
-  await dbQuery(
-    `INSERT INTO student_groups (id, name, description, created_by) VALUES ($1, $2, $3, $4)`,
-    [groupId, name, description || "", "admin"]
-  );
-  
-  res.json({ ok: true, groupId });
+  await runAdminAction(res, async () => {
+    const { name, description } = req.body;
+    const groupId = createId();
+    
+    await dbQueryRequired(
+      `INSERT INTO student_groups (id, name, description, created_by) VALUES ($1, $2, $3, $4)`,
+      [groupId, String(name || "").trim(), description || "", getAdminUsername(req)]
+    );
+    await logAuditAction("group.create", "student_groups", groupId, { name }, req);
+    
+    res.json({ ok: true, groupId });
+  });
 });
 
 app.post("/admin/groups/:id/members", requireAdmin, async (req, res) => {
@@ -1976,17 +2092,20 @@ app.post("/admin/groups/:id/members", requireAdmin, async (req, res) => {
     return;
   }
 
-  const groupId = req.params.id;
-  const { student_id } = req.body;
-  
-  await dbQuery(
-    `INSERT INTO student_group_members (group_id, student_id, added_by)
-     VALUES ($1, $2, $3)
-     ON CONFLICT DO NOTHING`,
-    [groupId, student_id, "admin"]
-  );
-  
-  res.json({ ok: true });
+  await runAdminAction(res, async () => {
+    const groupId = req.params.id;
+    const { student_id } = req.body;
+    
+    const result = await dbQueryRequired(
+      `INSERT INTO student_group_members (group_id, student_id, added_by)
+       VALUES ($1, $2, $3)
+       ON CONFLICT DO NOTHING`,
+      [groupId, student_id, getAdminUsername(req)]
+    );
+    await logAuditAction("group.member.add", "student_groups", groupId, { student_id, inserted: result.rowCount }, req);
+    
+    res.json({ ok: true, inserted: result.rowCount });
+  });
 });
 
 // Audit Logs
@@ -2013,7 +2132,7 @@ async function logAuditAction(action, resourceType, resourceId, details, req) {
      VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)`,
     [
       auditId,
-      "admin",
+      getAdminUsername(req),
       action,
       resourceType || null,
       resourceId || null,
@@ -2040,7 +2159,7 @@ app.get("/admin/active-sessions", requireAdmin, (_req, res) => {
   res.json({ sessions: activeSessions });
 });
 
-app.post("/admin/active-sessions/:roomCode/close", requireAdmin, (req, res) => {
+app.post("/admin/active-sessions/:roomCode/close", requireAdmin, async (req, res) => {
   const roomCode = String(req.params.roomCode || "").trim().toUpperCase();
   const room = rooms.get(roomCode);
   
@@ -2064,12 +2183,13 @@ app.post("/admin/active-sessions/:roomCode/close", requireAdmin, (req, res) => {
   });
   
   void persistSessionStatus(room, "CLOSED");
+  await logAuditAction("session.close", "quiz_sessions", room.sessionId || roomCode, { roomCode }, req);
   rooms.delete(roomCode);
   
   res.json({ ok: true, message: "Room closed successfully" });
 });
 
-app.post("/admin/active-sessions/:roomCode/kick/:playerId", requireAdmin, (req, res) => {
+app.post("/admin/active-sessions/:roomCode/kick/:playerId", requireAdmin, async (req, res) => {
   const roomCode = String(req.params.roomCode || "").trim().toUpperCase();
   const playerId = String(req.params.playerId || "");
   const room = rooms.get(roomCode);
@@ -2093,7 +2213,11 @@ app.post("/admin/active-sessions/:roomCode/kick/:playerId", requireAdmin, (req, 
   if (player.ws) {
     player.ws.close();
   }
+  if (player.clientId && room.clientIds) {
+    room.clientIds.delete(player.clientId);
+  }
   room.players.delete(playerId);
+  await logAuditAction("session.player.kick", "session_participants", player.studentId || playerId, { roomCode, playerName: player.name }, req);
   broadcastRoomState(roomCode);
   
   res.json({ ok: true, message: "Player kicked successfully" });
@@ -2267,7 +2391,72 @@ Requirements:
   return parsed;
 }
 
+function normalizeQuestionBankRow(row) {
+  const choices = Array.isArray(row.choices) ? row.choices : JSON.parse(row.choices || "[]");
+  return {
+    question: row.prompt,
+    choices,
+    correctChoice: row.correct_choice,
+    shortExplanation: row.short_explanation,
+    elaboration: row.elaboration,
+    subject: row.subject,
+    bankQuestionId: row.id
+  };
+}
+
+async function getQuestionBankQuestion(room) {
+  if (!db) {
+    return null;
+  }
+
+  const result = await dbQuery(
+    `SELECT id, prompt, choices, correct_choice, short_explanation, elaboration, subject
+     FROM question_bank
+     WHERE is_active = TRUE
+       AND curriculum = $1
+       AND language = $2
+       AND subject = $3
+       AND grade_level = $4
+       AND difficulty_mode = $5
+     ORDER BY usage_count ASC, RANDOM()
+     LIMIT 10`,
+    [gameConfig.curriculum, gameConfig.language, gameConfig.subject, gameConfig.gradeLevel, gameConfig.difficultyMode]
+  );
+  const rows = result?.rows || [];
+  const selected = rows
+    .map((row) => {
+      try {
+        return normalizeQuestionBankRow(row);
+      } catch (error) {
+        console.error("Invalid question bank row:", error);
+        return null;
+      }
+    })
+    .find((question) => question && !room.history.includes(normalizePrompt(question.question)));
+
+  if (!selected) {
+    return null;
+  }
+
+  await dbQuery(
+    `UPDATE question_bank SET usage_count = usage_count + 1, updated_at = NOW() WHERE id = $1`,
+    [selected.bankQuestionId]
+  );
+  return selected;
+}
+
 async function generateQuestion(room) {
+  const bankQuestion = await getQuestionBankQuestion(room);
+  if (bankQuestion) {
+    room.history.push(normalizePrompt(bankQuestion.question));
+    room.history = room.history.slice(-20);
+    return {
+      ...bankQuestion,
+      source: "question_bank",
+      model: null
+    };
+  }
+
   if (gameConfig.questionSource === "fallback_only" || !OPENAI_API_KEY) {
     const fallbackOnlyQuestion = getFallbackQuestion(room);
     room.history.push(normalizePrompt(fallbackOnlyQuestion.question));
@@ -2595,6 +2784,15 @@ wss.on("connection", (ws) => {
         if (ws.meta.playerId && ws.meta.roomCode === roomCode && room.players.has(ws.meta.playerId)) {
           const existingPlayer = room.players.get(ws.meta.playerId);
           if (existingPlayer) {
+            existingPlayer.studentId = existingPlayer.studentId || await upsertStudent(existingPlayer.clientId || `${room.roomCode}:${existingPlayer.playerId}`, existingPlayer.name);
+            const activeBlock = await getActiveStudentBlock(existingPlayer.studentId);
+            if (activeBlock) {
+              send(ws, {
+                type: "join_error",
+                message: activeBlock.reason || "This student is blocked by the teacher."
+              });
+              return;
+            }
             existingPlayer.ws = ws;
             if (room.status === "ANSWERING") {
               existingPlayer.activeQuestionIndex = room.questionIndex;
@@ -2620,6 +2818,15 @@ wss.on("connection", (ws) => {
             const requestedName = String(data.playerName || "").trim();
             if (requestedName) {
               existingPlayer.name = requestedName.slice(0, 24);
+            }
+            existingPlayer.studentId = existingPlayer.studentId || await upsertStudent(existingPlayer.clientId || `${room.roomCode}:${existingPlayer.playerId}`, existingPlayer.name);
+            const activeBlock = await getActiveStudentBlock(existingPlayer.studentId);
+            if (activeBlock) {
+              send(ws, {
+                type: "join_error",
+                message: activeBlock.reason || "This student is blocked by the teacher."
+              });
+              return;
             }
             existingPlayer.ws = ws;
             if (room.status === "ANSWERING") {
@@ -2662,10 +2869,20 @@ wss.on("connection", (ws) => {
 
         const playerId = createPlayerId();
         const playerName = getOrCreatePlayerName(room, data.playerName);
+        const studentId = await upsertStudent(clientId || `${room.roomCode}:${playerId}`, playerName);
+        const activeBlock = await getActiveStudentBlock(studentId);
+        if (activeBlock) {
+          send(ws, {
+            type: "join_error",
+            message: activeBlock.reason || "This student is blocked by the teacher."
+          });
+          return;
+        }
         room.players.set(playerId, {
           playerId,
           name: playerName,
           clientId: clientId || null,
+          studentId,
           ws,
           score: 0,
           currentAnswer: null,
