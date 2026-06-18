@@ -497,6 +497,30 @@
       timerInterval = setInterval(tick, 250);
     }
 
+    function formatMathHTML(text) {
+      if (!text) return "";
+      return String(text)
+        .replace(/\^(\d+)/g, '<sup>$1</sup>')
+        .replace(/\^([a-z])/gi, '<sup>$1</sup>')
+        .replace(/\^{([^}]+)}/g, '<sup>$1</sup>')
+        .replace(/\_(\d+)/g, '<sub>$1</sub>')
+        .replace(/\_([a-z])/gi, '<sub>$1</sub>')
+        .replace(/\_\{([^}]+)\}/g, '<sub>$1</sub>')
+        .replace(/<=/g, '≤')
+        .replace(/>=/g, '≥')
+        .replace(/!=/g, '≠')
+        .replace(/\+\/-/g, '±')
+        .replace(/sqrt\(/g, '√(')
+        .replace(/pi\b/gi, 'π')
+        .replace(/theta\b/gi, 'θ')
+        .replace(/alpha\b/gi, 'α')
+        .replace(/beta\b/gi, 'β')
+        .replace(/gamma\b/gi, 'γ')
+        .replace(/delta\b/gi, 'δ')
+        .replace(/degrees/gi, '°')
+        .replace(/\bdegree\b/gi, '°');
+    }
+
     function renderAnswers() {
       ui.answers.innerHTML = "";
       const question = latestState && latestState.question ? latestState.question : null;
@@ -524,7 +548,7 @@
         label.innerText = choice.id;
         const text = document.createElement("div");
         text.className = "choice-text";
-        text.innerText = choice.text;
+        text.innerHTML = formatMathHTML(choice.text);
         el.appendChild(label);
         el.appendChild(text);
         ui.answers.appendChild(el);
@@ -600,9 +624,9 @@
         ui.explanation.innerText = copy.pleaseWait;
         ui.answers.innerHTML = "";
       } else if (state.question) {
-        ui.questionPrompt.innerText = state.question.prompt;
-        ui.explanation.innerText = state.status === "REVIEWING"
-          ? `${state.shortExplanation} ${state.elaboration}`
+        ui.questionPrompt.innerHTML = formatMathHTML(state.question.prompt);
+        ui.explanation.innerHTML = state.status === "REVIEWING"
+          ? formatMathHTML(`${state.shortExplanation} ${state.elaboration}`)
           : copy.chooseAnswer;
         renderAnswers();
       } else if (state.status === "FINISHED") {

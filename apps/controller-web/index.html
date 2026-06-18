@@ -406,6 +406,30 @@
       }
     }
 
+    function formatMathHTML(text) {
+      if (!text) return "";
+      return String(text)
+        .replace(/\^(\d+)/g, '<sup>$1</sup>')
+        .replace(/\^([a-z])/gi, '<sup>$1</sup>')
+        .replace(/\^{([^}]+)}/g, '<sup>$1</sup>')
+        .replace(/\_(\d+)/g, '<sub>$1</sub>')
+        .replace(/\_([a-z])/gi, '<sub>$1</sub>')
+        .replace(/\_\{([^}]+)\}/g, '<sub>$1</sub>')
+        .replace(/<=/g, '≤')
+        .replace(/>=/g, '≥')
+        .replace(/!=/g, '≠')
+        .replace(/\+\/-/g, '±')
+        .replace(/sqrt\(/g, '√(')
+        .replace(/pi\b/gi, 'π')
+        .replace(/theta\b/gi, 'θ')
+        .replace(/alpha\b/gi, 'α')
+        .replace(/beta\b/gi, 'β')
+        .replace(/gamma\b/gi, 'γ')
+        .replace(/delta\b/gi, 'δ')
+        .replace(/degrees/gi, '°')
+        .replace(/\bdegree\b/gi, '°');
+    }
+
     function renderAnswers() {
       answersEl.innerHTML = "";
       const question = latestState?.question;
@@ -419,7 +443,9 @@
         button.disabled = latestState.status !== "ANSWERING" || Boolean(latestState.player?.answered);
         const label = document.createElement("b");
         label.textContent = choice.id;
-        button.append(label, document.createTextNode(choice.text));
+        const textSpan = document.createElement("span");
+        textSpan.innerHTML = formatMathHTML(choice.text);
+        button.append(label, textSpan);
 
         if (latestState.status === "REVIEWING") {
           if (choice.id === latestState.correctChoice) {
@@ -474,9 +500,9 @@
         explanationEl.textContent = "";
         answersEl.innerHTML = "";
       } else if (latestState.question) {
-        questionTextEl.textContent = latestState.question.prompt;
-        explanationEl.textContent = latestState.status === "REVIEWING"
-          ? `${latestState.shortExplanation} ${latestState.elaboration}`
+        questionTextEl.innerHTML = formatMathHTML(latestState.question.prompt);
+        explanationEl.innerHTML = latestState.status === "REVIEWING"
+          ? formatMathHTML(`${latestState.shortExplanation} ${latestState.elaboration}`)
           : latestState.player?.answered
             ? "Answer sent. Waiting for other students or the timer."
             : `Players answered: ${latestState.answerCount || 0}/${latestState.connectedPlayerCount || latestState.playerCount || 0}`;
