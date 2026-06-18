@@ -1239,6 +1239,17 @@ async function initDatabase() {
       PRIMARY KEY (group_id, student_id)
     )
   `);
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS quiz_presets (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      config JSONB NOT NULL,
+      created_by TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
   await runDatabaseMigrations();
   await ensureDefaultAdminUser();
   
@@ -1266,7 +1277,10 @@ async function runDatabaseMigrations() {
     "ALTER TABLE question_bank ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE",
     "ALTER TABLE question_bank ADD COLUMN IF NOT EXISTS usage_count INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE question_bank ADD COLUMN IF NOT EXISTS created_by TEXT",
-    "ALTER TABLE question_bank ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+    "ALTER TABLE question_bank ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+    "ALTER TABLE quiz_presets ADD COLUMN IF NOT EXISTS description TEXT",
+    "ALTER TABLE quiz_presets ADD COLUMN IF NOT EXISTS created_by TEXT",
+    "ALTER TABLE quiz_presets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
   ];
 
   for (const migration of migrations) {
@@ -1990,6 +2004,107 @@ app.put("/admin/config", requireAdmin, async (req, res) => {
       persisted,
       config: gameConfig
     });
+  });
+});
+
+app.get("/admin/presets", requireAdmin, async (_req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  const result = await dbQueryRequired(
+    "SELECT id, name, description, config, created_by, created_at, updated_at FROM quiz_presets ORDER BY updated_at DESC"
+  );
+  res.json({ presets: result.rows });
+});
+
+app.post("/admin/presets", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  await runAdminAction(res, async () => {
+    const name = normalizeAdminText(req.body?.name, 120);
+    const description = normalizeAdminText(req.body?.description, 500);
+    const presetConfig = sanitizeConfig(req.body?.config || req.body || {});
+    requireValid(name.length > 0, "Preset name is required");
+
+    const presetId = createId();
+    await dbQueryRequired(
+      `INSERT INTO quiz_presets (id, name, description, config, created_by, created_at, updated_at)
+       VALUES ($1, $2, $3, $4::jsonb, $5, NOW(), NOW())`,
+      [presetId, name, description, JSON.stringify(presetConfig), getAdminUsername(req)]
+    );
+    await logAuditAction("preset.create", "quiz_presets", presetId, { name }, req);
+    res.json({ ok: true, id: presetId, preset: { id: presetId, name, description, config: presetConfig } });
+  });
+});
+
+app.put("/admin/presets/:id", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  await runAdminAction(res, async () => {
+    const presetId = normalizeAdminId(req.params.id, "preset id");
+    const name = normalizeAdminText(req.body?.name, 120);
+    const description = normalizeAdminText(req.body?.description, 500);
+    const presetConfig = sanitizeConfig(req.body?.config || req.body || {});
+    requireValid(name.length > 0, "Preset name is required");
+
+    const result = await dbQueryRequired(
+      `UPDATE quiz_presets
+       SET name = $2, description = $3, config = $4::jsonb, updated_at = NOW()
+       WHERE id = $1`,
+      [presetId, name, description, JSON.stringify(presetConfig)]
+    );
+    if (result.rowCount === 0) {
+      res.status(404).json({ error: "Preset not found" });
+      return;
+    }
+    await logAuditAction("preset.update", "quiz_presets", presetId, { name }, req);
+    res.json({ ok: true });
+  });
+});
+
+app.post("/admin/presets/:id/apply", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  await runAdminAction(res, async () => {
+    const presetId = normalizeAdminId(req.params.id, "preset id");
+    const result = await dbQueryRequired("SELECT config FROM quiz_presets WHERE id = $1", [presetId]);
+    const preset = result.rows[0];
+    if (!preset) {
+      res.status(404).json({ error: "Preset not found" });
+      return;
+    }
+
+    const nextConfig = sanitizeConfig(preset.config || {});
+    Object.assign(gameConfig, nextConfig);
+    const persisted = persistConfig(gameConfig);
+    await persistDbConfig(gameConfig);
+    await logAuditAction("preset.apply", "quiz_presets", presetId, nextConfig, req);
+    broadcastConfig();
+    res.json({ ok: true, persisted, config: gameConfig });
+  });
+});
+
+app.delete("/admin/presets/:id", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  await runAdminAction(res, async () => {
+    const presetId = normalizeAdminId(req.params.id, "preset id");
+    const result = await dbQueryRequired("DELETE FROM quiz_presets WHERE id = $1", [presetId]);
+    if (result.rowCount === 0) {
+      res.status(404).json({ error: "Preset not found" });
+      return;
+    }
+    await logAuditAction("preset.delete", "quiz_presets", presetId, null, req);
+    res.json({ ok: true });
   });
 });
 

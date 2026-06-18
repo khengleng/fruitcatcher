@@ -367,6 +367,22 @@
       <section id="settingsPanel" class="panel">
         <h2>Live Quiz Settings</h2>
         <p class="muted">These settings affect new questions and are broadcast to active TV and phone sessions.</p>
+        <div class="filter-grid" style="margin-top:14px;">
+          <label>Preset Name<input id="presetName" type="text" placeholder="Example: Grade 6 Khmer Math"></label>
+          <label>Preset Description<input id="presetDescription" type="text" placeholder="Optional note for teachers"></label>
+          <label>
+            Saved Presets
+            <select id="presetSelect">
+              <option value="">No presets loaded</option>
+            </select>
+          </label>
+        </div>
+        <div class="actions">
+          <button id="savePresetButton" class="success small">Save Current As Preset</button>
+          <button id="loadPresetsButton" class="secondary small">Load Presets</button>
+          <button id="applyPresetButton" class="secondary small">Apply Selected Preset</button>
+          <button id="deletePresetButton" class="danger small">Delete Selected Preset</button>
+        </div>
         <div class="settings-grid" style="margin-top:14px;">
           <label>Brand title<input id="brandTitle" type="text"></label>
           <label>Brand caption<input id="brandCaption" type="text"></label>
@@ -824,6 +840,9 @@
       adminPassword: document.getElementById("adminPassword"),
       adminToken: document.getElementById("adminToken"),
       gatewayUrl: document.getElementById("gatewayUrl"),
+      presetName: document.getElementById("presetName"),
+      presetDescription: document.getElementById("presetDescription"),
+      presetSelect: document.getElementById("presetSelect"),
       brandTitle: document.getElementById("brandTitle"),
       brandCaption: document.getElementById("brandCaption"),
       curriculum: document.getElementById("curriculum"),
@@ -848,6 +867,7 @@
 
     let allSessions = [];
     let allStudents = [];
+    let allPresets = [];
     let sessionPage = 1;
     let studentPage = 1;
     const pageSize = 20;
@@ -970,17 +990,8 @@
       fields.questionTimerSec.value = config.questionTimerSec ?? "";
     }
 
-    async function loadConfig() {
-      setStatus(authStatus, "Loading settings...", "#85321e");
-      const config = await api("/admin/config");
-      fillForm(config);
-      setStatus(authStatus, "Settings loaded.", "#1f7a4d");
-      setStatus(saveStatus, "");
-    }
-
-    async function saveConfig() {
-      setStatus(saveStatus, "Saving live settings...", "#85321e");
-      const payload = {
+    function readSettingsPayload() {
+      return {
         brandTitle: fields.brandTitle.value,
         brandCaption: fields.brandCaption.value,
         curriculum: fields.curriculum.value,
@@ -992,12 +1003,103 @@
         questionsPerRound: Number(fields.questionsPerRound.value),
         questionTimerSec: Number(fields.questionTimerSec.value)
       };
+    }
+
+    async function loadConfig() {
+      setStatus(authStatus, "Loading settings...", "#85321e");
+      const config = await api("/admin/config");
+      fillForm(config);
+      setStatus(authStatus, "Settings loaded.", "#1f7a4d");
+      setStatus(saveStatus, "");
+    }
+
+    async function saveConfig() {
+      setStatus(saveStatus, "Saving live settings...", "#85321e");
+      const payload = readSettingsPayload();
       const result = await api("/admin/config", {
         method: "PUT",
         body: JSON.stringify(payload)
       });
       fillForm(result.config);
       setStatus(saveStatus, result.persisted ? "Live settings saved to gateway and database." : "Live settings saved to gateway.", "#1f7a4d");
+    }
+
+    function renderPresets() {
+      fields.presetSelect.innerHTML = "";
+      if (!allPresets.length) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "No presets saved";
+        fields.presetSelect.appendChild(option);
+        return;
+      }
+
+      for (const preset of allPresets) {
+        const option = document.createElement("option");
+        option.value = preset.id;
+        option.textContent = `${preset.name} | Grade ${preset.config?.gradeLevel || "?"} ${preset.config?.subject || ""}`;
+        fields.presetSelect.appendChild(option);
+      }
+    }
+
+    async function loadPresets() {
+      setStatus(saveStatus, "Loading presets...", "#85321e");
+      const data = await api("/admin/presets");
+      allPresets = data.presets || [];
+      renderPresets();
+      setStatus(saveStatus, `Loaded ${allPresets.length} preset(s).`, "#1f7a4d");
+    }
+
+    async function savePreset() {
+      const name = fields.presetName.value.trim();
+      if (!name) {
+        setStatus(saveStatus, "Preset name is required.", "#a33d3d");
+        return;
+      }
+
+      setStatus(saveStatus, "Saving preset...", "#85321e");
+      await api("/admin/presets", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          description: fields.presetDescription.value,
+          config: readSettingsPayload()
+        })
+      });
+      fields.presetName.value = "";
+      fields.presetDescription.value = "";
+      await loadPresets();
+      setStatus(saveStatus, "Preset saved.", "#1f7a4d");
+    }
+
+    async function applyPreset() {
+      const presetId = fields.presetSelect.value;
+      if (!presetId) {
+        setStatus(saveStatus, "Select a preset first.", "#a33d3d");
+        return;
+      }
+
+      setStatus(saveStatus, "Applying preset...", "#85321e");
+      const result = await api(`/admin/presets/${encodeURIComponent(presetId)}/apply`, { method: "POST" });
+      fillForm(result.config);
+      setStatus(saveStatus, "Preset applied to live settings.", "#1f7a4d");
+    }
+
+    async function deletePreset() {
+      const presetId = fields.presetSelect.value;
+      const preset = allPresets.find((item) => item.id === presetId);
+      if (!presetId || !preset) {
+        setStatus(saveStatus, "Select a preset first.", "#a33d3d");
+        return;
+      }
+
+      if (!confirm(`Delete preset "${preset.name}"?`)) {
+        return;
+      }
+
+      await api(`/admin/presets/${encodeURIComponent(presetId)}`, { method: "DELETE" });
+      await loadPresets();
+      setStatus(saveStatus, "Preset deleted.", "#1f7a4d");
     }
 
     function renderOverview(data) {
@@ -1855,6 +1957,7 @@
     document.getElementById("loadButton").addEventListener("click", async () => {
       try {
         await loadConfig();
+        await loadPresets();
       } catch (error) {
         setStatus(authStatus, error.message, "#a33d3d");
       }
@@ -1871,6 +1974,38 @@
     document.getElementById("saveButton").addEventListener("click", async () => {
       try {
         await saveConfig();
+      } catch (error) {
+        setStatus(saveStatus, error.message, "#a33d3d");
+      }
+    });
+
+    document.getElementById("savePresetButton").addEventListener("click", async () => {
+      try {
+        await savePreset();
+      } catch (error) {
+        setStatus(saveStatus, error.message, "#a33d3d");
+      }
+    });
+
+    document.getElementById("loadPresetsButton").addEventListener("click", async () => {
+      try {
+        await loadPresets();
+      } catch (error) {
+        setStatus(saveStatus, error.message, "#a33d3d");
+      }
+    });
+
+    document.getElementById("applyPresetButton").addEventListener("click", async () => {
+      try {
+        await applyPreset();
+      } catch (error) {
+        setStatus(saveStatus, error.message, "#a33d3d");
+      }
+    });
+
+    document.getElementById("deletePresetButton").addEventListener("click", async () => {
+      try {
+        await deletePreset();
       } catch (error) {
         setStatus(saveStatus, error.message, "#a33d3d");
       }

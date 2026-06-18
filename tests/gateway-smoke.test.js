@@ -74,4 +74,12 @@ test("gateway exposes public health/config and protects admin origins", async (t
   assert.equal(allowedAdminResponse.status, 200, logs);
   assert.equal(allowedAdminResponse.headers.get("access-control-allow-origin"), "https://admintv.cambobia.com");
   assert.ok(allowedAdminResponse.headers.get("x-ratelimit-limit"));
+
+  const presetsWithoutDbResponse = await fetch(`${baseUrl}/admin/presets`, {
+    headers: {
+      Origin: "https://admintv.cambobia.com",
+      Authorization: "Bearer test-admin-token"
+    }
+  });
+  assert.equal(presetsWithoutDbResponse.status, 503);
 });
