@@ -1023,6 +1023,99 @@ async function initDatabase() {
   await dbQuery("CREATE INDEX IF NOT EXISTS idx_quiz_sessions_created_at ON quiz_sessions(created_at DESC)");
   await dbQuery("CREATE INDEX IF NOT EXISTS idx_answers_student_created ON student_answers(student_id, created_at DESC)");
   await dbQuery("CREATE INDEX IF NOT EXISTS idx_progress_subject_grade ON student_progress(subject, grade_level)");
+  
+  // Admin users table for multi-admin support
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS admin_users (
+      id TEXT PRIMARY KEY,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'admin',
+      email TEXT,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_login_at TIMESTAMPTZ
+    )
+  `);
+  
+  // Audit log table
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id TEXT PRIMARY KEY,
+      admin_id TEXT,
+      admin_username TEXT NOT NULL,
+      action TEXT NOT NULL,
+      resource_type TEXT,
+      resource_id TEXT,
+      details JSONB,
+      ip_address TEXT,
+      user_agent TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await dbQuery("CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC)");
+  await dbQuery("CREATE INDEX IF NOT EXISTS idx_audit_logs_admin ON audit_logs(admin_id, created_at DESC)");
+  
+  // Question bank table
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS question_bank (
+      id TEXT PRIMARY KEY,
+      curriculum TEXT NOT NULL,
+      language TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      grade_level INTEGER NOT NULL,
+      difficulty_mode TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      choices JSONB NOT NULL,
+      correct_choice TEXT NOT NULL,
+      short_explanation TEXT NOT NULL,
+      elaboration TEXT NOT NULL,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      usage_count INTEGER NOT NULL DEFAULT 0,
+      created_by TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await dbQuery("CREATE INDEX IF NOT EXISTS idx_question_bank_lookup ON question_bank(subject, grade_level, is_active)");
+  
+  // Student blocks table
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS student_blocks (
+      id TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      reason TEXT,
+      blocked_by TEXT,
+      blocked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE
+    )
+  `);
+  await dbQuery("CREATE INDEX IF NOT EXISTS idx_student_blocks_student ON student_blocks(student_id, is_active)");
+  
+  // Student groups table
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS student_groups (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      created_by TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS student_group_members (
+      group_id TEXT NOT NULL REFERENCES student_groups(id) ON DELETE CASCADE,
+      student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      added_by TEXT,
+      added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (group_id, student_id)
+    )
+  `);
+  
   return true;
 }
 
@@ -1720,6 +1813,290 @@ app.post("/admin/reports/sessions/cleanup", requireAdmin, async (req, res) => {
     console.error("Failed to delete old sessions:", error);
     res.status(500).json({ error: "Failed to delete old sessions" });
   }
+});
+
+// Question Bank Management
+app.get("/admin/questions", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  const limit = getReportLimit(req.query.limit, 100);
+  const subject = req.query.subject || "";
+  const gradeLevel = req.query.gradeLevel ? Number(req.query.gradeLevel) : null;
+  
+  let query = `SELECT * FROM question_bank WHERE is_active = TRUE`;
+  const params = [];
+  let paramIndex = 1;
+  
+  if (subject) {
+    params.push(subject);
+    query += ` AND subject = $${paramIndex++}`;
+  }
+  if (gradeLevel) {
+    params.push(gradeLevel);
+    query += ` AND grade_level = $${paramIndex++}`;
+  }
+  
+  query += ` ORDER BY created_at DESC LIMIT $${paramIndex}`;
+  params.push(limit);
+  
+  const result = await dbQuery(query, params);
+  res.json({ questions: result?.rows || [] });
+});
+
+app.post("/admin/questions", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  const { curriculum, language, subject, grade_level, difficulty_mode, prompt, choices, correct_choice, short_explanation, elaboration } = req.body;
+  
+  const questionId = createId();
+  await dbQuery(
+    `INSERT INTO question_bank (
+      id, curriculum, language, subject, grade_level, difficulty_mode,
+      prompt, choices, correct_choice, short_explanation, elaboration, created_by
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12)`,
+    [questionId, curriculum, language, subject, grade_level, difficulty_mode, prompt, JSON.stringify(choices), correct_choice, short_explanation, elaboration, "admin"]
+  );
+  
+  res.json({ ok: true, id: questionId });
+});
+
+app.put("/admin/questions/:id", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  const questionId = req.params.id;
+  const { prompt, choices, correct_choice, short_explanation, elaboration, is_active } = req.body;
+  
+  await dbQuery(
+    `UPDATE question_bank SET 
+      prompt = $2, choices = $3::jsonb, correct_choice = $4, 
+      short_explanation = $5, elaboration = $6, is_active = $7, updated_at = NOW()
+     WHERE id = $1`,
+    [questionId, prompt, JSON.stringify(choices), correct_choice, short_explanation, elaboration, is_active !== false]
+  );
+  
+  res.json({ ok: true });
+});
+
+app.delete("/admin/questions/:id", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  const questionId = req.params.id;
+  await dbQuery(`UPDATE question_bank SET is_active = FALSE WHERE id = $1`, [questionId]);
+  res.json({ ok: true });
+});
+
+// Student Management
+app.put("/admin/students/:id", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  const studentId = req.params.id;
+  const { display_name } = req.body;
+  
+  await dbQuery(
+    `UPDATE students SET display_name = $2, updated_at = NOW() WHERE id = $1`,
+    [studentId, sanitizeStudentName(display_name)]
+  );
+  
+  res.json({ ok: true });
+});
+
+app.post("/admin/students/:id/block", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  const studentId = req.params.id;
+  const { reason, expires_at } = req.body;
+  
+  const blockId = createId();
+  await dbQuery(
+    `INSERT INTO student_blocks (id, student_id, reason, blocked_by, expires_at)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [blockId, studentId, reason || "Blocked by admin", "admin", expires_at || null]
+  );
+  
+  res.json({ ok: true, blockId });
+});
+
+app.delete("/admin/students/:id/block", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  const studentId = req.params.id;
+  await dbQuery(`UPDATE student_blocks SET is_active = FALSE WHERE student_id = $1 AND is_active = TRUE`, [studentId]);
+  res.json({ ok: true });
+});
+
+// Student Groups
+app.get("/admin/groups", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  const result = await dbQuery(`
+    SELECT g.*, COUNT(m.student_id)::int AS member_count
+    FROM student_groups g
+    LEFT JOIN student_group_members m ON m.group_id = g.id
+    GROUP BY g.id
+    ORDER BY g.created_at DESC
+  `);
+  
+  res.json({ groups: result?.rows || [] });
+});
+
+app.post("/admin/groups", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  const { name, description } = req.body;
+  const groupId = createId();
+  
+  await dbQuery(
+    `INSERT INTO student_groups (id, name, description, created_by) VALUES ($1, $2, $3, $4)`,
+    [groupId, name, description || "", "admin"]
+  );
+  
+  res.json({ ok: true, groupId });
+});
+
+app.post("/admin/groups/:id/members", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  const groupId = req.params.id;
+  const { student_id } = req.body;
+  
+  await dbQuery(
+    `INSERT INTO student_group_members (group_id, student_id, added_by)
+     VALUES ($1, $2, $3)
+     ON CONFLICT DO NOTHING`,
+    [groupId, student_id, "admin"]
+  );
+  
+  res.json({ ok: true });
+});
+
+// Audit Logs
+app.get("/admin/audit", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  const limit = getReportLimit(req.query.limit, 100);
+  const result = await dbQuery(
+    `SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT $1`,
+    [limit]
+  );
+  
+  res.json({ logs: result?.rows || [] });
+});
+
+async function logAuditAction(action, resourceType, resourceId, details, req) {
+  if (!db) return;
+  
+  const auditId = createId();
+  await dbQuery(
+    `INSERT INTO audit_logs (id, admin_username, action, resource_type, resource_id, details, ip_address, user_agent)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)`,
+    [
+      auditId,
+      "admin",
+      action,
+      resourceType || null,
+      resourceId || null,
+      details ? JSON.stringify(details) : null,
+      req.ip || req.connection?.remoteAddress || null,
+      req.get("user-agent") || null
+    ]
+  );
+}
+
+// Active Session Control
+app.get("/admin/active-sessions", requireAdmin, (_req, res) => {
+  const activeSessions = [];
+  for (const [roomCode, room] of rooms.entries()) {
+    activeSessions.push({
+      roomCode,
+      status: room.status,
+      playerCount: room.players.size,
+      questionIndex: room.questionIndex,
+      sessionId: room.sessionId,
+      startedAt: room.startedAt
+    });
+  }
+  res.json({ sessions: activeSessions });
+});
+
+app.post("/admin/active-sessions/:roomCode/close", requireAdmin, (req, res) => {
+  const roomCode = String(req.params.roomCode || "").trim().toUpperCase();
+  const room = rooms.get(roomCode);
+  
+  if (!room) {
+    res.status(404).json({ error: "Room not found" });
+    return;
+  }
+  
+  clearRoomTimer(room);
+  for (const player of room.players.values()) {
+    send(player.ws, {
+      type: "room_closed",
+      roomCode,
+      reason: "Closed by admin"
+    });
+  }
+  send(room.tv, {
+    type: "room_closed",
+    roomCode,
+    reason: "Closed by admin"
+  });
+  
+  void persistSessionStatus(room, "CLOSED");
+  rooms.delete(roomCode);
+  
+  res.json({ ok: true, message: "Room closed successfully" });
+});
+
+app.post("/admin/active-sessions/:roomCode/kick/:playerId", requireAdmin, (req, res) => {
+  const roomCode = String(req.params.roomCode || "").trim().toUpperCase();
+  const playerId = String(req.params.playerId || "");
+  const room = rooms.get(roomCode);
+  
+  if (!room) {
+    res.status(404).json({ error: "Room not found" });
+    return;
+  }
+  
+  const player = room.players.get(playerId);
+  if (!player) {
+    res.status(404).json({ error: "Player not found" });
+    return;
+  }
+  
+  send(player.ws, {
+    type: "kicked",
+    reason: "Removed by admin"
+  });
+  
+  if (player.ws) {
+    player.ws.close();
+  }
+  room.players.delete(playerId);
+  broadcastRoomState(roomCode);
+  
+  res.json({ ok: true, message: "Player kicked successfully" });
 });
 
 function generateRoomCode() {
