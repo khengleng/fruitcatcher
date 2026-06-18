@@ -347,6 +347,9 @@
         <button class="tab active" data-tab="settings">Settings</button>
         <button class="tab" data-tab="sessions">Quiz Sessions</button>
         <button class="tab" data-tab="students">Students</button>
+        <button class="tab" data-tab="questions">Question Bank</button>
+        <button class="tab" data-tab="groups">Groups</button>
+        <button class="tab" data-tab="activeSessions">Active Sessions</button>
         <button class="tab" data-tab="analytics">Analytics</button>
         <button class="tab" data-tab="audit">Audit Log</button>
       </nav>
@@ -562,27 +565,205 @@
         </div>
       </section>
 
+      <section id="questionsPanel" class="panel" hidden>
+        <h2>Question Bank</h2>
+        <p class="muted">Manage custom quiz questions for all subjects and grade levels.</p>
+
+        <div class="filter-grid" style="margin-top:14px;">
+          <label>
+            Subject Filter
+            <select id="questionSubjectFilter">
+              <option value="">All Subjects</option>
+              <option value="math">Math</option>
+              <option value="general_science">General Science</option>
+              <option value="biology">Biology</option>
+              <option value="chemistry">Chemistry</option>
+              <option value="physics">Physics</option>
+              <option value="english">English</option>
+            </select>
+          </label>
+          <label>
+            Grade Level Filter
+            <select id="questionGradeFilter">
+              <option value="">All Grades</option>
+              <option value="2">Grade 2</option>
+              <option value="3">Grade 3</option>
+              <option value="4">Grade 4</option>
+              <option value="5">Grade 5</option>
+              <option value="6">Grade 6</option>
+              <option value="7">Grade 7</option>
+              <option value="8">Grade 8</option>
+              <option value="9">Grade 9</option>
+              <option value="10">Grade 10</option>
+              <option value="11">Grade 11</option>
+              <option value="12">Grade 12</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="actions">
+          <button id="loadQuestionsButton" class="secondary small">Load Questions</button>
+          <button id="createQuestionButton" class="success small">➕ Create New Question</button>
+        </div>
+
+        <div class="table-wrap" style="margin-top:14px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Subject</th>
+                <th>Grade</th>
+                <th>Question</th>
+                <th>Correct</th>
+                <th>Usage</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="questionsBody"></tbody>
+          </table>
+        </div>
+
+        <div id="questionFormModal" class="detail" hidden style="margin-top:18px;">
+          <h3 id="questionFormTitle">Create New Question</h3>
+          <div class="settings-grid">
+            <label>Subject<select id="qSubject">
+              <option value="math">Math</option>
+              <option value="general_science">General Science</option>
+              <option value="biology">Biology</option>
+              <option value="chemistry">Chemistry</option>
+              <option value="physics">Physics</option>
+              <option value="english">English</option>
+            </select></label>
+            <label>Grade Level<select id="qGradeLevel">
+              <option value="2">Grade 2</option>
+              <option value="3">Grade 3</option>
+              <option value="4">Grade 4</option>
+              <option value="5">Grade 5</option>
+              <option value="6">Grade 6</option>
+              <option value="7">Grade 7</option>
+              <option value="8">Grade 8</option>
+              <option value="9">Grade 9</option>
+              <option value="10">Grade 10</option>
+              <option value="11">Grade 11</option>
+              <option value="12">Grade 12</option>
+            </select></label>
+            <label>Curriculum<select id="qCurriculum">
+              <option value="international">International</option>
+              <option value="cambodia_moeys">Cambodia MoEYS</option>
+            </select></label>
+            <label>Language<select id="qLanguage">
+              <option value="english">English</option>
+              <option value="khmer">Khmer</option>
+              <option value="bilingual">Bilingual</option>
+            </select></label>
+            <label>Difficulty<select id="qDifficulty">
+              <option value="easy">Easy</option>
+              <option value="standard">Standard</option>
+              <option value="challenge">Challenge</option>
+            </select></label>
+          </div>
+          <label style="margin-top:14px;">Question Prompt<input id="qPrompt" type="text" placeholder="Enter the question..."></label>
+          <label>Choice A<input id="qChoiceA" type="text"></label>
+          <label>Choice B<input id="qChoiceB" type="text"></label>
+          <label>Choice C<input id="qChoiceC" type="text"></label>
+          <label>Choice D<input id="qChoiceD" type="text"></label>
+          <label>Correct Answer<select id="qCorrectChoice">
+            <option value="A">A</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+            <option value="D">D</option>
+          </select></label>
+          <label>Short Explanation<input id="qShortExplanation" type="text" placeholder="Brief explanation (under 30 words)"></label>
+          <label>Elaboration<input id="qElaboration" type="text" placeholder="Detailed explanation (under 90 words)"></label>
+          <div class="actions">
+            <button id="saveQuestionButton">Save Question</button>
+            <button id="cancelQuestionButton" class="secondary">Cancel</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="groupsPanel" class="panel" hidden>
+        <h2>Student Groups</h2>
+        <p class="muted">Organize students into groups for better management and analytics.</p>
+
+        <div class="actions" style="margin-top:14px;">
+          <button id="loadGroupsButton" class="secondary small">Load Groups</button>
+          <button id="createGroupButton" class="success small">➕ Create New Group</button>
+        </div>
+
+        <div class="table-wrap" style="margin-top:14px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Group Name</th>
+                <th>Description</th>
+                <th>Members</th>
+                <th>Created</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="groupsBody"></tbody>
+          </table>
+        </div>
+
+        <div id="groupFormModal" class="detail" hidden style="margin-top:18px;">
+          <h3>Create New Group</h3>
+          <label>Group Name<input id="groupName" type="text" placeholder="Enter group name..."></label>
+          <label>Description<input id="groupDescription" type="text" placeholder="Optional description..."></label>
+          <div class="actions">
+            <button id="saveGroupButton">Create Group</button>
+            <button id="cancelGroupButton" class="secondary">Cancel</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="activeSessionsPanel" class="panel" hidden>
+        <h2>Active Quiz Sessions</h2>
+        <p class="muted">Monitor and control live quiz rooms in real-time.</p>
+
+        <div class="actions" style="margin-top:14px;">
+          <button id="refreshActiveSessionsButton" class="secondary small">🔄 Refresh</button>
+        </div>
+
+        <div class="table-wrap" style="margin-top:14px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Room Code</th>
+                <th>Status</th>
+                <th>Players</th>
+                <th>Question</th>
+                <th>Started</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="activeSessionsBody"></tbody>
+          </table>
+        </div>
+
+        <div id="activeSessionDetail" class="detail"></div>
+      </section>
+
       <section id="auditPanel" class="panel" hidden>
         <h2>Admin Action Audit Log</h2>
         <p class="muted">Track all administrative actions for security and compliance.</p>
+
+        <div class="actions" style="margin-top:14px;">
+          <button id="loadAuditLogsButton" class="secondary small">Load Logs</button>
+          <button id="exportAuditCSV" class="success small">📥 Export CSV</button>
+        </div>
 
         <div class="table-wrap" style="margin-top:14px;">
           <table>
             <thead>
               <tr>
                 <th>Timestamp</th>
+                <th>Admin</th>
                 <th>Action</th>
-                <th>Details</th>
+                <th>Resource</th>
                 <th>IP Address</th>
               </tr>
             </thead>
-            <tbody id="auditBody">
-              <tr>
-                <td colspan="4" style="text-align:center; color:var(--muted); padding:24px;">
-                  Audit logging will be implemented in the next phase.
-                </td>
-              </tr>
-            </tbody>
+            <tbody id="auditBody"></tbody>
           </table>
         </div>
       </section>
@@ -1110,6 +1291,305 @@
       }
     }
 
+    // Question Bank Functions
+    let allQuestions = [];
+    let editingQuestionId = null;
+
+    async function loadQuestions() {
+      try {
+        setStatus(authStatus, "Loading questions...", "#85321e");
+        const subject = document.getElementById("questionSubjectFilter").value;
+        const gradeLevel = document.getElementById("questionGradeFilter").value;
+        let url = "/admin/questions?limit=100";
+        if (subject) url += `&subject=${subject}`;
+        if (gradeLevel) url += `&gradeLevel=${gradeLevel}`;
+        
+        const data = await api(url);
+        allQuestions = data.questions || [];
+        renderQuestions();
+        setStatus(authStatus, `Loaded ${allQuestions.length} questions.`, "#1f7a4d");
+      } catch (error) {
+        setStatus(authStatus, error.message, "#a33d3d");
+      }
+    }
+
+    function renderQuestions() {
+      const tbody = document.getElementById("questionsBody");
+      tbody.innerHTML = "";
+      
+      for (const q of allQuestions) {
+        const row = document.createElement("tr");
+        appendCell(row, q.subject);
+        appendCell(row, `Grade ${q.grade_level}`);
+        appendCell(row, q.prompt.substring(0, 60) + (q.prompt.length > 60 ? "..." : ""));
+        appendCell(row, q.correct_choice);
+        appendCell(row, q.usage_count || 0);
+        
+        const actionCell = document.createElement("td");
+        const editBtn = document.createElement("button");
+        editBtn.className = "secondary small";
+        editBtn.textContent = "Edit";
+        editBtn.onclick = () => editQuestion(q);
+        const delBtn = document.createElement("button");
+        delBtn.className = "danger small";
+        delBtn.textContent = "Delete";
+        delBtn.style.marginLeft = "6px";
+        delBtn.onclick = () => deleteQuestion(q.id);
+        actionCell.append(editBtn, delBtn);
+        row.appendChild(actionCell);
+        tbody.appendChild(row);
+      }
+      
+      if (allQuestions.length === 0) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 6;
+        cell.style.textAlign = "center";
+        cell.style.padding = "24px";
+        cell.style.color = "var(--muted)";
+        cell.textContent = "No questions found. Click 'Create New Question' to add one.";
+        row.appendChild(cell);
+        tbody.appendChild(row);
+      }
+    }
+
+    function showQuestionForm(question = null) {
+      editingQuestionId = question ? question.id : null;
+      document.getElementById("questionFormTitle").textContent = question ? "Edit Question" : "Create New Question";
+      document.getElementById("qSubject").value = question?.subject || "math";
+      document.getElementById("qGradeLevel").value = question?.grade_level || "6";
+      document.getElementById("qCurriculum").value = question?.curriculum || "international";
+      document.getElementById("qLanguage").value = question?.language || "english";
+      document.getElementById("qDifficulty").value = question?.difficulty_mode || "standard";
+      document.getElementById("qPrompt").value = question?.prompt || "";
+      
+      const choices = question?.choices || [];
+      document.getElementById("qChoiceA").value = choices.find(c => c.id === "A")?.text || "";
+      document.getElementById("qChoiceB").value = choices.find(c => c.id === "B")?.text || "";
+      document.getElementById("qChoiceC").value = choices.find(c => c.id === "C")?.text || "";
+      document.getElementById("qChoiceD").value = choices.find(c => c.id === "D")?.text || "";
+      document.getElementById("qCorrectChoice").value = question?.correct_choice || "A";
+      document.getElementById("qShortExplanation").value = question?.short_explanation || "";
+      document.getElementById("qElaboration").value = question?.elaboration || "";
+      
+      document.getElementById("questionFormModal").hidden = false;
+    }
+
+    function editQuestion(question) {
+      showQuestionForm(question);
+    }
+
+    async function saveQuestion() {
+      try {
+        const payload = {
+          curriculum: document.getElementById("qCurriculum").value,
+          language: document.getElementById("qLanguage").value,
+          subject: document.getElementById("qSubject").value,
+          grade_level: Number(document.getElementById("qGradeLevel").value),
+          difficulty_mode: document.getElementById("qDifficulty").value,
+          prompt: document.getElementById("qPrompt").value,
+          choices: [
+            { id: "A", text: document.getElementById("qChoiceA").value },
+            { id: "B", text: document.getElementById("qChoiceB").value },
+            { id: "C", text: document.getElementById("qChoiceC").value },
+            { id: "D", text: document.getElementById("qChoiceD").value }
+          ],
+          correct_choice: document.getElementById("qCorrectChoice").value,
+          short_explanation: document.getElementById("qShortExplanation").value,
+          elaboration: document.getElementById("qElaboration").value
+        };
+        
+        if (editingQuestionId) {
+          await api(`/admin/questions/${editingQuestionId}`, { method: "PUT", body: JSON.stringify(payload) });
+          setStatus(authStatus, "Question updated successfully.", "#1f7a4d");
+        } else {
+          await api("/admin/questions", { method: "POST", body: JSON.stringify(payload) });
+          setStatus(authStatus, "Question created successfully.", "#1f7a4d");
+        }
+        
+        document.getElementById("questionFormModal").hidden = true;
+        await loadQuestions();
+      } catch (error) {
+        setStatus(authStatus, error.message, "#a33d3d");
+      }
+    }
+
+    async function deleteQuestion(questionId) {
+      if (!confirm("Delete this question? This action cannot be undone.")) return;
+      
+      try {
+        await api(`/admin/questions/${questionId}`, { method: "DELETE" });
+        setStatus(authStatus, "Question deleted successfully.", "#1f7a4d");
+        await loadQuestions();
+      } catch (error) {
+        setStatus(authStatus, error.message, "#a33d3d");
+      }
+    }
+
+    // Groups Functions
+    let allGroups = [];
+
+    async function loadGroups() {
+      try {
+        setStatus(authStatus, "Loading groups...", "#85321e");
+        const data = await api("/admin/groups");
+        allGroups = data.groups || [];
+        renderGroups();
+        setStatus(authStatus, `Loaded ${allGroups.length} groups.`, "#1f7a4d");
+      } catch (error) {
+        setStatus(authStatus, error.message, "#a33d3d");
+      }
+    }
+
+    function renderGroups() {
+      const tbody = document.getElementById("groupsBody");
+      tbody.innerHTML = "";
+      
+      for (const group of allGroups) {
+        const row = document.createElement("tr");
+        appendCell(row, group.name);
+        appendCell(row, group.description || "-");
+        appendCell(row, group.member_count || 0);
+        appendCell(row, formatDate(group.created_at));
+        appendButtonCell(row, "View", () => alert(`Group management coming soon`));
+        tbody.appendChild(row);
+      }
+      
+      if (allGroups.length === 0) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 5;
+        cell.style.textAlign = "center";
+        cell.style.padding = "24px";
+        cell.style.color = "var(--muted)";
+        cell.textContent = "No groups found. Click 'Create New Group' to add one.";
+        row.appendChild(cell);
+        tbody.appendChild(row);
+      }
+    }
+
+    function showGroupForm() {
+      document.getElementById("groupName").value = "";
+      document.getElementById("groupDescription").value = "";
+      document.getElementById("groupFormModal").hidden = false;
+    }
+
+    async function saveGroup() {
+      try {
+        const payload = {
+          name: document.getElementById("groupName").value,
+          description: document.getElementById("groupDescription").value
+        };
+        
+        await api("/admin/groups", { method: "POST", body: JSON.stringify(payload) });
+        setStatus(authStatus, "Group created successfully.", "#1f7a4d");
+        document.getElementById("groupFormModal").hidden = true;
+        await loadGroups();
+      } catch (error) {
+        setStatus(authStatus, error.message, "#a33d3d");
+      }
+    }
+
+    // Active Sessions Functions
+    async function loadActiveSessions() {
+      try {
+        setStatus(authStatus, "Loading active sessions...", "#85321e");
+        const data = await api("/admin/active-sessions");
+        const sessions = data.sessions || [];
+        renderActiveSessions(sessions);
+        setStatus(authStatus, `Found ${sessions.length} active sessions.`, "#1f7a4d");
+      } catch (error) {
+        setStatus(authStatus, error.message, "#a33d3d");
+      }
+    }
+
+    function renderActiveSessions(sessions) {
+      const tbody = document.getElementById("activeSessionsBody");
+      tbody.innerHTML = "";
+      
+      for (const session of sessions) {
+        const row = document.createElement("tr");
+        appendCell(row, session.roomCode);
+        appendCell(row, session.status);
+        appendCell(row, session.playerCount);
+        appendCell(row, `${session.questionIndex + 1}`);
+        appendCell(row, session.startedAt ? formatDate(session.startedAt) : "-");
+        
+        const actionCell = document.createElement("td");
+        const closeBtn = document.createElement("button");
+        closeBtn.className = "danger small";
+        closeBtn.textContent = "Close Room";
+        closeBtn.onclick = () => closeActiveSession(session.roomCode);
+        actionCell.appendChild(closeBtn);
+        row.appendChild(actionCell);
+        tbody.appendChild(row);
+      }
+      
+      if (sessions.length === 0) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 6;
+        cell.style.textAlign = "center";
+        cell.style.padding = "24px";
+        cell.style.color = "var(--muted)";
+        cell.textContent = "No active quiz sessions.";
+        row.appendChild(cell);
+        tbody.appendChild(row);
+      }
+    }
+
+    async function closeActiveSession(roomCode) {
+      if (!confirm(`Close room ${roomCode}? All players will be disconnected.`)) return;
+      
+      try {
+        await api(`/admin/active-sessions/${roomCode}/close`, { method: "POST" });
+        setStatus(authStatus, `Room ${roomCode} closed successfully.`, "#1f7a4d");
+        await loadActiveSessions();
+      } catch (error) {
+        setStatus(authStatus, error.message, "#a33d3d");
+      }
+    }
+
+    // Audit Log Functions
+    async function loadAuditLogs() {
+      try {
+        setStatus(authStatus, "Loading audit logs...", "#85321e");
+        const data = await api("/admin/audit?limit=100");
+        const logs = data.logs || [];
+        renderAuditLogs(logs);
+        setStatus(authStatus, `Loaded ${logs.length} audit log entries.`, "#1f7a4d");
+      } catch (error) {
+        setStatus(authStatus, error.message, "#a33d3d");
+      }
+    }
+
+    function renderAuditLogs(logs) {
+      const tbody = document.getElementById("auditBody");
+      tbody.innerHTML = "";
+      
+      for (const log of logs) {
+        const row = document.createElement("tr");
+        appendCell(row, formatDate(log.created_at));
+        appendCell(row, log.admin_username);
+        appendCell(row, log.action);
+        appendCell(row, log.resource_type ? `${log.resource_type}:${log.resource_id || ''}` : "-");
+        appendCell(row, log.ip_address || "-");
+        tbody.appendChild(row);
+      }
+      
+      if (logs.length === 0) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 5;
+        cell.style.textAlign = "center";
+        cell.style.padding = "24px";
+        cell.style.color = "var(--muted)";
+        cell.textContent = "No audit log entries found.";
+        row.appendChild(cell);
+        tbody.appendChild(row);
+      }
+    }
+
     function showTab(tabName) {
       document.querySelectorAll("button.tab").forEach((button) => {
         button.classList.toggle("active", button.dataset.tab === tabName);
@@ -1117,6 +1597,9 @@
       document.getElementById("settingsPanel").hidden = tabName !== "settings";
       document.getElementById("sessionsPanel").hidden = tabName !== "sessions";
       document.getElementById("studentsPanel").hidden = tabName !== "students";
+      document.getElementById("questionsPanel").hidden = tabName !== "questions";
+      document.getElementById("groupsPanel").hidden = tabName !== "groups";
+      document.getElementById("activeSessionsPanel").hidden = tabName !== "activeSessions";
       document.getElementById("analyticsPanel").hidden = tabName !== "analytics";
       document.getElementById("auditPanel").hidden = tabName !== "audit";
       
@@ -1124,6 +1607,14 @@
         refreshReports();
       } else if (tabName === "analytics") {
         loadAnalytics();
+      } else if (tabName === "questions") {
+        loadQuestions();
+      } else if (tabName === "groups") {
+        loadGroups();
+      } else if (tabName === "activeSessions") {
+        loadActiveSessions();
+      } else if (tabName === "audit") {
+        loadAuditLogs();
       }
     }
 
@@ -1243,6 +1734,43 @@
 
     // Delete old sessions
     document.getElementById("deleteOldSessions").addEventListener("click", deleteOldSessions);
+
+    // Question Bank event listeners
+    document.getElementById("loadQuestionsButton").addEventListener("click", loadQuestions);
+    document.getElementById("createQuestionButton").addEventListener("click", () => showQuestionForm());
+    document.getElementById("saveQuestionButton").addEventListener("click", saveQuestion);
+    document.getElementById("cancelQuestionButton").addEventListener("click", () => {
+      document.getElementById("questionFormModal").hidden = true;
+    });
+
+    // Groups event listeners
+    document.getElementById("loadGroupsButton").addEventListener("click", loadGroups);
+    document.getElementById("createGroupButton").addEventListener("click", showGroupForm);
+    document.getElementById("saveGroupButton").addEventListener("click", saveGroup);
+    document.getElementById("cancelGroupButton").addEventListener("click", () => {
+      document.getElementById("groupFormModal").hidden = true;
+    });
+
+    // Active Sessions event listeners
+    document.getElementById("refreshActiveSessionsButton").addEventListener("click", loadActiveSessions);
+
+    // Audit Log event listeners
+    document.getElementById("loadAuditLogsButton").addEventListener("click", loadAuditLogs);
+    document.getElementById("exportAuditCSV").addEventListener("click", () => {
+      const tbody = document.getElementById("auditBody");
+      const rows = Array.from(tbody.querySelectorAll("tr"));
+      const data = rows.map(row => {
+        const cells = Array.from(row.querySelectorAll("td"));
+        return {
+          timestamp: cells[0]?.textContent || "",
+          admin: cells[1]?.textContent || "",
+          action: cells[2]?.textContent || "",
+          resource: cells[3]?.textContent || "",
+          ip_address: cells[4]?.textContent || ""
+        };
+      }).filter(row => row.timestamp);
+      exportToCSV(data, "audit-logs.csv");
+    });
 
     // Auto-refresh active rooms every 30 seconds
     setInterval(updateActiveRooms, 30000);
