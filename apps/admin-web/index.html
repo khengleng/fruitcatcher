@@ -328,8 +328,16 @@
       <section class="panel">
         <div class="auth-grid">
           <label>
-            Admin token
-            <input id="adminToken" type="password" placeholder="Gateway ADMIN_TOKEN">
+            Username
+            <input id="adminUsername" type="text" autocomplete="username" placeholder="admin">
+          </label>
+          <label>
+            Password
+            <input id="adminPassword" type="password" autocomplete="current-password" placeholder="Admin password">
+          </label>
+          <label>
+            Emergency token
+            <input id="adminToken" type="password" placeholder="Optional legacy ADMIN_TOKEN">
           </label>
           <label>
             Gateway URL
@@ -337,6 +345,8 @@
           </label>
         </div>
         <div class="actions">
+          <button id="loginButton">Login</button>
+          <button id="logoutButton" class="secondary">Logout</button>
           <button id="loadButton" class="secondary">Load Settings</button>
           <button id="refreshReportsButton" class="secondary">Refresh Reports</button>
         </div>
@@ -413,7 +423,10 @@
           <label>
             Question source
             <select id="questionSource">
-              <option value="openai_fallback">OpenAI + fallback</option>
+              <option value="question_bank_openai">Question bank, then OpenAI</option>
+              <option value="question_bank_only">Question bank only</option>
+              <option value="openai_only">OpenAI only</option>
+              <option value="openai_fallback">OpenAI, then fallback</option>
               <option value="fallback_only">Fallback only</option>
             </select>
           </label>
@@ -776,6 +789,8 @@
     const gatewayUrl = appConfig.gatewayHttpUrl || "http://localhost:3000";
 
     const fields = {
+      adminUsername: document.getElementById("adminUsername"),
+      adminPassword: document.getElementById("adminPassword"),
       adminToken: document.getElementById("adminToken"),
       gatewayUrl: document.getElementById("gatewayUrl"),
       brandTitle: document.getElementById("brandTitle"),
@@ -809,9 +824,17 @@
     let gradeChart = null;
     let subjectChart = null;
     let activityChart = null;
+    let adminSession = null;
+
+    try {
+      adminSession = JSON.parse(sessionStorage.getItem("fruitcatcher_admin_session") || "null");
+    } catch (error) {
+      sessionStorage.removeItem("fruitcatcher_admin_session");
+    }
 
     fields.gatewayUrl.value = gatewayUrl;
-    fields.adminToken.value = localStorage.getItem("fruitcatcher_admin_token") || "";
+    fields.adminUsername.value = localStorage.getItem("fruitcatcher_admin_username") || "admin";
+    fields.adminToken.value = sessionStorage.getItem("fruitcatcher_admin_legacy_token") || "";
 
     function setStatus(el, text, color) {
       el.textContent = text;
@@ -819,15 +842,47 @@
     }
 
     function getHeaders() {
-      const token = fields.adminToken.value.trim();
-      localStorage.setItem("fruitcatcher_admin_token", token);
+      const token = adminSession?.token || fields.adminToken.value.trim();
+      if (fields.adminToken.value.trim()) {
+        sessionStorage.setItem("fruitcatcher_admin_legacy_token", fields.adminToken.value.trim());
+      }
       if (!token) {
-        throw new Error("Admin token is required.");
+        throw new Error("Admin login or emergency token is required.");
       }
       return {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`
+        "Authorization": `Bearer ${token}`,
+        "X-Admin-User": adminSession?.user?.username || "admin"
       };
+    }
+
+    async function loginAdmin() {
+      setStatus(authStatus, "Logging in...", "#85321e");
+      const username = fields.adminUsername.value.trim();
+      const password = fields.adminPassword.value;
+      const response = await fetch(`${gatewayUrl}/admin/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error || "Login failed");
+      }
+      adminSession = body;
+      fields.adminPassword.value = "";
+      localStorage.setItem("fruitcatcher_admin_username", username);
+      sessionStorage.setItem("fruitcatcher_admin_session", JSON.stringify(adminSession));
+      setStatus(authStatus, `Logged in as ${body.user?.username || username}.`, "#1f7a4d");
+      await loadConfig();
+    }
+
+    function logoutAdmin() {
+      adminSession = null;
+      sessionStorage.removeItem("fruitcatcher_admin_session");
+      sessionStorage.removeItem("fruitcatcher_admin_legacy_token");
+      fields.adminToken.value = "";
+      setStatus(authStatus, "Logged out.", "#687069");
     }
 
     async function api(path, options = {}) {
@@ -1620,6 +1675,26 @@
 
     document.querySelectorAll("button.tab").forEach((button) => {
       button.addEventListener("click", () => showTab(button.dataset.tab));
+    });
+
+    document.getElementById("loginButton").addEventListener("click", async () => {
+      try {
+        await loginAdmin();
+      } catch (error) {
+        setStatus(authStatus, error.message, "#a33d3d");
+      }
+    });
+
+    document.getElementById("logoutButton").addEventListener("click", logoutAdmin);
+
+    fields.adminPassword.addEventListener("keydown", async (event) => {
+      if (event.key === "Enter") {
+        try {
+          await loginAdmin();
+        } catch (error) {
+          setStatus(authStatus, error.message, "#a33d3d");
+        }
+      }
     });
 
     document.getElementById("loadButton").addEventListener("click", async () => {

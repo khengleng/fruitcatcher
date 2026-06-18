@@ -187,6 +187,30 @@
       border: 1px solid rgba(255, 211, 79, 0.4);
       background: rgba(255, 211, 79, 0.08);
     }
+
+    .results {
+      margin-top: 16px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .result-card {
+      border-radius: 14px;
+      padding: 12px 14px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .result-card.correct {
+      border-color: rgba(105, 230, 166, 0.35);
+    }
+
+    .result-card.wrong {
+      border-color: rgba(255, 155, 125, 0.45);
+    }
   </style>
 </head>
 <body>
@@ -215,6 +239,7 @@
         <button id="nextButton" class="secondary" disabled>Next</button>
       </div>
       <div id="explanation" class="explanation"></div>
+      <div id="results" class="results"></div>
       <div id="leaderboard" class="leaderboard"></div>
     </section>
   </main>
@@ -235,6 +260,7 @@
     const questionTextEl = document.getElementById("questionText");
     const answersEl = document.getElementById("answers");
     const explanationEl = document.getElementById("explanation");
+    const resultsEl = document.getElementById("results");
     const leaderboardEl = document.getElementById("leaderboard");
     const hostActionsEl = document.getElementById("hostActions");
     const startButton = document.getElementById("startButton");
@@ -406,6 +432,30 @@
       }
     }
 
+    function renderResults() {
+      resultsEl.innerHTML = "";
+      const results = latestState?.player?.results || [];
+      if (!results.length) {
+        return;
+      }
+
+      const title = document.createElement("div");
+      title.className = "status";
+      title.textContent = "Your recent answers";
+      resultsEl.appendChild(title);
+
+      for (const result of results.slice(-5).reverse()) {
+        const card = document.createElement("div");
+        card.className = `result-card ${result.isCorrect ? "correct" : "wrong"}`;
+        const answer = result.choice || "No answer";
+        card.innerHTML =
+          `<b>Q${Number(result.questionIndex || 0) + 1}: ${result.isCorrect ? "Correct" : "Review"}</b><br>` +
+          `Your answer: ${answer} | Correct: ${result.correctChoice}<br>` +
+          `<span>${formatMathHTML(result.shortExplanation || result.elaboration || "")}</span>`;
+        resultsEl.appendChild(card);
+      }
+    }
+
     function formatMathHTML(text) {
       if (!text) return "";
       return String(text)
@@ -508,6 +558,7 @@
         explanationEl.textContent = "";
         answersEl.innerHTML = "";
         leaderboardEl.innerHTML = "";
+        resultsEl.innerHTML = "";
         joinButton.textContent = "Join";
         updateButtons();
         return;
@@ -549,6 +600,7 @@
       }
 
       renderLeaderboard();
+      renderResults();
       updateButtons();
     }
 

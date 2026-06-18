@@ -12,6 +12,13 @@ const wss = new WebSocket.Server({ server });
 
 const PORT = Number(process.env.PORT || 3000);
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
+const ADMIN_SESSION_TTL_MS = Number(process.env.ADMIN_SESSION_TTL_MS || 12 * 60 * 60 * 1000);
+const ADMIN_ALLOWED_ORIGINS = (process.env.ADMIN_ALLOWED_ORIGINS || "https://admintv.cambobia.com,http://localhost:3002,http://127.0.0.1:3002")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5.4-mini";
 const DATABASE_URL = process.env.DATABASE_URL || "";
@@ -38,7 +45,13 @@ const SUPPORTED_SUBJECTS = [
 const SUPPORTED_CURRICULUMS = ["international", "cambodia_moeys"];
 const SUPPORTED_LANGUAGES = ["english", "khmer", "bilingual"];
 const SUPPORTED_DIFFICULTY_MODES = ["easy", "standard", "challenge"];
-const SUPPORTED_QUESTION_SOURCES = ["openai_fallback", "fallback_only"];
+const SUPPORTED_QUESTION_SOURCES = [
+  "question_bank_openai",
+  "question_bank_only",
+  "openai_only",
+  "openai_fallback",
+  "fallback_only"
+];
 const MIN_GRADE_LEVEL = 2;
 const MAX_GRADE_LEVEL = 12;
 const MAX_ROOM_PLAYERS = 40;
@@ -901,6 +914,63 @@ function createId() {
   return crypto.randomUUID();
 }
 
+function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
+  const hash = crypto.scryptSync(String(password), salt, 64).toString("hex");
+  return `scrypt:${salt}:${hash}`;
+}
+
+function verifyPassword(password, storedHash) {
+  const [, salt, hash] = String(storedHash || "").split(":");
+  if (!salt || !hash) {
+    return false;
+  }
+
+  const candidate = hashPassword(password, salt).split(":")[2];
+  if (candidate.length !== hash.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(Buffer.from(candidate, "hex"), Buffer.from(hash, "hex"));
+}
+
+function signAdminSession(user) {
+  const payload = Buffer.from(JSON.stringify({
+    sub: user.id,
+    username: user.username,
+    role: user.role || "admin",
+    exp: Date.now() + ADMIN_SESSION_TTL_MS
+  })).toString("base64url");
+  const signature = crypto
+    .createHmac("sha256", ADMIN_TOKEN || APP_VERSION)
+    .update(payload)
+    .digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+function verifyAdminSession(token) {
+  const [payload, signature] = String(token || "").split(".");
+  if (!payload || !signature || !ADMIN_TOKEN) {
+    return null;
+  }
+
+  const expected = crypto
+    .createHmac("sha256", ADMIN_TOKEN)
+    .update(payload)
+    .digest("base64url");
+  if (signature.length !== expected.length) {
+    return null;
+  }
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    return null;
+  }
+
+  try {
+    const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return session.exp > Date.now() ? session : null;
+  } catch (error) {
+    return null;
+  }
+}
+
 async function dbQuery(text, params = []) {
   if (!db) {
     return null;
@@ -1124,6 +1194,7 @@ async function initDatabase() {
     )
   `);
   await runDatabaseMigrations();
+  await ensureDefaultAdminUser();
   
   return true;
 }
@@ -1163,6 +1234,23 @@ async function runDatabaseMigrations() {
         difficulty_mode = COALESCE(difficulty_mode, $3),
         elaboration = COALESCE(elaboration, short_explanation, '')
   `, [defaultGameConfig.curriculum, defaultGameConfig.language, defaultGameConfig.difficultyMode]);
+}
+
+async function ensureDefaultAdminUser() {
+  if (!ADMIN_PASSWORD) {
+    return;
+  }
+
+  await dbQueryRequired(
+    `INSERT INTO admin_users (id, username, password_hash, role, is_active, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, TRUE, NOW(), NOW())
+     ON CONFLICT (username) DO UPDATE
+       SET password_hash = EXCLUDED.password_hash,
+           role = EXCLUDED.role,
+           is_active = TRUE,
+           updated_at = NOW()`,
+    [createId(), ADMIN_USERNAME, hashPassword(ADMIN_PASSWORD), "admin"]
+  );
 }
 
 async function loadDbConfig() {
@@ -1435,12 +1523,21 @@ async function markProgressSession(room) {
 
 app.use(express.json());
 app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const origin = req.get("origin");
+  const isAdminRequest = req.path.startsWith("/admin");
+  const allowedAdminOrigin = !origin || ADMIN_ALLOWED_ORIGINS.includes(origin);
+  res.setHeader("Access-Control-Allow-Origin", isAdminRequest ? (allowedAdminOrigin ? origin || "null" : "null") : "*");
+  res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Admin-Token");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
 
   if (req.method === "OPTIONS") {
-    res.status(204).end();
+    res.status(allowedAdminOrigin ? 204 : 403).end();
+    return;
+  }
+
+  if (isAdminRequest && !allowedAdminOrigin) {
+    res.status(403).json({ error: "Admin origin is not allowed" });
     return;
   }
 
@@ -1476,24 +1573,91 @@ app.get("/config", (_req, res) => {
   });
 });
 
-function isAuthorized(req) {
+async function isAuthorized(req) {
   if (!ADMIN_TOKEN) {
     return false;
   }
 
   const headerToken = req.get("authorization")?.replace(/^Bearer\s+/i, "");
   const fallbackToken = req.get("x-admin-token");
-  return (headerToken || fallbackToken) === ADMIN_TOKEN;
+  const token = headerToken || fallbackToken;
+  if (!token) {
+    return false;
+  }
+
+  if (token === ADMIN_TOKEN) {
+    req.adminUser = { username: "token-admin", role: "admin" };
+    return true;
+  }
+
+  const session = verifyAdminSession(token);
+  if (!session) {
+    return false;
+  }
+
+  req.adminUser = session;
+  return true;
 }
 
-function requireAdmin(req, res, next) {
-  if (!isAuthorized(req)) {
+async function requireAdmin(req, res, next) {
+  try {
+    if (!(await isAuthorized(req))) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    next();
+  } catch (error) {
+    console.error("Admin authorization failed:", error);
     res.status(401).json({ error: "Unauthorized" });
+  }
+}
+
+app.post("/admin/login", async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+  if (!ADMIN_TOKEN) {
+    res.status(503).json({ error: "ADMIN_TOKEN is required for signed admin sessions" });
     return;
   }
 
-  next();
-}
+  try {
+    const username = String(req.body?.username || "").trim();
+    const password = String(req.body?.password || "");
+    if (!username || !password) {
+      res.status(400).json({ error: "Username and password are required" });
+      return;
+    }
+
+    const result = await dbQueryRequired(
+      `SELECT id, username, password_hash, role
+       FROM admin_users
+       WHERE username = $1 AND is_active = TRUE`,
+      [username]
+    );
+    const user = result.rows[0];
+    if (!user || !verifyPassword(password, user.password_hash)) {
+      res.status(401).json({ error: "Invalid admin login" });
+      return;
+    }
+
+    await dbQueryRequired("UPDATE admin_users SET last_login_at = NOW() WHERE id = $1", [user.id]);
+    req.adminUser = { username: user.username, role: user.role };
+    await logAuditAction("admin.login", "admin_users", user.id, { username: user.username }, req);
+    res.json({
+      ok: true,
+      token: signAdminSession(user),
+      user: {
+        username: user.username,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    console.error("Admin login failed:", error);
+    res.status(500).json({ error: "Admin login failed" });
+  }
+});
 
 function finiteNumber(value, fallback) {
   const parsed = Number(value);
@@ -1625,7 +1789,8 @@ function buildRoomState(roomCode, viewerWs = null) {
           playerId: viewerPlayer.playerId,
           name: viewerPlayer.name,
           score: viewerPlayer.score,
-          answered: viewerPlayer.answeredQuestionIndex === room.questionIndex && room.status === "ANSWERING"
+          answered: viewerPlayer.answeredQuestionIndex === room.questionIndex && room.status === "ANSWERING",
+          results: viewerPlayer.answerHistory || []
         }
       : null,
     question
@@ -1694,7 +1859,7 @@ function requireDatabase(res) {
 }
 
 function getAdminUsername(req) {
-  return req.get("x-admin-user") || "admin";
+  return req.adminUser?.username || req.get("x-admin-user") || "admin";
 }
 
 async function runAdminAction(res, action) {
@@ -2446,60 +2611,65 @@ async function getQuestionBankQuestion(room) {
 }
 
 async function generateQuestion(room) {
-  const bankQuestion = await getQuestionBankQuestion(room);
-  if (bankQuestion) {
-    room.history.push(normalizePrompt(bankQuestion.question));
+  function useQuestion(question, source, model = null) {
+    room.history.push(normalizePrompt(question.question));
     room.history = room.history.slice(-20);
     return {
-      ...bankQuestion,
-      source: "question_bank",
-      model: null
+      ...question,
+      source,
+      model
     };
   }
 
-  if (gameConfig.questionSource === "fallback_only" || !OPENAI_API_KEY) {
-    const fallbackOnlyQuestion = getFallbackQuestion(room);
-    room.history.push(normalizePrompt(fallbackOnlyQuestion.question));
-    room.history = room.history.slice(-20);
-    return {
-      ...fallbackOnlyQuestion,
-      source: "fallback",
-      model: null
-    };
-  }
+  async function tryOpenAI() {
+    if (!OPENAI_API_KEY) {
+      return null;
+    }
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const question = await fetchOpenAIQuestion(room);
-      const normalizedQuestion = normalizePrompt(question.question);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const question = await fetchOpenAIQuestion(room);
+        const normalizedQuestion = normalizePrompt(question.question);
 
-      if (room.history.includes(normalizedQuestion)) {
-        throw new Error(`Duplicate question generated: ${question.question}`);
-      }
+        if (room.history.includes(normalizedQuestion)) {
+          throw new Error(`Duplicate question generated: ${question.question}`);
+        }
 
-      room.history.push(normalizedQuestion);
-      room.history = room.history.slice(-20);
-      return {
-        ...question,
-        source: "openai",
-        model: OPENAI_MODEL
-      };
-    } catch (error) {
-      console.error("OpenAI quiz generation failed:", error);
-
-      if (attempt === 2) {
-        const fallback = getFallbackQuestion(room);
-        const normalizedFallback = normalizePrompt(fallback.question);
-        room.history.push(normalizedFallback);
-        room.history = room.history.slice(-20);
-        return {
-          ...fallback,
-          source: "fallback",
-          model: null
-        };
+        return useQuestion(question, "openai", OPENAI_MODEL);
+      } catch (error) {
+        console.error("OpenAI quiz generation failed:", error);
       }
     }
+
+    return null;
   }
+
+  async function tryQuestionBank() {
+    const bankQuestion = await getQuestionBankQuestion(room);
+    return bankQuestion ? useQuestion(bankQuestion, "question_bank") : null;
+  }
+
+  function fallbackQuestion() {
+    return useQuestion(getFallbackQuestion(room), "fallback");
+  }
+
+  if (gameConfig.questionSource === "fallback_only") {
+    return fallbackQuestion();
+  }
+
+  if (gameConfig.questionSource === "question_bank_only") {
+    return await tryQuestionBank() || fallbackQuestion();
+  }
+
+  if (gameConfig.questionSource === "question_bank_openai") {
+    return await tryQuestionBank() || await tryOpenAI() || fallbackQuestion();
+  }
+
+  if (gameConfig.questionSource === "openai_only") {
+    return await tryOpenAI() || fallbackQuestion();
+  }
+
+  return await tryOpenAI() || fallbackQuestion();
 }
 
 function revealQuestion(roomCode) {
@@ -2514,9 +2684,24 @@ function revealQuestion(roomCode) {
 
   let roundScore = 0;
   for (const player of room.players.values()) {
-    if (player.currentAnswer && player.currentAnswer === room.currentQuestion.correctChoice) {
+    const isCorrect = Boolean(player.currentAnswer && player.currentAnswer === room.currentQuestion.correctChoice);
+    if (isCorrect) {
       player.score += 1;
       roundScore += 1;
+    }
+    if (!player.isHost) {
+      player.answerHistory = player.answerHistory || [];
+      player.answerHistory.push({
+        questionIndex: room.questionIndex,
+        prompt: room.currentQuestion.question,
+        choice: player.currentAnswer || null,
+        correctChoice: room.currentQuestion.correctChoice,
+        isCorrect,
+        shortExplanation: room.currentQuestion.shortExplanation || "",
+        elaboration: room.currentQuestion.elaboration || "",
+        scoreAfter: player.score
+      });
+      player.answerHistory = player.answerHistory.slice(-20);
     }
   }
   room.score = roundScore;
@@ -2748,6 +2933,7 @@ wss.on("connection", (ws) => {
           ws: null,
           isHost: true,
           score: 0,
+          answerHistory: [],
           currentAnswer: null,
           answeredQuestionIndex: null,
           answerSubmittedAt: null,
@@ -2885,6 +3071,7 @@ wss.on("connection", (ws) => {
           studentId,
           ws,
           score: 0,
+          answerHistory: [],
           currentAnswer: null,
           answeredQuestionIndex: null,
           answerSubmittedAt: null,
