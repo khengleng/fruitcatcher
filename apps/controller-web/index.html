@@ -409,25 +409,56 @@
     function formatMathHTML(text) {
       if (!text) return "";
       return String(text)
+        // Superscripts (exponents) - handle single chars and bracketed expressions
         .replace(/\^(\d+)/g, '<sup>$1</sup>')
-        .replace(/\^([a-z])/gi, '<sup>$1</sup>')
-        .replace(/\^{([^}]+)}/g, '<sup>$1</sup>')
+        .replace(/\^([a-zA-Z])/g, '<sup>$1</sup>')
+        .replace(/\^\{([^}]+)\}/g, '<sup>$1</sup>')
+        .replace(/\^\(([^)]+)\)/g, '<sup>$1</sup>')
+        // Subscripts - handle single chars and bracketed expressions
         .replace(/\_(\d+)/g, '<sub>$1</sub>')
-        .replace(/\_([a-z])/gi, '<sub>$1</sub>')
+        .replace(/\_([a-zA-Z])/g, '<sub>$1</sub>')
         .replace(/\_\{([^}]+)\}/g, '<sub>$1</sub>')
+        .replace(/\_\(([^)]+)\)/g, '<sub>$1</sub>')
+        // Comparison operators
         .replace(/<=/g, '≤')
         .replace(/>=/g, '≥')
         .replace(/!=/g, '≠')
+        .replace(/==/g, '=')
+        // Mathematical operators and symbols
         .replace(/\+\/-/g, '±')
-        .replace(/sqrt\(/g, '√(')
-        .replace(/pi\b/gi, 'π')
-        .replace(/theta\b/gi, 'θ')
-        .replace(/alpha\b/gi, 'α')
-        .replace(/beta\b/gi, 'β')
-        .replace(/gamma\b/gi, 'γ')
-        .replace(/delta\b/gi, 'δ')
-        .replace(/degrees/gi, '°')
-        .replace(/\bdegree\b/gi, '°');
+        .replace(/\+-/g, '±')
+        .replace(/\*\*/g, '×')
+        .replace(/\s+x\s+/gi, ' × ')
+        .replace(/\s+÷\s+/g, ' ÷ ')
+        .replace(/sqrt\(/gi, '√(')
+        .replace(/\bsqrt\b/gi, '√')
+        // Fractions (simple a/b format) - wrap in span for better styling
+        .replace(/(\d+)\/(\d+)/g, '<sup>$1</sup>⁄<sub>$2</sub>')
+        // Greek letters (common in math)
+        .replace(/\bpi\b/gi, 'π')
+        .replace(/\btheta\b/gi, 'θ')
+        .replace(/\balpha\b/gi, 'α')
+        .replace(/\bbeta\b/gi, 'β')
+        .replace(/\bgamma\b/gi, 'γ')
+        .replace(/\bdelta\b/gi, 'δ')
+        .replace(/\bDelta\b/g, 'Δ')
+        .replace(/\bsigma\b/gi, 'σ')
+        .replace(/\blambda\b/gi, 'λ')
+        .replace(/\bmu\b/gi, 'μ')
+        .replace(/\bepsilon\b/gi, 'ε')
+        .replace(/\bomega\b/gi, 'ω')
+        .replace(/\bOmega\b/g, 'Ω')
+        .replace(/\bphi\b/gi, 'φ')
+        // Special symbols
+        .replace(/\bdegrees?\b/gi, '°')
+        .replace(/\binf(?:inity)?\b/gi, '∞')
+        .replace(/\bapprox\b/gi, '≈')
+        .replace(/\bneq\b/gi, '≠')
+        .replace(/\bleq\b/gi, '≤')
+        .replace(/\bgeq\b/gi, '≥')
+        .replace(/\btimes\b/gi, '×')
+        // Clean up any double spaces
+        .replace(/\s{2,}/g, ' ');
     }
 
     function renderAnswers() {
