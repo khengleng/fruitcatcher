@@ -1696,6 +1696,32 @@ app.get("/admin/reports/students/:studentId", requireAdmin, async (req, res) => 
   });
 });
 
+app.post("/admin/reports/sessions/cleanup", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+
+  try {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const result = await dbQuery(
+      `DELETE FROM quiz_sessions WHERE created_at < $1 RETURNING id`,
+      [thirtyDaysAgo.toISOString()]
+    );
+
+    const deletedCount = result?.rows?.length || 0;
+    res.json({
+      ok: true,
+      deleted: deletedCount,
+      message: `Successfully deleted ${deletedCount} session(s) older than 30 days.`
+    });
+  } catch (error) {
+    console.error("Failed to delete old sessions:", error);
+    res.status(500).json({ error: "Failed to delete old sessions" });
+  }
+});
+
 function generateRoomCode() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let roomCode = "";

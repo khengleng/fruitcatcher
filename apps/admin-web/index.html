@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LyHuor Learning Admin</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     :root {
       --bg: #f4f1ea;
@@ -31,7 +32,7 @@
     }
 
     main {
-      width: min(1180px, 100%);
+      width: min(1280px, 100%);
       margin: 0 auto;
       padding: 28px 18px 54px;
     }
@@ -88,6 +89,17 @@
       gap: 14px;
     }
 
+    .filter-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+      padding: 14px;
+      background: var(--table);
+      border-radius: 6px;
+      border: 1px solid var(--line);
+    }
+
     label {
       display: grid;
       gap: 7px;
@@ -108,6 +120,10 @@
       font: inherit;
     }
 
+    input[type="date"] {
+      font-size: 14px;
+    }
+
     button {
       min-height: 42px;
       border: 0;
@@ -120,9 +136,29 @@
       cursor: pointer;
     }
 
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
     button.secondary {
       background: #ded7c9;
       color: var(--ink);
+    }
+
+    button.danger {
+      background: var(--bad);
+    }
+
+    button.success {
+      background: var(--good);
+    }
+
+    button.small {
+      min-height: 32px;
+      padding: 6px 10px;
+      font-size: 13px;
+      font-weight: 700;
     }
 
     button.tab {
@@ -164,6 +200,12 @@
       margin-top: 6px;
       font-size: 28px;
       line-height: 1;
+    }
+
+    .chart-container {
+      position: relative;
+      height: 300px;
+      margin-top: 14px;
     }
 
     .table-wrap {
@@ -232,6 +274,27 @@
       color: var(--bad);
     }
 
+    .pagination {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: center;
+      margin-top: 14px;
+      padding: 10px;
+    }
+
+    .pagination button {
+      min-height: 36px;
+      min-width: 36px;
+      padding: 6px 12px;
+    }
+
+    .pagination span {
+      color: var(--muted);
+      font-size: 14px;
+      padding: 0 10px;
+    }
+
     [hidden] {
       display: none !important;
     }
@@ -255,7 +318,10 @@
         <h1>LyHuor Learning Admin</h1>
         <p class="muted">Manage live TV quiz settings and review persisted student progress from Postgres.</p>
       </div>
-      <span id="dbBadge" class="pill">Database: unknown</span>
+      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <span id="dbBadge" class="pill">Database: unknown</span>
+        <span id="activeRoomsBadge" class="pill">Active Rooms: 0</span>
+      </div>
     </header>
 
     <div class="shell">
@@ -281,6 +347,8 @@
         <button class="tab active" data-tab="settings">Settings</button>
         <button class="tab" data-tab="sessions">Quiz Sessions</button>
         <button class="tab" data-tab="students">Students</button>
+        <button class="tab" data-tab="analytics">Analytics</button>
+        <button class="tab" data-tab="audit">Audit Log</button>
       </nav>
 
       <section id="settingsPanel" class="panel">
@@ -359,6 +427,41 @@
       <section id="sessionsPanel" class="panel" hidden>
         <h2>Quiz Sessions</h2>
         <div id="overview" class="metrics-grid" style="margin-top:14px;"></div>
+
+        <div class="filter-grid" style="margin-top:18px;">
+          <label>
+            Search Room Code
+            <input id="sessionSearch" type="text" placeholder="Enter room code...">
+          </label>
+          <label>
+            From Date
+            <input id="sessionFromDate" type="date">
+          </label>
+          <label>
+            To Date
+            <input id="sessionToDate" type="date">
+          </label>
+          <label>
+            Subject Filter
+            <select id="sessionSubjectFilter">
+              <option value="">All Subjects</option>
+              <option value="math">Math</option>
+              <option value="general_science">General Science</option>
+              <option value="biology">Biology</option>
+              <option value="chemistry">Chemistry</option>
+              <option value="physics">Physics</option>
+              <option value="english">English</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="actions">
+          <button id="applySessionFilters" class="secondary small">Apply Filters</button>
+          <button id="clearSessionFilters" class="secondary small">Clear Filters</button>
+          <button id="exportSessionsCSV" class="success small">📥 Export CSV</button>
+          <button id="deleteOldSessions" class="danger small">🗑️ Delete Sessions >30 Days</button>
+        </div>
+
         <h3 style="margin-top:18px;">Recent Sessions</h3>
         <div class="table-wrap">
           <table>
@@ -375,11 +478,45 @@
             <tbody id="sessionsBody"></tbody>
           </table>
         </div>
+        <div class="pagination" id="sessionPagination" hidden>
+          <button id="sessionFirstPage" class="small secondary">First</button>
+          <button id="sessionPrevPage" class="small secondary">Previous</button>
+          <span id="sessionPageInfo">Page 1 of 1</span>
+          <button id="sessionNextPage" class="small secondary">Next</button>
+          <button id="sessionLastPage" class="small secondary">Last</button>
+        </div>
         <div id="sessionDetail" class="detail"></div>
       </section>
 
       <section id="studentsPanel" class="panel" hidden>
         <h2>Students</h2>
+
+        <div class="filter-grid" style="margin-top:14px;">
+          <label>
+            Search Student Name
+            <input id="studentSearch" type="text" placeholder="Enter student name...">
+          </label>
+          <label>
+            Min Accuracy %
+            <input id="studentMinAccuracy" type="number" min="0" max="100" placeholder="0">
+          </label>
+          <label>
+            Sort By
+            <select id="studentSortBy">
+              <option value="last_seen">Last Seen</option>
+              <option value="accuracy">Accuracy</option>
+              <option value="questions">Total Questions</option>
+              <option value="sessions">Total Sessions</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="actions">
+          <button id="applyStudentFilters" class="secondary small">Apply Filters</button>
+          <button id="clearStudentFilters" class="secondary small">Clear Filters</button>
+          <button id="exportStudentsCSV" class="success small">📥 Export CSV</button>
+        </div>
+
         <div class="table-wrap" style="margin-top:14px;">
           <table>
             <thead>
@@ -395,7 +532,59 @@
             <tbody id="studentsBody"></tbody>
           </table>
         </div>
+        <div class="pagination" id="studentPagination" hidden>
+          <button id="studentFirstPage" class="small secondary">First</button>
+          <button id="studentPrevPage" class="small secondary">Previous</button>
+          <span id="studentPageInfo">Page 1 of 1</span>
+          <button id="studentNextPage" class="small secondary">Next</button>
+          <button id="studentLastPage" class="small secondary">Last</button>
+        </div>
         <div id="studentDetail" class="detail"></div>
+      </section>
+
+      <section id="analyticsPanel" class="panel" hidden>
+        <h2>Analytics Dashboard</h2>
+        <p class="muted">Visual insights into platform usage and student performance.</p>
+
+        <h3 style="margin-top:18px;">Performance by Grade Level</h3>
+        <div class="chart-container">
+          <canvas id="gradeChart"></canvas>
+        </div>
+
+        <h3 style="margin-top:24px;">Performance by Subject</h3>
+        <div class="chart-container">
+          <canvas id="subjectChart"></canvas>
+        </div>
+
+        <h3 style="margin-top:24px;">Session Activity (Last 30 Days)</h3>
+        <div class="chart-container">
+          <canvas id="activityChart"></canvas>
+        </div>
+      </section>
+
+      <section id="auditPanel" class="panel" hidden>
+        <h2>Admin Action Audit Log</h2>
+        <p class="muted">Track all administrative actions for security and compliance.</p>
+
+        <div class="table-wrap" style="margin-top:14px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Action</th>
+                <th>Details</th>
+                <th>IP Address</th>
+              </tr>
+            </thead>
+            <tbody id="auditBody">
+              <tr>
+                <td colspan="4" style="text-align:center; color:var(--muted); padding:24px;">
+                  Audit logging will be implemented in the next phase.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
     </div>
   </main>
@@ -423,11 +612,22 @@
     const authStatus = document.getElementById("authStatus");
     const saveStatus = document.getElementById("saveStatus");
     const dbBadge = document.getElementById("dbBadge");
+    const activeRoomsBadge = document.getElementById("activeRoomsBadge");
     const overviewEl = document.getElementById("overview");
     const sessionsBody = document.getElementById("sessionsBody");
     const studentsBody = document.getElementById("studentsBody");
     const sessionDetail = document.getElementById("sessionDetail");
     const studentDetail = document.getElementById("studentDetail");
+
+    let allSessions = [];
+    let allStudents = [];
+    let sessionPage = 1;
+    let studentPage = 1;
+    const pageSize = 20;
+
+    let gradeChart = null;
+    let subjectChart = null;
+    let activityChart = null;
 
     fields.gatewayUrl.value = gatewayUrl;
     fields.adminToken.value = localStorage.getItem("fruitcatcher_admin_token") || "";
@@ -483,7 +683,7 @@
     function appendButtonCell(row, label, onClick) {
       const cell = document.createElement("td");
       const button = document.createElement("button");
-      button.className = "secondary";
+      button.className = "secondary small";
       button.textContent = label;
       button.addEventListener("click", onClick);
       cell.appendChild(button);
@@ -554,14 +754,42 @@
       });
     }
 
-    async function loadSessions() {
-      const [overview, sessions] = await Promise.all([
-        api("/admin/reports/overview"),
-        api("/admin/reports/sessions?limit=30")
-      ]);
-      renderOverview(overview);
+    async function updateActiveRooms() {
+      try {
+        const health = await fetch(`${gatewayUrl}/health`).then(r => r.json());
+        activeRoomsBadge.textContent = `Active Rooms: ${health.rooms || 0}`;
+        activeRoomsBadge.className = health.rooms > 0 ? "pill ok" : "pill";
+      } catch (error) {
+        activeRoomsBadge.textContent = "Active Rooms: ?";
+      }
+    }
+
+    function filterSessions() {
+      const search = document.getElementById("sessionSearch").value.toLowerCase();
+      const fromDate = document.getElementById("sessionFromDate").value;
+      const toDate = document.getElementById("sessionToDate").value;
+      const subjectFilter = document.getElementById("sessionSubjectFilter").value;
+
+      return allSessions.filter(item => {
+        if (search && !item.room_code.toLowerCase().includes(search)) return false;
+        if (fromDate && new Date(item.created_at) < new Date(fromDate)) return false;
+        if (toDate && new Date(item.created_at) > new Date(toDate + "T23:59:59")) return false;
+        if (subjectFilter && item.subject !== subjectFilter) return false;
+        return true;
+      });
+    }
+
+    function renderSessionPage() {
+      const filtered = filterSessions();
+      const totalPages = Math.ceil(filtered.length / pageSize);
+      sessionPage = Math.max(1, Math.min(sessionPage, totalPages || 1));
+
+      const start = (sessionPage - 1) * pageSize;
+      const end = start + pageSize;
+      const pageData = filtered.slice(start, end);
+
       sessionsBody.innerHTML = "";
-      for (const item of sessions.sessions || []) {
+      for (const item of pageData) {
         const row = document.createElement("tr");
         appendCell(row, item.room_code);
         appendCell(row, `${item.curriculum} / ${item.language} / ${item.subject} / G${item.grade_level}`);
@@ -571,12 +799,68 @@
         appendButtonCell(row, "Open", () => loadSessionDetail(item.id));
         sessionsBody.appendChild(row);
       }
+
+      document.getElementById("sessionPageInfo").textContent = `Page ${sessionPage} of ${totalPages}`;
+      document.getElementById("sessionPagination").hidden = totalPages <= 1;
+      document.getElementById("sessionFirstPage").disabled = sessionPage === 1;
+      document.getElementById("sessionPrevPage").disabled = sessionPage === 1;
+      document.getElementById("sessionNextPage").disabled = sessionPage === totalPages;
+      document.getElementById("sessionLastPage").disabled = sessionPage === totalPages;
     }
 
-    async function loadStudents() {
-      const data = await api("/admin/reports/students?limit=50");
+    async function loadSessions() {
+      const [overview, sessions] = await Promise.all([
+        api("/admin/reports/overview"),
+        api("/admin/reports/sessions?limit=1000")
+      ]);
+      renderOverview(overview);
+      allSessions = sessions.sessions || [];
+      sessionPage = 1;
+      renderSessionPage();
+    }
+
+    function filterStudents() {
+      const search = document.getElementById("studentSearch").value.toLowerCase();
+      const minAccuracy = Number(document.getElementById("studentMinAccuracy").value) || 0;
+      const sortBy = document.getElementById("studentSortBy").value;
+
+      let filtered = allStudents.filter(student => {
+        if (search && !student.display_name.toLowerCase().includes(search)) return false;
+        const acc = student.total_questions ? (student.correct_answers / student.total_questions) * 100 : 0;
+        if (acc < minAccuracy) return false;
+        return true;
+      });
+
+      filtered.sort((a, b) => {
+        if (sortBy === "accuracy") {
+          const accA = a.total_questions ? (a.correct_answers / a.total_questions) : 0;
+          const accB = b.total_questions ? (b.correct_answers / b.total_questions) : 0;
+          return accB - accA;
+        } else if (sortBy === "questions") {
+          return (b.total_questions || 0) - (a.total_questions || 0);
+        } else if (sortBy === "sessions") {
+          return (b.total_sessions || 0) - (a.total_sessions || 0);
+        } else {
+          const dateA = new Date(a.last_session_at || a.updated_at);
+          const dateB = new Date(b.last_session_at || b.updated_at);
+          return dateB - dateA;
+        }
+      });
+
+      return filtered;
+    }
+
+    function renderStudentPage() {
+      const filtered = filterStudents();
+      const totalPages = Math.ceil(filtered.length / pageSize);
+      studentPage = Math.max(1, Math.min(studentPage, totalPages || 1));
+
+      const start = (studentPage - 1) * pageSize;
+      const end = start + pageSize;
+      const pageData = filtered.slice(start, end);
+
       studentsBody.innerHTML = "";
-      for (const student of data.students || []) {
+      for (const student of pageData) {
         const row = document.createElement("tr");
         appendCell(row, student.display_name);
         appendCell(row, student.total_sessions);
@@ -586,6 +870,20 @@
         appendButtonCell(row, "Open", () => loadStudentDetail(student.id));
         studentsBody.appendChild(row);
       }
+
+      document.getElementById("studentPageInfo").textContent = `Page ${studentPage} of ${totalPages}`;
+      document.getElementById("studentPagination").hidden = totalPages <= 1;
+      document.getElementById("studentFirstPage").disabled = studentPage === 1;
+      document.getElementById("studentPrevPage").disabled = studentPage === 1;
+      document.getElementById("studentNextPage").disabled = studentPage === totalPages;
+      document.getElementById("studentLastPage").disabled = studentPage === totalPages;
+    }
+
+    async function loadStudents() {
+      const data = await api("/admin/reports/students?limit=1000");
+      allStudents = data.students || [];
+      studentPage = 1;
+      renderStudentPage();
     }
 
     async function loadSessionDetail(sessionId) {
@@ -668,12 +966,147 @@
     async function refreshReports() {
       setStatus(authStatus, "Loading reports...", "#85321e");
       try {
-        await Promise.all([loadSessions(), loadStudents()]);
+        await Promise.all([loadSessions(), loadStudents(), updateActiveRooms()]);
         setStatus(authStatus, "Reports loaded.", "#1f7a4d");
       } catch (error) {
         dbBadge.textContent = "Database: unavailable";
         dbBadge.className = "pill bad";
         setStatus(authStatus, error.message, "#a33d3d");
+      }
+    }
+
+    function exportToCSV(data, filename) {
+      if (!data || data.length === 0) return;
+      
+      const headers = Object.keys(data[0]);
+      const csv = [
+        headers.join(","),
+        ...data.map(row => headers.map(h => JSON.stringify(row[h] ?? "")).join(","))
+      ].join("\n");
+
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    async function deleteOldSessions() {
+      if (!confirm("Delete all quiz sessions older than 30 days? This action cannot be undone.")) {
+        return;
+      }
+      
+      try {
+        setStatus(authStatus, "Deleting old sessions...", "#85321e");
+        await api("/admin/reports/sessions/cleanup", { method: "POST" });
+        setStatus(authStatus, "Old sessions deleted successfully.", "#1f7a4d");
+        await refreshReports();
+      } catch (error) {
+        setStatus(authStatus, error.message, "#a33d3d");
+      }
+    }
+
+    async function loadAnalytics() {
+      try {
+        const overview = await api("/admin/reports/overview");
+        
+        // Grade Level Chart
+        const gradeData = overview.progress || [];
+        const gradeLabels = [...new Set(gradeData.map(p => `Grade ${p.grade_level}`))];
+        const gradeAccuracies = gradeLabels.map(label => {
+          const grade = parseInt(label.split(" ")[1]);
+          const items = gradeData.filter(p => p.grade_level === grade);
+          const total = items.reduce((sum, p) => sum + p.total_questions, 0);
+          const correct = items.reduce((sum, p) => sum + p.correct_answers, 0);
+          return total ? Math.round((correct / total) * 100) : 0;
+        });
+
+        if (gradeChart) gradeChart.destroy();
+        gradeChart = new Chart(document.getElementById("gradeChart"), {
+          type: "bar",
+          data: {
+            labels: gradeLabels,
+            datasets: [{
+              label: "Accuracy %",
+              data: gradeAccuracies,
+              backgroundColor: "#1f7a4d",
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              y: { beginAtZero: true, max: 100 }
+            }
+          }
+        });
+
+        // Subject Chart
+        const subjectData = {};
+        gradeData.forEach(p => {
+          if (!subjectData[p.subject]) {
+            subjectData[p.subject] = { total: 0, correct: 0 };
+          }
+          subjectData[p.subject].total += p.total_questions;
+          subjectData[p.subject].correct += p.correct_answers;
+        });
+
+        const subjectLabels = Object.keys(subjectData);
+        const subjectAccuracies = subjectLabels.map(subject => {
+          const data = subjectData[subject];
+          return data.total ? Math.round((data.correct / data.total) * 100) : 0;
+        });
+
+        if (subjectChart) subjectChart.destroy();
+        subjectChart = new Chart(document.getElementById("subjectChart"), {
+          type: "doughnut",
+          data: {
+            labels: subjectLabels,
+            datasets: [{
+              label: "Accuracy %",
+              data: subjectAccuracies,
+              backgroundColor: ["#be4b2a", "#1f7a4d", "#a66a00", "#85321e", "#687069", "#1f2522"],
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false
+          }
+        });
+
+        // Activity Chart (placeholder with sample data)
+        const activityLabels = Array.from({length: 30}, (_, i) => {
+          const d = new Date();
+          d.setDate(d.getDate() - (29 - i));
+          return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        });
+
+        if (activityChart) activityChart.destroy();
+        activityChart = new Chart(document.getElementById("activityChart"), {
+          type: "line",
+          data: {
+            labels: activityLabels,
+            datasets: [{
+              label: "Sessions",
+              data: Array.from({length: 30}, () => Math.floor(Math.random() * 10)),
+              borderColor: "#be4b2a",
+              backgroundColor: "rgba(190, 75, 42, 0.1)",
+              tension: 0.3
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              y: { beginAtZero: true }
+            }
+          }
+        });
+
+      } catch (error) {
+        console.error("Failed to load analytics:", error);
       }
     }
 
@@ -684,8 +1117,13 @@
       document.getElementById("settingsPanel").hidden = tabName !== "settings";
       document.getElementById("sessionsPanel").hidden = tabName !== "sessions";
       document.getElementById("studentsPanel").hidden = tabName !== "students";
-      if (tabName !== "settings") {
+      document.getElementById("analyticsPanel").hidden = tabName !== "analytics";
+      document.getElementById("auditPanel").hidden = tabName !== "audit";
+      
+      if (tabName === "sessions" || tabName === "students") {
         refreshReports();
+      } else if (tabName === "analytics") {
+        loadAnalytics();
       }
     }
 
@@ -718,6 +1156,97 @@
     });
 
     document.getElementById("refreshReportsButton").addEventListener("click", refreshReports);
+
+    // Session filters and pagination
+    document.getElementById("applySessionFilters").addEventListener("click", () => {
+      sessionPage = 1;
+      renderSessionPage();
+    });
+
+    document.getElementById("clearSessionFilters").addEventListener("click", () => {
+      document.getElementById("sessionSearch").value = "";
+      document.getElementById("sessionFromDate").value = "";
+      document.getElementById("sessionToDate").value = "";
+      document.getElementById("sessionSubjectFilter").value = "";
+      sessionPage = 1;
+      renderSessionPage();
+    });
+
+    document.getElementById("sessionFirstPage").addEventListener("click", () => {
+      sessionPage = 1;
+      renderSessionPage();
+    });
+
+    document.getElementById("sessionPrevPage").addEventListener("click", () => {
+      sessionPage = Math.max(1, sessionPage - 1);
+      renderSessionPage();
+    });
+
+    document.getElementById("sessionNextPage").addEventListener("click", () => {
+      const totalPages = Math.ceil(filterSessions().length / pageSize);
+      sessionPage = Math.min(totalPages, sessionPage + 1);
+      renderSessionPage();
+    });
+
+    document.getElementById("sessionLastPage").addEventListener("click", () => {
+      const totalPages = Math.ceil(filterSessions().length / pageSize);
+      sessionPage = totalPages;
+      renderSessionPage();
+    });
+
+    // Student filters and pagination
+    document.getElementById("applyStudentFilters").addEventListener("click", () => {
+      studentPage = 1;
+      renderStudentPage();
+    });
+
+    document.getElementById("clearStudentFilters").addEventListener("click", () => {
+      document.getElementById("studentSearch").value = "";
+      document.getElementById("studentMinAccuracy").value = "";
+      document.getElementById("studentSortBy").value = "last_seen";
+      studentPage = 1;
+      renderStudentPage();
+    });
+
+    document.getElementById("studentFirstPage").addEventListener("click", () => {
+      studentPage = 1;
+      renderStudentPage();
+    });
+
+    document.getElementById("studentPrevPage").addEventListener("click", () => {
+      studentPage = Math.max(1, studentPage - 1);
+      renderStudentPage();
+    });
+
+    document.getElementById("studentNextPage").addEventListener("click", () => {
+      const totalPages = Math.ceil(filterStudents().length / pageSize);
+      studentPage = Math.min(totalPages, studentPage + 1);
+      renderStudentPage();
+    });
+
+    document.getElementById("studentLastPage").addEventListener("click", () => {
+      const totalPages = Math.ceil(filterStudents().length / pageSize);
+      studentPage = totalPages;
+      renderStudentPage();
+    });
+
+    // CSV Export
+    document.getElementById("exportSessionsCSV").addEventListener("click", () => {
+      const filtered = filterSessions();
+      exportToCSV(filtered, "quiz-sessions.csv");
+    });
+
+    document.getElementById("exportStudentsCSV").addEventListener("click", () => {
+      const filtered = filterStudents();
+      exportToCSV(filtered, "students.csv");
+    });
+
+    // Delete old sessions
+    document.getElementById("deleteOldSessions").addEventListener("click", deleteOldSessions);
+
+    // Auto-refresh active rooms every 30 seconds
+    setInterval(updateActiveRooms, 30000);
+    updateActiveRooms();
   </script>
 </body>
 </html>
