@@ -29,6 +29,7 @@ const CONFIG_PATH = process.env.CONFIG_PATH || path.join(__dirname, "data", "gam
 const APP_VERSION = process.env.APP_VERSION || "1.0.0";
 const startedAt = new Date().toISOString();
 const rooms = new Map();
+const soloSessions = new Map();
 const adminRateBuckets = new Map();
 const db = DATABASE_URL
   ? new Pool({
@@ -866,8 +867,9 @@ function getCurriculumInstruction(curriculum) {
 }
 
 function getFallbackQuestion(room) {
-  const subject = SUPPORTED_SUBJECTS.includes(gameConfig.subject) ? gameConfig.subject : "math";
-  const band = getGradeBand(gameConfig.gradeLevel);
+  const config = getSessionConfig(room);
+  const subject = SUPPORTED_SUBJECTS.includes(config.subject) ? config.subject : "math";
+  const band = getGradeBand(config.gradeLevel);
   const bank = FALLBACK_QUESTION_BANK[subject][band];
   const template = bank[room.questionIndex % bank.length];
 
@@ -916,6 +918,10 @@ function persistConfig(nextConfig) {
 
 function createId() {
   return crypto.randomUUID();
+}
+
+function getSessionConfig(session) {
+  return session?.config || gameConfig;
 }
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
@@ -1147,6 +1153,48 @@ async function initDatabase() {
   await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_quiz_sessions_created_at ON quiz_sessions(created_at DESC)");
   await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_answers_student_created ON student_answers(student_id, created_at DESC)");
   await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_progress_subject_grade ON student_progress(subject, grade_level)");
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS solo_sessions (
+      id TEXT PRIMARY KEY,
+      student_id TEXT REFERENCES students(id) ON DELETE SET NULL,
+      student_name TEXT NOT NULL,
+      source TEXT NOT NULL,
+      source_user_id TEXT,
+      status TEXT NOT NULL,
+      curriculum TEXT NOT NULL,
+      language TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      grade_level INTEGER NOT NULL,
+      difficulty_mode TEXT NOT NULL,
+      question_source TEXT NOT NULL,
+      questions_per_round INTEGER NOT NULL,
+      score INTEGER NOT NULL DEFAULT 0,
+      config JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      completed_at TIMESTAMPTZ
+    )
+  `);
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS solo_answers (
+      id TEXT PRIMARY KEY,
+      solo_session_id TEXT NOT NULL REFERENCES solo_sessions(id) ON DELETE CASCADE,
+      student_id TEXT REFERENCES students(id) ON DELETE SET NULL,
+      question_index INTEGER NOT NULL,
+      prompt TEXT NOT NULL,
+      choices JSONB NOT NULL,
+      correct_choice TEXT NOT NULL,
+      choice TEXT,
+      is_correct BOOLEAN NOT NULL,
+      short_explanation TEXT NOT NULL,
+      elaboration TEXT NOT NULL,
+      source TEXT,
+      model TEXT,
+      answered_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_solo_sessions_created_at ON solo_sessions(created_at DESC)");
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_solo_answers_session ON solo_answers(solo_session_id, question_index)");
   
   // Admin users table for multi-admin support
   await dbQueryRequired(`
@@ -1280,7 +1328,20 @@ async function runDatabaseMigrations() {
     "ALTER TABLE question_bank ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
     "ALTER TABLE quiz_presets ADD COLUMN IF NOT EXISTS description TEXT",
     "ALTER TABLE quiz_presets ADD COLUMN IF NOT EXISTS created_by TEXT",
-    "ALTER TABLE quiz_presets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+    "ALTER TABLE quiz_presets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+    "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS source_user_id TEXT",
+    "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS student_name TEXT",
+    "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS curriculum TEXT",
+    "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS language TEXT",
+    "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS subject TEXT",
+    "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS grade_level INTEGER",
+    "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS difficulty_mode TEXT",
+    "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS question_source TEXT",
+    "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS questions_per_round INTEGER",
+    "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS score INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ",
+    "ALTER TABLE solo_answers ADD COLUMN IF NOT EXISTS source TEXT",
+    "ALTER TABLE solo_answers ADD COLUMN IF NOT EXISTS model TEXT"
   ];
 
   for (const migration of migrations) {
@@ -1668,6 +1729,314 @@ app.get("/config", (_req, res) => {
     minGradeLevel: MIN_GRADE_LEVEL,
     maxGradeLevel: MAX_GRADE_LEVEL
   });
+});
+
+function normalizeSoloSource(value) {
+  const source = String(value || "").trim().toLowerCase();
+  return ["facebook", "messenger", "telegram", "web", "ad"].includes(source) ? source : "web";
+}
+
+function sanitizeSoloConfig(input = {}) {
+  return sanitizeConfig({
+    ...gameConfig,
+    curriculum: input.curriculum ?? gameConfig.curriculum,
+    language: input.language ?? gameConfig.language,
+    subject: input.subject ?? gameConfig.subject,
+    gradeLevel: input.gradeLevel ?? input.grade_level ?? gameConfig.gradeLevel,
+    difficultyMode: input.difficultyMode ?? input.difficulty_mode ?? gameConfig.difficultyMode,
+    questionSource: input.questionSource ?? input.question_source ?? "question_bank_openai",
+    questionsPerRound: input.questionsPerRound ?? input.questions_per_round ?? 10,
+    questionTimerSec: input.questionTimerSec ?? input.question_timer_sec ?? gameConfig.questionTimerSec
+  });
+}
+
+function publicQuestion(question) {
+  if (!question) {
+    return null;
+  }
+
+  return {
+    prompt: question.question,
+    choices: question.choices
+  };
+}
+
+function getSoloSession(sessionId) {
+  return soloSessions.get(String(sessionId || ""));
+}
+
+function buildSoloState(session) {
+  const latestResult = session.results[session.results.length - 1] || null;
+  return {
+    sessionId: session.id,
+    status: session.status,
+    mode: "solo",
+    config: session.config,
+    playerCount: 1,
+    connectedPlayerCount: 1,
+    questionIndex: session.questionIndex,
+    questionsPerRound: session.config.questionsPerRound,
+    score: session.score,
+    selectedChoice: session.currentAnswer || latestResult?.choice || null,
+    correctChoice: session.status === "REVIEWING" ? session.currentQuestion?.correctChoice || null : null,
+    shortExplanation: session.status === "REVIEWING" ? session.currentQuestion?.shortExplanation || "" : "",
+    elaboration: session.status === "REVIEWING" ? session.currentQuestion?.elaboration || "" : "",
+    answerCount: session.status === "ANSWERING" && session.currentAnswer ? 1 : 0,
+    leaderboard: [
+      {
+        playerId: session.id,
+        name: session.studentName,
+        score: session.score,
+        connected: true,
+        lastAnswer: latestResult?.choice || null
+      }
+    ],
+    player: {
+      playerId: session.id,
+      name: session.studentName,
+      score: session.score,
+      answered: session.status === "REVIEWING",
+      results: session.results
+    },
+    question: publicQuestion(session.currentQuestion)
+  };
+}
+
+async function persistSoloSessionCreated(session) {
+  if (!db || !session) {
+    return;
+  }
+
+  await dbQuery(
+    `INSERT INTO solo_sessions (
+      id, student_id, student_name, source, source_user_id, status,
+      curriculum, language, subject, grade_level, difficulty_mode,
+      question_source, questions_per_round, score, config, created_at, updated_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, NOW(), NOW())
+    ON CONFLICT (id) DO UPDATE
+      SET status = EXCLUDED.status,
+          score = EXCLUDED.score,
+          updated_at = NOW()`,
+    [
+      session.id,
+      session.studentId,
+      sanitizeStudentName(session.studentName),
+      session.source,
+      session.sourceUserId || null,
+      session.status,
+      session.config.curriculum,
+      session.config.language,
+      session.config.subject,
+      session.config.gradeLevel,
+      session.config.difficultyMode,
+      session.config.questionSource,
+      session.config.questionsPerRound,
+      session.score,
+      JSON.stringify(session.config)
+    ]
+  );
+}
+
+async function persistSoloSessionStatus(session) {
+  if (!db || !session) {
+    return;
+  }
+
+  await dbQuery(
+    `UPDATE solo_sessions
+     SET status = $2,
+         score = $3,
+         updated_at = NOW(),
+         completed_at = CASE WHEN $2 = 'FINISHED' THEN COALESCE(completed_at, NOW()) ELSE completed_at END
+     WHERE id = $1`,
+    [session.id, session.status, session.score]
+  );
+}
+
+async function persistSoloAnswer(session, result) {
+  if (!db || !session || !result) {
+    return;
+  }
+
+  await dbQuery(
+    `INSERT INTO solo_answers (
+      id, solo_session_id, student_id, question_index, prompt, choices,
+      correct_choice, choice, is_correct, short_explanation, elaboration,
+      source, model, answered_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, NOW())`,
+    [
+      createId(),
+      session.id,
+      session.studentId,
+      result.questionIndex,
+      result.prompt,
+      JSON.stringify(result.choices),
+      result.correctChoice,
+      result.choice,
+      result.isCorrect,
+      result.shortExplanation,
+      result.elaboration,
+      result.source || null,
+      result.model || null
+    ]
+  );
+
+  if (session.studentId) {
+    await dbQuery(
+      `INSERT INTO student_progress (
+        student_id, curriculum, language, subject, grade_level,
+        total_sessions, total_questions, correct_answers, last_session_at, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, 1, 1, $6, NOW(), NOW())
+      ON CONFLICT (student_id, curriculum, language, subject, grade_level) DO UPDATE
+        SET total_questions = student_progress.total_questions + 1,
+            correct_answers = student_progress.correct_answers + EXCLUDED.correct_answers,
+            last_session_at = NOW(),
+            updated_at = NOW()`,
+      [
+        session.studentId,
+        session.config.curriculum,
+        session.config.language,
+        session.currentQuestion?.subject || session.config.subject,
+        session.config.gradeLevel,
+        result.isCorrect ? 1 : 0
+      ]
+    );
+  }
+
+  await persistSoloSessionStatus(session);
+}
+
+app.get("/solo/options", (_req, res) => {
+  res.json({
+    curriculums: SUPPORTED_CURRICULUMS,
+    languages: SUPPORTED_LANGUAGES,
+    subjects: SUPPORTED_SUBJECTS,
+    difficultyModes: SUPPORTED_DIFFICULTY_MODES,
+    questionSources: SUPPORTED_QUESTION_SOURCES,
+    minGradeLevel: MIN_GRADE_LEVEL,
+    maxGradeLevel: MAX_GRADE_LEVEL
+  });
+});
+
+app.post("/solo/sessions", async (req, res) => {
+  try {
+    const config = sanitizeSoloConfig(req.body || {});
+    const source = normalizeSoloSource(req.body?.source);
+    const sourceUserId = normalizeClientId(req.body?.sourceUserId || req.body?.source_user_id || "");
+    const studentName = sanitizeStudentName(req.body?.studentName || req.body?.student_name || req.body?.name || "Student");
+    const clientId = normalizeClientId(req.body?.clientId || req.body?.client_id || `${source}:${sourceUserId || createId()}`);
+    const studentId = await upsertStudent(`solo:${clientId}`, studentName);
+    const block = await getActiveStudentBlock(studentId);
+    if (block) {
+      res.status(403).json({ error: block.reason || "Student is blocked" });
+      return;
+    }
+
+    const session = {
+      id: createId(),
+      studentId,
+      studentName,
+      source,
+      sourceUserId,
+      clientId,
+      config,
+      status: "READY",
+      questionIndex: 0,
+      score: 0,
+      history: [],
+      results: [],
+      currentQuestion: null,
+      currentAnswer: null
+    };
+
+    soloSessions.set(session.id, session);
+    await persistSoloSessionCreated(session);
+    res.status(201).json({ ok: true, sessionId: session.id, state: buildSoloState(session) });
+  } catch (error) {
+    console.error("Solo session creation failed:", error);
+    res.status(400).json({ error: "Could not create solo quiz session" });
+  }
+});
+
+app.post("/solo/sessions/:id/next", async (req, res) => {
+  const session = getSoloSession(req.params.id);
+  if (!session) {
+    res.status(404).json({ error: "Solo session not found" });
+    return;
+  }
+
+  try {
+    if (session.results.length >= session.config.questionsPerRound) {
+      session.status = "FINISHED";
+      session.currentQuestion = null;
+      session.currentAnswer = null;
+      await persistSoloSessionStatus(session);
+      res.json({ ok: true, state: buildSoloState(session) });
+      return;
+    }
+
+    session.status = "LOADING";
+    session.questionIndex = session.results.length;
+    session.currentAnswer = null;
+    session.currentQuestion = await generateQuestion(session);
+    session.status = "ANSWERING";
+    await persistSoloSessionStatus(session);
+    res.json({ ok: true, state: buildSoloState(session) });
+  } catch (error) {
+    console.error("Solo next question failed:", error);
+    res.status(500).json({ error: "Could not load the next question" });
+  }
+});
+
+app.post("/solo/sessions/:id/answer", async (req, res) => {
+  const session = getSoloSession(req.params.id);
+  if (!session) {
+    res.status(404).json({ error: "Solo session not found" });
+    return;
+  }
+
+  const choice = String(req.body?.choice || "").trim().toUpperCase();
+  if (!["A", "B", "C", "D"].includes(choice)) {
+    res.status(400).json({ error: "Choice must be A, B, C, or D" });
+    return;
+  }
+
+  if (session.status !== "ANSWERING" || !session.currentQuestion) {
+    res.status(409).json({ error: "No active solo question" });
+    return;
+  }
+
+  const isCorrect = choice === session.currentQuestion.correctChoice;
+  if (isCorrect) {
+    session.score += 1;
+  }
+  session.currentAnswer = choice;
+  const result = {
+    questionIndex: session.questionIndex,
+    prompt: session.currentQuestion.question,
+    choices: session.currentQuestion.choices,
+    choice,
+    correctChoice: session.currentQuestion.correctChoice,
+    isCorrect,
+    shortExplanation: session.currentQuestion.shortExplanation || "",
+    elaboration: session.currentQuestion.elaboration || "",
+    scoreAfter: session.score,
+    source: session.currentQuestion.source || null,
+    model: session.currentQuestion.model || null
+  };
+  session.results.push(result);
+  session.results = session.results.slice(-50);
+  session.status = session.results.length >= session.config.questionsPerRound ? "FINISHED" : "REVIEWING";
+  if (session.status === "FINISHED") {
+    session.currentQuestion = null;
+    session.currentAnswer = null;
+  }
+
+  await persistSoloAnswer(session, result);
+  res.json({ ok: true, result, state: buildSoloState(session) });
 });
 
 async function isAuthorized(req) {
@@ -2143,9 +2512,18 @@ app.get("/admin/reports/overview", requireAdmin, async (_req, res) => {
   }
 
   const [sessions, students, answers, progress] = await Promise.all([
-    dbQuery("SELECT COUNT(*)::int AS count FROM quiz_sessions"),
+    dbQuery("SELECT ((SELECT COUNT(*) FROM quiz_sessions) + (SELECT COUNT(*) FROM solo_sessions))::int AS count"),
     dbQuery("SELECT COUNT(*)::int AS count FROM students WHERE client_id NOT LIKE 'tv:%'"),
-    dbQuery("SELECT COUNT(*)::int AS total, COALESCE(SUM(CASE WHEN is_correct THEN 1 ELSE 0 END), 0)::int AS correct FROM student_answers"),
+    dbQuery(`
+      SELECT (
+               (SELECT COUNT(*) FROM student_answers) +
+               (SELECT COUNT(*) FROM solo_answers)
+             )::int AS total,
+             (
+               (SELECT COALESCE(SUM(CASE WHEN is_correct THEN 1 ELSE 0 END), 0) FROM student_answers) +
+               (SELECT COALESCE(SUM(CASE WHEN is_correct THEN 1 ELSE 0 END), 0) FROM solo_answers)
+             )::int AS correct
+    `),
     dbQuery(`
       SELECT subject, grade_level, SUM(total_questions)::int AS total_questions,
              SUM(correct_answers)::int AS correct_answers
@@ -2175,17 +2553,39 @@ app.get("/admin/reports/sessions", requireAdmin, async (req, res) => {
 
   const limit = getReportLimit(req.query.limit);
   const result = await dbQuery(
-    `SELECT s.id, s.room_code, s.status, s.curriculum, s.language, s.subject,
-            s.grade_level, s.difficulty_mode, s.question_source, s.created_at,
-            s.started_at, s.ended_at,
-            COUNT(DISTINCT p.student_id)::int AS participants,
-            COUNT(a.id)::int AS answers,
-            COALESCE(SUM(CASE WHEN a.is_correct THEN 1 ELSE 0 END), 0)::int AS correct_answers
-     FROM quiz_sessions s
-     LEFT JOIN session_participants p ON p.session_id = s.id AND p.is_host = FALSE
-     LEFT JOIN student_answers a ON a.session_id = s.id
-     GROUP BY s.id
-     ORDER BY s.created_at DESC
+    `SELECT *
+     FROM (
+       SELECT s.id, s.room_code, s.status, s.curriculum, s.language, s.subject,
+              s.grade_level, s.difficulty_mode, s.question_source, s.created_at,
+              s.started_at, s.ended_at,
+              COUNT(DISTINCT p.student_id)::int AS participants,
+              COUNT(a.id)::int AS answers,
+              COALESCE(SUM(CASE WHEN a.is_correct THEN 1 ELSE 0 END), 0)::int AS correct_answers
+       FROM quiz_sessions s
+       LEFT JOIN session_participants p ON p.session_id = s.id AND p.is_host = FALSE
+       LEFT JOIN student_answers a ON a.session_id = s.id
+       GROUP BY s.id
+       UNION ALL
+       SELECT ss.id,
+              CONCAT('Solo / ', ss.source) AS room_code,
+              ss.status,
+              ss.curriculum,
+              ss.language,
+              ss.subject,
+              ss.grade_level,
+              ss.difficulty_mode,
+              ss.question_source,
+              ss.created_at,
+              ss.created_at AS started_at,
+              ss.completed_at AS ended_at,
+              1::int AS participants,
+              COUNT(sa.id)::int AS answers,
+              COALESCE(SUM(CASE WHEN sa.is_correct THEN 1 ELSE 0 END), 0)::int AS correct_answers
+       FROM solo_sessions ss
+       LEFT JOIN solo_answers sa ON sa.solo_session_id = ss.id
+       GROUP BY ss.id
+     ) combined_sessions
+     ORDER BY created_at DESC
      LIMIT $1`,
     [limit]
   );
@@ -2250,7 +2650,59 @@ app.get("/admin/reports/sessions/:sessionId", requireAdmin, async (req, res) => 
   ]);
 
   if (!session?.rows[0]) {
-    res.status(404).json({ error: "Session not found" });
+    const [soloSession, soloAnswers] = await Promise.all([
+      dbQuery("SELECT * FROM solo_sessions WHERE id = $1", [sessionId]),
+      dbQuery(
+        `SELECT sa.*, st.display_name
+         FROM solo_answers sa
+         LEFT JOIN students st ON st.id = sa.student_id
+         WHERE sa.solo_session_id = $1
+         ORDER BY sa.question_index`,
+        [sessionId]
+      )
+    ]);
+
+    if (!soloSession?.rows[0]) {
+      res.status(404).json({ error: "Session not found" });
+      return;
+    }
+
+    const solo = soloSession.rows[0];
+    const rows = soloAnswers?.rows || [];
+    res.json({
+      session: {
+        ...solo,
+        room_code: `Solo / ${solo.source}`,
+        started_at: solo.created_at,
+        ended_at: solo.completed_at
+      },
+      participants: [
+        {
+          student_id: solo.student_id,
+          display_name: solo.student_name,
+          score: solo.score,
+          is_host: false
+        }
+      ],
+      questions: rows.map((row) => ({
+        id: row.id,
+        question_index: row.question_index,
+        subject: solo.subject,
+        grade_level: solo.grade_level,
+        prompt: row.prompt,
+        choices: row.choices,
+        correct_choice: row.correct_choice,
+        short_explanation: row.short_explanation,
+        elaboration: row.elaboration,
+        source: row.source,
+        model: row.model,
+        created_at: row.answered_at
+      })),
+      answers: rows.map((row) => ({
+        ...row,
+        display_name: row.display_name || solo.student_name
+      }))
+    });
     return;
   }
 
@@ -2279,14 +2731,27 @@ app.get("/admin/reports/students/:studentId", requireAdmin, async (req, res) => 
       [studentId]
     ),
     dbQuery(
-      `SELECT a.choice, a.is_correct, a.response_ms, a.answered_at,
-              s.room_code, s.curriculum, s.language, s.subject, s.grade_level,
-              q.question_index, q.prompt, q.correct_choice, q.short_explanation, q.elaboration
-       FROM student_answers a
-       JOIN quiz_sessions s ON s.id = a.session_id
-       JOIN quiz_questions q ON q.id = a.question_id
-       WHERE a.student_id = $1
-       ORDER BY a.created_at DESC
+      `SELECT *
+       FROM (
+         SELECT a.choice, a.is_correct, a.response_ms, a.answered_at,
+                s.room_code, s.curriculum, s.language, s.subject, s.grade_level,
+                q.question_index, q.prompt, q.correct_choice, q.short_explanation, q.elaboration,
+                a.created_at
+         FROM student_answers a
+         JOIN quiz_sessions s ON s.id = a.session_id
+         JOIN quiz_questions q ON q.id = a.question_id
+         WHERE a.student_id = $1
+         UNION ALL
+         SELECT sa.choice, sa.is_correct, NULL::integer AS response_ms, sa.answered_at,
+                CONCAT('Solo / ', ss.source) AS room_code,
+                ss.curriculum, ss.language, ss.subject, ss.grade_level,
+                sa.question_index, sa.prompt, sa.correct_choice, sa.short_explanation, sa.elaboration,
+                sa.answered_at AS created_at
+         FROM solo_answers sa
+         JOIN solo_sessions ss ON ss.id = sa.solo_session_id
+         WHERE sa.student_id = $1
+       ) student_answer_history
+       ORDER BY created_at DESC
        LIMIT 100`,
       [studentId]
     )
@@ -2842,25 +3307,26 @@ async function fetchOpenAIQuestion(room) {
     throw new Error("OPENAI_API_KEY is not configured");
   }
 
-  const prompt = `Create one multiple-choice educational quiz question for a Grade ${gameConfig.gradeLevel} student.
-Curriculum: ${getCurriculumLabel(gameConfig.curriculum)}
-Language mode: ${getLanguageLabel(gameConfig.language)}
-Subject: ${getSubjectLabel(gameConfig.subject)}
-Difficulty mode: ${gameConfig.difficultyMode}
-Question number: ${room.questionIndex + 1} of ${gameConfig.questionsPerRound}
+  const config = getSessionConfig(room);
+  const prompt = `Create one multiple-choice educational quiz question for a Grade ${config.gradeLevel} student.
+Curriculum: ${getCurriculumLabel(config.curriculum)}
+Language mode: ${getLanguageLabel(config.language)}
+Subject: ${getSubjectLabel(config.subject)}
+Difficulty mode: ${config.difficultyMode}
+Question number: ${room.questionIndex + 1} of ${config.questionsPerRound}
 Avoid repeating any of these recent prompts: ${room.history.join(" | ") || "none"}.
 
 Requirements:
 - Exactly 4 answer choices labeled A, B, C, and D
 - Only one correct answer
 - Safe, classroom-appropriate language
-- Match the reading level and background knowledge of Grade ${gameConfig.gradeLevel}
+- Match the reading level and background knowledge of Grade ${config.gradeLevel}
 - A short explanation under 30 words
 - A more detailed elaboration under 90 words
-- Keep the question answerable by Grade ${gameConfig.gradeLevel} learners
-- ${getCurriculumInstruction(gameConfig.curriculum)}
-- ${getLanguageInstruction(gameConfig.language)}
-- ${getDifficultyInstruction(gameConfig.difficultyMode)}
+- Keep the question answerable by Grade ${config.gradeLevel} learners
+- ${getCurriculumInstruction(config.curriculum)}
+- ${getLanguageInstruction(config.language)}
+- ${getDifficultyInstruction(config.difficultyMode)}
 - If the subject is English and the curriculum is Cambodia MoEYS, focus on school-level English learning that is realistic for Cambodia classrooms.`;
 
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -2962,6 +3428,7 @@ async function getQuestionBankQuestion(room) {
     return null;
   }
 
+  const config = getSessionConfig(room);
   const result = await dbQuery(
     `SELECT id, prompt, choices, correct_choice, short_explanation, elaboration, subject
      FROM question_bank
@@ -2973,7 +3440,7 @@ async function getQuestionBankQuestion(room) {
        AND difficulty_mode = $5
      ORDER BY usage_count ASC, RANDOM()
      LIMIT 10`,
-    [gameConfig.curriculum, gameConfig.language, gameConfig.subject, gameConfig.gradeLevel, gameConfig.difficultyMode]
+    [config.curriculum, config.language, config.subject, config.gradeLevel, config.difficultyMode]
   );
   const rows = result?.rows || [];
   const selected = rows
@@ -2999,6 +3466,8 @@ async function getQuestionBankQuestion(room) {
 }
 
 async function generateQuestion(room) {
+  const config = getSessionConfig(room);
+
   function useQuestion(question, source, model = null) {
     room.history.push(normalizePrompt(question.question));
     room.history = room.history.slice(-20);
@@ -3041,19 +3510,19 @@ async function generateQuestion(room) {
     return useQuestion(getFallbackQuestion(room), "fallback");
   }
 
-  if (gameConfig.questionSource === "fallback_only") {
+  if (config.questionSource === "fallback_only") {
     return fallbackQuestion();
   }
 
-  if (gameConfig.questionSource === "question_bank_only") {
+  if (config.questionSource === "question_bank_only") {
     return await tryQuestionBank() || fallbackQuestion();
   }
 
-  if (gameConfig.questionSource === "question_bank_openai") {
+  if (config.questionSource === "question_bank_openai") {
     return await tryQuestionBank() || await tryOpenAI() || fallbackQuestion();
   }
 
-  if (gameConfig.questionSource === "openai_only") {
+  if (config.questionSource === "openai_only") {
     return await tryOpenAI() || fallbackQuestion();
   }
 

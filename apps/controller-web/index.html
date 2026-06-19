@@ -68,7 +68,7 @@
       margin-top: 16px;
     }
 
-    input {
+    input, select {
       width: 100%;
       border: 0;
       outline: none;
@@ -80,6 +80,25 @@
       font-weight: 800;
       letter-spacing: 0.16em;
       text-transform: uppercase;
+    }
+
+    select {
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: 0;
+      text-transform: none;
+      appearance: none;
+    }
+
+    .solo-options {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .solo-options[hidden] {
+      display: none;
     }
 
     button {
@@ -223,6 +242,38 @@
         <input id="roomCodeInput" maxlength="6" placeholder="ROOM" autocomplete="off">
         <button id="joinButton">Join</button>
       </div>
+      <div id="soloOptions" class="solo-options" hidden>
+        <select id="soloCurriculum">
+          <option value="cambodia_moeys">Cambodia MoEYS</option>
+          <option value="international">International</option>
+        </select>
+        <select id="soloLanguage">
+          <option value="khmer">Khmer</option>
+          <option value="english">English</option>
+          <option value="bilingual">Bilingual</option>
+        </select>
+        <select id="soloSubject">
+          <option value="math">Math</option>
+          <option value="english">English</option>
+          <option value="general_science">General Science</option>
+          <option value="biology">Biology</option>
+          <option value="chemistry">Chemistry</option>
+          <option value="physics">Physics</option>
+        </select>
+        <select id="soloGrade">
+          <option value="2">Grade 2</option>
+          <option value="3">Grade 3</option>
+          <option value="4">Grade 4</option>
+          <option value="5">Grade 5</option>
+          <option value="6" selected>Grade 6</option>
+          <option value="7">Grade 7</option>
+          <option value="8">Grade 8</option>
+          <option value="9">Grade 9</option>
+          <option value="10">Grade 10</option>
+          <option value="11">Grade 11</option>
+          <option value="12">Grade 12</option>
+        </select>
+      </div>
       <div id="status" class="status" style="margin-top:12px;">Disconnected</div>
     </section>
 
@@ -247,6 +298,7 @@
   <script src="./config.js"></script>
   <script>
     const config = window.FRUIT_CATCHER_CONFIG || {};
+    const gatewayHttpUrl = config.gatewayHttpUrl || "http://localhost:3000";
     const gatewayWsUrl = config.gatewayWsUrl || "ws://localhost:3000";
 
     const playerNameInput = document.getElementById("playerNameInput");
@@ -265,9 +317,15 @@
     const hostActionsEl = document.getElementById("hostActions");
     const startButton = document.getElementById("startButton");
     const nextButton = document.getElementById("nextButton");
+    const soloOptionsEl = document.getElementById("soloOptions");
+    const soloCurriculumEl = document.getElementById("soloCurriculum");
+    const soloLanguageEl = document.getElementById("soloLanguage");
+    const soloSubjectEl = document.getElementById("soloSubject");
+    const soloGradeEl = document.getElementById("soloGrade");
     const sessionStorageKey = "fruitcatcher-controller-session-v2";
 
     const params = new URLSearchParams(window.location.search);
+    const isSoloMode = (params.get("mode") || "").toLowerCase() === "solo";
     const prefilledRoomCode = (params.get("roomCode") || "").toUpperCase();
 
     let ws;
@@ -276,6 +334,7 @@
     let joinedPlayerId = "";
     let joinInFlight = false;
     let reconnectTimer = null;
+    let soloSessionId = "";
 
     function makeClientId() {
       return `C${Math.random().toString(36).slice(2, 12)}${Date.now().toString(36)}`.toUpperCase();
@@ -310,6 +369,18 @@
       playerNameInput.value = savedSession.playerName;
     }
     roomCodeInput.value = prefilledRoomCode || savedSession.roomCode || "";
+    if (isSoloMode) {
+      playerNameInput.value = params.get("name") || savedSession.playerName || "";
+      roomCodeInput.value = "";
+      roomCodeInput.hidden = true;
+      roomCodeInput.required = false;
+      soloOptionsEl.hidden = false;
+      joinButton.textContent = "Start";
+      soloCurriculumEl.value = params.get("curriculum") || "cambodia_moeys";
+      soloLanguageEl.value = params.get("language") || "khmer";
+      soloSubjectEl.value = params.get("subject") || "math";
+      soloGradeEl.value = params.get("grade") || "6";
+    }
 
     function getCurriculumLabel(value) {
       return value === "cambodia_moeys" ? "Cambodia MoEYS" : "International";
@@ -353,9 +424,18 @@
     function setJoinFormLocked(locked) {
       playerNameInput.disabled = locked;
       roomCodeInput.disabled = locked;
+      soloCurriculumEl.disabled = locked;
+      soloLanguageEl.disabled = locked;
+      soloSubjectEl.disabled = locked;
+      soloGradeEl.disabled = locked;
     }
 
     function send(payload) {
+      if (isSoloMode) {
+        handleSoloControl(payload);
+        return;
+      }
+
       if (!ws || ws.readyState !== WebSocket.OPEN || !joinedRoomCode) {
         return;
       }
@@ -368,6 +448,15 @@
 
     function updateButtons() {
       const status = latestState?.status || "LOBBY";
+      if (isSoloMode) {
+        hostActionsEl.hidden = !soloSessionId;
+        startButton.hidden = true;
+        nextButton.disabled = !soloSessionId || !["READY", "REVIEWING"].includes(status);
+        joinButton.disabled = joinInFlight || Boolean(soloSessionId);
+        setJoinFormLocked(Boolean(soloSessionId));
+        return;
+      }
+
       const canHostAdvance = joinedRoomCode && !joinedPlayerId && (status === "LOBBY" || status === "FINISHED");
       hostActionsEl.hidden = true;
       startButton.disabled = !canHostAdvance;
@@ -377,6 +466,11 @@
     }
 
     function attemptJoin(roomCode, playerName) {
+      if (isSoloMode) {
+        startSoloQuiz(playerName);
+        return true;
+      }
+
       if (!ws || ws.readyState !== WebSocket.OPEN || joinInFlight || joinedRoomCode) {
         return false;
       }
@@ -406,6 +500,132 @@
         clientId: savedSession.clientId
       }));
       return true;
+    }
+
+    async function soloRequest(path, options = {}) {
+      const response = await fetch(`${gatewayHttpUrl}${path}`, {
+        method: options.method || "GET",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: options.body ? JSON.stringify(options.body) : undefined
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || `Request failed: ${response.status}`);
+      }
+      return data;
+    }
+
+    async function startSoloQuiz(playerName) {
+      if (joinInFlight || soloSessionId) {
+        return;
+      }
+
+      const normalizedPlayerName = normalizePlayerName(playerName);
+      playerNameInput.value = normalizedPlayerName;
+      saveSession({ playerName: normalizedPlayerName, roomCode: "" });
+      joinInFlight = true;
+      joinButton.textContent = "Starting...";
+      setStatus("Creating your quiz...", "#ffd166");
+      updateButtons();
+
+      try {
+        const createResult = await soloRequest("/solo/sessions", {
+          method: "POST",
+          body: {
+            studentName: normalizedPlayerName || "Student",
+            clientId: savedSession.clientId,
+            source: params.get("source") || "web",
+            sourceUserId: params.get("sourceUserId") || params.get("uid") || "",
+            curriculum: soloCurriculumEl.value,
+            language: soloLanguageEl.value,
+            subject: soloSubjectEl.value,
+            gradeLevel: Number(soloGradeEl.value),
+            questionSource: params.get("questionSource") || "question_bank_openai",
+            questionsPerRound: Number(params.get("count") || 10)
+          }
+        });
+        soloSessionId = createResult.sessionId;
+        joinedRoomCode = "SOLO";
+        joinedPlayerId = soloSessionId;
+        latestState = createResult.state;
+        setStatus("Solo quiz ready.", "#69e6a6");
+        await loadSoloNext();
+      } catch (error) {
+        soloSessionId = "";
+        joinedRoomCode = "";
+        joinedPlayerId = "";
+        latestState = null;
+        setStatus(error.message || "Could not start quiz.", "#ff9b7d");
+        renderState();
+      } finally {
+        joinInFlight = false;
+        updateButtons();
+      }
+    }
+
+    async function loadSoloNext() {
+      if (!soloSessionId) {
+        return;
+      }
+
+      setStatus("Loading question...", "#ffd166");
+      latestState = {
+        ...(latestState || {}),
+        status: "LOADING"
+      };
+      renderState();
+
+      try {
+        const data = await soloRequest(`/solo/sessions/${encodeURIComponent(soloSessionId)}/next`, {
+          method: "POST",
+          body: {}
+        });
+        latestState = data.state;
+        setStatus(latestState.status === "FINISHED" ? "Quiz complete." : "Question ready.", "#69e6a6");
+        renderState();
+      } catch (error) {
+        setStatus(error.message || "Could not load question.", "#ff9b7d");
+        renderState();
+      }
+    }
+
+    async function submitSoloAnswer(choice) {
+      if (!soloSessionId || latestState?.status !== "ANSWERING") {
+        return;
+      }
+
+      latestState = {
+        ...latestState,
+        selectedChoice: choice,
+        player: {
+          ...(latestState.player || {}),
+          answered: true
+        }
+      };
+      renderState();
+
+      try {
+        const data = await soloRequest(`/solo/sessions/${encodeURIComponent(soloSessionId)}/answer`, {
+          method: "POST",
+          body: { choice }
+        });
+        latestState = data.state;
+        setStatus(data.result?.isCorrect ? "Correct. Review the explanation." : "Review the explanation.", data.result?.isCorrect ? "#69e6a6" : "#ff9b7d");
+        renderState();
+      } catch (error) {
+        setStatus(error.message || "Could not submit answer.", "#ff9b7d");
+        renderState();
+      }
+    }
+
+    function handleSoloControl(payload) {
+      if (payload?.action === "answer") {
+        submitSoloAnswer(payload.choice);
+      } else if (payload?.action === "next" || payload?.action === "start") {
+        loadSoloNext();
+      }
     }
 
     function renderLeaderboard() {
@@ -551,15 +771,17 @@
 
     function renderState() {
       if (!latestState) {
-        leadTextEl.textContent = "Join the TV room, then answer the live quiz from your phone.";
-        questionMetaEl.textContent = "Waiting for room";
+        leadTextEl.textContent = isSoloMode
+          ? "Choose your quiz, then answer from your phone."
+          : "Join the TV room, then answer the live quiz from your phone.";
+        questionMetaEl.textContent = isSoloMode ? "Solo quiz" : "Waiting for room";
         scoreMetaEl.textContent = "Score 0";
-        questionTextEl.textContent = "Join a room to begin.";
+        questionTextEl.textContent = isSoloMode ? "Enter your name and press Start." : "Join a room to begin.";
         explanationEl.textContent = "";
         answersEl.innerHTML = "";
         leaderboardEl.innerHTML = "";
         resultsEl.innerHTML = "";
-        joinButton.textContent = "Join";
+        joinButton.textContent = isSoloMode ? "Start" : "Join";
         updateButtons();
         return;
       }
@@ -575,7 +797,7 @@
       scoreMetaEl.textContent = latestState.player
         ? `${latestState.player.name}: ${latestState.player.score}`
         : `Players ${latestState.playerCount || 0}`;
-      joinButton.textContent = joinedRoomCode ? "Joined" : "Join";
+      joinButton.textContent = joinedRoomCode ? (isSoloMode ? "Started" : "Joined") : (isSoloMode ? "Start" : "Join");
 
       if (latestState.status === "LOADING") {
         questionTextEl.textContent = "Loading next question...";
@@ -590,11 +812,15 @@
             : `Players answered: ${latestState.answerCount || 0}/${latestState.connectedPlayerCount || latestState.playerCount || 0}`;
         renderAnswers();
       } else if (latestState.status === "FINISHED") {
-        questionTextEl.textContent = `Round complete. Correct answers this round: ${latestState.score}`;
-        explanationEl.textContent = "Press Start Quiz to generate a fresh set of questions.";
+        questionTextEl.textContent = isSoloMode
+          ? `Quiz complete. Your score: ${latestState.player?.score || latestState.score || 0}/${latestState.questionsPerRound}`
+          : `Round complete. Correct answers this round: ${latestState.score}`;
+        explanationEl.textContent = isSoloMode
+          ? "Review your recent answers below."
+          : "Press Start Quiz to generate a fresh set of questions.";
         answersEl.innerHTML = "";
       } else {
-        questionTextEl.textContent = "Press Start Quiz when the TV is ready.";
+        questionTextEl.textContent = isSoloMode ? "Press Next to continue." : "Press Start Quiz when the TV is ready.";
         explanationEl.textContent = "";
         answersEl.innerHTML = "";
       }
@@ -687,6 +913,15 @@
     });
 
     joinButton.addEventListener("click", () => {
+      if (isSoloMode) {
+        if (soloSessionId) {
+          setStatus("Solo quiz already started.", "#69e6a6");
+          return;
+        }
+        attemptJoin("", playerNameInput.value);
+        return;
+      }
+
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         setStatus("Gateway is not connected yet.", "#ff9b7d");
         return;
@@ -715,7 +950,11 @@
     });
 
     renderState();
-    connect();
+    if (isSoloMode) {
+      setStatus("Ready for solo quiz.", "#69e6a6");
+    } else {
+      connect();
+    }
   </script>
 </body>
 </html>

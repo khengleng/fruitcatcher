@@ -6,6 +6,7 @@ This repository contains the production apps for the LyHuor Learning TV quiz sys
 - `apps/controller-web`: mobile phone answer controller
 - `apps/gateway`: Express + WebSocket room gateway, quiz engine, and Postgres persistence API
 - `apps/admin-web`: Railway-hosted admin panel for live quiz settings and student progress reports
+- `apps/bot-gateway`: Telegram/Messenger entry service that sends learners into solo quiz links
 
 The gateway is the system of record for live configuration and persisted quiz results. Admin changes are pushed into the gateway immediately and active TV/controller sessions receive the updated config without redeploying the web apps.
 
@@ -35,6 +36,12 @@ Run the admin:
 npm run dev:admin
 ```
 
+Run the bot gateway:
+
+```bash
+npm run dev:bot
+```
+
 Useful checks:
 
 ```bash
@@ -46,6 +53,7 @@ Local defaults:
 - gateway: `http://localhost:3000`
 - controller: `http://localhost:3001`
 - admin: `http://localhost:3002`
+- bot gateway: `http://localhost:3003`
 
 The controller and admin apps serve their `config.js` dynamically, so local development does not require manual edits for the web apps.
 
@@ -63,6 +71,7 @@ Deploy each service from its app directory:
 - `apps/gateway`
 - `apps/controller-web`
 - `apps/admin-web`
+- `apps/bot-gateway`
 
 ### Gateway
 
@@ -129,6 +138,11 @@ Bind the controller service to your public domain, for example:
 
 - `https://mytv.cambobia.com`
 
+The controller supports two modes:
+
+- TV room mode: `https://mytv.cambobia.com?roomCode=ABC123`
+- Solo ad/bot mode: `https://mytv.cambobia.com?mode=solo&source=facebook&curriculum=cambodia_moeys&language=khmer&subject=math&grade=6`
+
 ### Admin Web
 
 Recommended environment variables:
@@ -149,6 +163,31 @@ Use the same `ADMIN_TOKEN` configured on the gateway in the admin page. The admi
 - inspect a session's questions, answers, scores, and OpenAI explanations
 - list students and their aggregate progress
 - inspect a student's recent answers and elaborations
+
+### Bot Gateway
+
+Recommended environment variables:
+
+```bash
+CONTROLLER_URL=https://mytv.cambobia.com
+TELEGRAM_BOT_TOKEN=123456:telegram-token
+MESSENGER_VERIFY_TOKEN=change-this-facebook-verify-token
+MESSENGER_PAGE_ACCESS_TOKEN=facebook-page-access-token
+```
+
+Useful bot endpoints:
+
+- `GET /health`: Railway health check.
+- `GET /quiz-link`: returns a generated solo quiz URL for ads, landing pages, and QR codes.
+- `POST /telegram/webhook`: Telegram bot webhook. Learners receive a button that opens the controller in solo quiz mode.
+- `GET /messenger/webhook`: Facebook Messenger webhook verification.
+- `POST /messenger/webhook`: Facebook Messenger webhook. Learners receive a button that opens the controller in solo quiz mode.
+
+Example generated solo quiz URL:
+
+```text
+https://mytv.cambobia.com?mode=solo&source=telegram&curriculum=cambodia_moeys&language=khmer&subject=math&grade=6
+```
 
 ## TV Configuration
 
