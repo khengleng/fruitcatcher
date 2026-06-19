@@ -6,7 +6,7 @@
   <title>LyHuor Learning Controller</title>
   <style>
     :root {
-      --bg: #0c1320;
+      --bg: #08111d;
       --panel: #111f34;
       --panel-2: #1b3151;
       --ink: #f6f8fb;
@@ -14,6 +14,9 @@
       --accent: #ffd34f;
       --accent-2: #69e6a6;
       --danger: #ff7272;
+      --gold: #f6c45f;
+      --cream: #fff4d8;
+      --line: rgba(255, 255, 255, 0.1);
     }
 
     * {
@@ -31,6 +34,13 @@
         linear-gradient(180deg, #101b2c 0%, #08111d 100%);
     }
 
+    body.solo-mode {
+      background:
+        radial-gradient(circle at 20% 0%, rgba(246, 196, 95, 0.2), transparent 28%),
+        radial-gradient(circle at 100% 16%, rgba(105, 230, 166, 0.14), transparent 30%),
+        linear-gradient(160deg, #07101c 0%, #0f2238 48%, #07111c 100%);
+    }
+
     main {
       width: min(100%, 540px);
       margin: 0 auto;
@@ -46,6 +56,11 @@
       box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
     }
 
+    body.solo-mode .panel {
+      border-color: rgba(246, 196, 95, 0.18);
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.34);
+    }
+
     h1, h2, p {
       margin: 0;
     }
@@ -54,6 +69,85 @@
       font-size: 34px;
       line-height: 1;
       margin-bottom: 8px;
+    }
+
+    .eyebrow {
+      color: var(--gold);
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.16em;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+    }
+
+    .solo-hero {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 14px;
+      align-items: center;
+      margin: 14px 0 4px;
+      padding: 14px;
+      border: 1px solid rgba(246, 196, 95, 0.2);
+      border-radius: 20px;
+      background: rgba(255, 244, 216, 0.06);
+    }
+
+    .solo-hero[hidden] {
+      display: none;
+    }
+
+    .brand-mark {
+      width: 58px;
+      height: 58px;
+      display: grid;
+      place-items: center;
+      border-radius: 18px;
+      color: #0a1422;
+      background: linear-gradient(135deg, #ffe08b, #69e6a6);
+      box-shadow: 0 12px 30px rgba(246, 196, 95, 0.24);
+      font-weight: 1000;
+      letter-spacing: -0.04em;
+    }
+
+    .solo-hero h2 {
+      font-size: 20px;
+      margin-bottom: 4px;
+    }
+
+    .trust-badges {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .trust-badge {
+      padding: 10px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid var(--line);
+      color: var(--cream);
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.25;
+    }
+
+    .trust-badges[hidden] {
+      display: none;
+    }
+
+    .solo-field {
+      display: grid;
+      gap: 6px;
+    }
+
+    .solo-field label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      padding-left: 4px;
+      text-transform: uppercase;
     }
 
     .lead, .status {
@@ -66,6 +160,10 @@
       grid-template-columns: 1fr 1fr auto;
       gap: 10px;
       margin-top: 16px;
+    }
+
+    body.solo-mode .room-form {
+      grid-template-columns: 1fr auto;
     }
 
     input, select {
@@ -99,6 +197,55 @@
 
     .solo-options[hidden] {
       display: none;
+    }
+
+    .solo-trust {
+      display: grid;
+      gap: 12px;
+    }
+
+    .solo-trust[hidden] {
+      display: none;
+    }
+
+    .trust-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .trust-item {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 12px;
+      align-items: start;
+      padding: 13px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--line);
+    }
+
+    .trust-icon {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border-radius: 11px;
+      background: rgba(105, 230, 166, 0.12);
+      color: var(--accent-2);
+      font-weight: 1000;
+    }
+
+    .trust-item b {
+      display: block;
+      margin-bottom: 3px;
+      color: var(--ink);
+    }
+
+    .trust-item span {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.42;
     }
 
     button {
@@ -178,6 +325,12 @@
       color: white;
     }
 
+    body.solo-mode .secondary {
+      border: 1px solid rgba(246, 196, 95, 0.25);
+      background: rgba(255, 244, 216, 0.1);
+      color: var(--cream);
+    }
+
     .explanation {
       margin-top: 16px;
       color: var(--muted);
@@ -230,49 +383,93 @@
     .result-card.wrong {
       border-color: rgba(255, 155, 125, 0.45);
     }
+
+    @media (max-width: 420px) {
+      h1 {
+        font-size: 29px;
+      }
+
+      .trust-badges,
+      .solo-options {
+        grid-template-columns: 1fr;
+      }
+
+      body.solo-mode .room-form {
+        grid-template-columns: 1fr;
+      }
+
+      button {
+        width: 100%;
+      }
+    }
   </style>
 </head>
 <body>
   <main>
     <section class="panel">
-      <h1>LyHuor Learning</h1>
+      <div id="eyebrow" class="eyebrow" hidden>Student Portal</div>
+      <h1 id="appTitle">LyHuor Learning</h1>
       <p id="leadText" class="lead">Join the TV room, then answer the live quiz from your phone.</p>
+      <div id="soloHero" class="solo-hero" hidden>
+        <div class="brand-mark">AI</div>
+        <div>
+          <h2>Personal AI Quiz Practice</h2>
+          <p class="lead">Choose your curriculum, language, subject, and grade. Get instant explanations after every answer.</p>
+        </div>
+      </div>
+      <div id="trustBadges" class="trust-badges" hidden>
+        <div class="trust-badge">Grades 2-12 learning path</div>
+        <div class="trust-badge">Khmer, English, or bilingual</div>
+        <div class="trust-badge">Progress saved for review</div>
+      </div>
       <div class="room-form">
         <input id="playerNameInput" maxlength="24" placeholder="NAME" autocomplete="off">
         <input id="roomCodeInput" maxlength="6" placeholder="ROOM" autocomplete="off">
         <button id="joinButton">Join</button>
       </div>
       <div id="soloOptions" class="solo-options" hidden>
-        <select id="soloCurriculum">
-          <option value="cambodia_moeys">Cambodia MoEYS</option>
-          <option value="international">International</option>
-        </select>
-        <select id="soloLanguage">
-          <option value="khmer">Khmer</option>
-          <option value="english">English</option>
-          <option value="bilingual">Bilingual</option>
-        </select>
-        <select id="soloSubject">
-          <option value="math">Math</option>
-          <option value="english">English</option>
-          <option value="general_science">General Science</option>
-          <option value="biology">Biology</option>
-          <option value="chemistry">Chemistry</option>
-          <option value="physics">Physics</option>
-        </select>
-        <select id="soloGrade">
-          <option value="2">Grade 2</option>
-          <option value="3">Grade 3</option>
-          <option value="4">Grade 4</option>
-          <option value="5">Grade 5</option>
-          <option value="6" selected>Grade 6</option>
-          <option value="7">Grade 7</option>
-          <option value="8">Grade 8</option>
-          <option value="9">Grade 9</option>
-          <option value="10">Grade 10</option>
-          <option value="11">Grade 11</option>
-          <option value="12">Grade 12</option>
-        </select>
+        <div class="solo-field">
+          <label for="soloCurriculum">Curriculum</label>
+          <select id="soloCurriculum">
+            <option value="cambodia_moeys">Cambodia MoEYS</option>
+            <option value="international">International</option>
+          </select>
+        </div>
+        <div class="solo-field">
+          <label for="soloLanguage">Language</label>
+          <select id="soloLanguage">
+            <option value="khmer">Khmer</option>
+            <option value="english">English</option>
+            <option value="bilingual">Bilingual</option>
+          </select>
+        </div>
+        <div class="solo-field">
+          <label for="soloSubject">Subject</label>
+          <select id="soloSubject">
+            <option value="math">Math</option>
+            <option value="english">English</option>
+            <option value="general_science">General Science</option>
+            <option value="biology">Biology</option>
+            <option value="chemistry">Chemistry</option>
+            <option value="physics">Physics</option>
+          </select>
+        </div>
+        <div class="solo-field">
+          <label for="soloGrade">Grade</label>
+          <select id="soloGrade">
+            <option value="2">Grade 2</option>
+            <option value="3">Grade 3</option>
+            <option value="4">Grade 4</option>
+            <option value="5">Grade 5</option>
+            <option value="6" selected>Grade 6</option>
+            <option value="7">Grade 7</option>
+            <option value="8">Grade 8</option>
+            <option value="9">Grade 9</option>
+            <option value="10">Grade 10</option>
+            <option value="11">Grade 11</option>
+            <option value="12">Grade 12</option>
+          </select>
+        </div>
       </div>
       <div id="status" class="status" style="margin-top:12px;">Disconnected</div>
     </section>
@@ -293,6 +490,28 @@
       <div id="results" class="results"></div>
       <div id="leaderboard" class="leaderboard"></div>
     </section>
+
+    <section id="soloTrustPanel" class="panel solo-trust" hidden>
+      <div>
+        <div class="eyebrow">Why students can trust this</div>
+        <h2>Practice With Clear Explanations</h2>
+        <p class="lead">This portal is designed for independent learning. It records progress, gives immediate feedback, and keeps every quiz matched to the selected grade and subject.</p>
+      </div>
+      <div class="trust-list">
+        <div class="trust-item">
+          <div class="trust-icon">1</div>
+          <div><b>Choose your learning path</b><span>Select Cambodia MoEYS or international style, then choose grade, subject, and language.</span></div>
+        </div>
+        <div class="trust-item">
+          <div class="trust-icon">2</div>
+          <div><b>Answer one question at a time</b><span>Questions are generated from the configured quiz engine and fallback bank, with safety controls on the server.</span></div>
+        </div>
+        <div class="trust-item">
+          <div class="trust-icon">3</div>
+          <div><b>Review your result</b><span>After each answer, the app shows the correct answer and a short explanation so students can learn from mistakes.</span></div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <script src="./config.js"></script>
@@ -305,7 +524,11 @@
     const roomCodeInput = document.getElementById("roomCodeInput");
     const joinButton = document.getElementById("joinButton");
     const statusEl = document.getElementById("status");
+    const eyebrowEl = document.getElementById("eyebrow");
+    const appTitleEl = document.getElementById("appTitle");
     const leadTextEl = document.getElementById("leadText");
+    const soloHeroEl = document.getElementById("soloHero");
+    const trustBadgesEl = document.getElementById("trustBadges");
     const brandTitleEl = document.getElementById("brandTitle");
     const questionMetaEl = document.getElementById("questionMeta");
     const scoreMetaEl = document.getElementById("scoreMeta");
@@ -322,11 +545,16 @@
     const soloLanguageEl = document.getElementById("soloLanguage");
     const soloSubjectEl = document.getElementById("soloSubject");
     const soloGradeEl = document.getElementById("soloGrade");
+    const soloTrustPanelEl = document.getElementById("soloTrustPanel");
     const sessionStorageKey = "fruitcatcher-controller-session-v2";
 
     const params = new URLSearchParams(window.location.search);
     const isSoloMode = (params.get("mode") || "").toLowerCase() === "solo";
     const prefilledRoomCode = (params.get("roomCode") || "").toUpperCase();
+
+    if (isSoloMode) {
+      document.body.classList.add("solo-mode");
+    }
 
     let ws;
     let joinedRoomCode = "";
@@ -370,11 +598,16 @@
     }
     roomCodeInput.value = prefilledRoomCode || savedSession.roomCode || "";
     if (isSoloMode) {
+      eyebrowEl.hidden = false;
+      appTitleEl.textContent = "Learning with AI Center";
       playerNameInput.value = params.get("name") || savedSession.playerName || "";
       roomCodeInput.value = "";
       roomCodeInput.hidden = true;
       roomCodeInput.required = false;
+      soloHeroEl.hidden = false;
+      trustBadgesEl.hidden = false;
       soloOptionsEl.hidden = false;
+      soloTrustPanelEl.hidden = false;
       joinButton.textContent = "Start";
       soloCurriculumEl.value = params.get("curriculum") || "cambodia_moeys";
       soloLanguageEl.value = params.get("language") || "khmer";
@@ -788,11 +1021,11 @@
     function renderState() {
       if (!latestState) {
         leadTextEl.textContent = isSoloMode
-          ? "Choose your quiz, then answer from your phone."
+          ? "A guided quiz portal for Grade 2-12 students with instant explanations."
           : "Join the TV room, then answer the live quiz from your phone.";
         questionMetaEl.textContent = isSoloMode ? "Solo quiz" : "Waiting for room";
         scoreMetaEl.textContent = "Score 0";
-        questionTextEl.textContent = isSoloMode ? "Enter your name and press Start." : "Join a room to begin.";
+        questionTextEl.textContent = isSoloMode ? "Enter your name, choose your learning path, and start your practice quiz." : "Join a room to begin.";
         explanationEl.textContent = "";
         answersEl.innerHTML = "";
         leaderboardEl.innerHTML = "";
@@ -818,7 +1051,7 @@
       }
 
       if (latestState.status === "LOADING") {
-        questionTextEl.textContent = "Loading next question...";
+        questionTextEl.textContent = isSoloMode ? "Preparing your next learning question..." : "Loading next question...";
         explanationEl.textContent = "";
         answersEl.innerHTML = "";
       } else if (latestState.question) {
@@ -838,7 +1071,7 @@
           : "Press Start Quiz to generate a fresh set of questions.";
         answersEl.innerHTML = "";
       } else {
-        questionTextEl.textContent = isSoloMode ? "Press Next to continue." : "Press Start Quiz when the TV is ready.";
+        questionTextEl.textContent = isSoloMode ? "Press Next when you are ready to continue learning." : "Press Start Quiz when the TV is ready.";
         explanationEl.textContent = "";
         answersEl.innerHTML = "";
       }
