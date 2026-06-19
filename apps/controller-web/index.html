@@ -451,9 +451,11 @@
       if (isSoloMode) {
         hostActionsEl.hidden = !soloSessionId;
         startButton.hidden = true;
-        nextButton.disabled = !soloSessionId || !["READY", "REVIEWING"].includes(status);
-        joinButton.disabled = joinInFlight || Boolean(soloSessionId);
-        setJoinFormLocked(Boolean(soloSessionId));
+        nextButton.textContent = status === "FINISHED" ? "New Quiz" : "Next";
+        nextButton.disabled = !soloSessionId || !["READY", "REVIEWING", "FINISHED"].includes(status);
+        joinButton.textContent = soloSessionId ? "Change Quiz" : (joinInFlight ? "Starting..." : "Start");
+        joinButton.disabled = joinInFlight;
+        setJoinFormLocked(Boolean(soloSessionId) && status !== "FINISHED");
         return;
       }
 
@@ -570,6 +572,11 @@
         return;
       }
 
+      if (latestState?.status === "FINISHED") {
+        resetSoloQuiz();
+        return;
+      }
+
       setStatus("Loading question...", "#ffd166");
       latestState = {
         ...(latestState || {}),
@@ -626,6 +633,15 @@
       } else if (payload?.action === "next" || payload?.action === "start") {
         loadSoloNext();
       }
+    }
+
+    function resetSoloQuiz() {
+      soloSessionId = "";
+      joinedRoomCode = "";
+      joinedPlayerId = "";
+      latestState = null;
+      setStatus("Choose a quiz and press Start.", "#69e6a6");
+      renderState();
     }
 
     function renderLeaderboard() {
@@ -797,7 +813,9 @@
       scoreMetaEl.textContent = latestState.player
         ? `${latestState.player.name}: ${latestState.player.score}`
         : `Players ${latestState.playerCount || 0}`;
-      joinButton.textContent = joinedRoomCode ? (isSoloMode ? "Started" : "Joined") : (isSoloMode ? "Start" : "Join");
+      if (!isSoloMode) {
+        joinButton.textContent = joinedRoomCode ? "Joined" : "Join";
+      }
 
       if (latestState.status === "LOADING") {
         questionTextEl.textContent = "Loading next question...";
@@ -816,7 +834,7 @@
           ? `Quiz complete. Your score: ${latestState.player?.score || latestState.score || 0}/${latestState.questionsPerRound}`
           : `Round complete. Correct answers this round: ${latestState.score}`;
         explanationEl.textContent = isSoloMode
-          ? "Review your recent answers below."
+          ? "Review your recent answers below, or press New Quiz to start again."
           : "Press Start Quiz to generate a fresh set of questions.";
         answersEl.innerHTML = "";
       } else {
@@ -915,7 +933,7 @@
     joinButton.addEventListener("click", () => {
       if (isSoloMode) {
         if (soloSessionId) {
-          setStatus("Solo quiz already started.", "#69e6a6");
+          resetSoloQuiz();
           return;
         }
         attemptJoin("", playerNameInput.value);
