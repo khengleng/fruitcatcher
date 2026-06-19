@@ -1689,7 +1689,7 @@ app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
 
   if (req.method === "OPTIONS") {
-    res.status(allowedAdminOrigin ? 204 : 403).end();
+    res.status(!isAdminRequest || allowedAdminOrigin ? 204 : 403).end();
     return;
   }
 
