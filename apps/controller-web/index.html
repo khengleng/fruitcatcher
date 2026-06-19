@@ -927,33 +927,76 @@
 
     function formatMathHTML(text) {
       if (!text) return "";
-      return String(text)
-        // Superscripts (exponents) - handle single chars and bracketed expressions
-        .replace(/\^(\d+)/g, '<sup>$1</sup>')
-        .replace(/\^([a-zA-Z])/g, '<sup>$1</sup>')
-        .replace(/\^\{([^}]+)\}/g, '<sup>$1</sup>')
-        .replace(/\^\(([^)]+)\)/g, '<sup>$1</sup>')
-        // Subscripts - handle single chars and bracketed expressions
-        .replace(/\_(\d+)/g, '<sub>$1</sub>')
-        .replace(/\_([a-zA-Z])/g, '<sub>$1</sub>')
-        .replace(/\_\{([^}]+)\}/g, '<sub>$1</sub>')
-        .replace(/\_\(([^)]+)\)/g, '<sub>$1</sub>')
-        // Comparison operators
+
+      const escapeHtml = (value) => String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+      const normalizedText = String(text)
+        // Strip common inline/display LaTeX wrappers while preserving the expression.
+        .replace(/\\\(([\s\S]*?)\\\)/g, "$1")
+        .replace(/\\\[([\s\S]*?)\\\]/g, "$1")
+        .replace(/\$\$([\s\S]*?)\$\$/g, "$1")
+        .replace(/\$([^$]+)\$/g, "$1")
+        // LaTeX operators and symbols.
+        .replace(/\\leq?|≤/g, "≤")
+        .replace(/\\geq?|≥/g, "≥")
+        .replace(/\\neq?|≠/g, "≠")
+        .replace(/\\times/g, "×")
+        .replace(/\\div/g, "÷")
+        .replace(/\\pm/g, "±")
+        .replace(/\\cdot/g, "·")
+        .replace(/\\sqrt/g, "√")
+        .replace(/\\pi/g, "π")
+        .replace(/\\theta/g, "θ")
+        .replace(/\\alpha/g, "α")
+        .replace(/\\beta/g, "β")
+        .replace(/\\gamma/g, "γ")
+        .replace(/\\delta/g, "δ")
+        .replace(/\\Delta/g, "Δ")
+        .replace(/\\sigma/g, "σ")
+        .replace(/\\lambda/g, "λ")
+        .replace(/\\mu/g, "μ")
+        .replace(/\\epsilon/g, "ε")
+        .replace(/\\omega/g, "ω")
+        .replace(/\\Omega/g, "Ω")
+        .replace(/\\phi/g, "φ")
+        .replace(/\\{/g, "{")
+        .replace(/\\}/g, "}");
+
+      return escapeHtml(normalizedText)
+        // Comparison operators.
+        .replace(/&lt;=/g, '≤')
+        .replace(/&gt;=/g, '≥')
         .replace(/<=/g, '≤')
         .replace(/>=/g, '≥')
         .replace(/!=/g, '≠')
         .replace(/==/g, '=')
-        // Mathematical operators and symbols
+        // Superscripts and subscripts. Also repair common AI output like x2 for x squared.
+        .replace(/\^\{([^}]+)\}/g, '<sup>$1</sup>')
+        .replace(/\^\(([^)]+)\)/g, '<sup>$1</sup>')
+        .replace(/\^(\d+)/g, '<sup>$1</sup>')
+        .replace(/\^([a-zA-Z])/g, '<sup>$1</sup>')
+        .replace(/\_\{([^}]+)\}/g, '<sub>$1</sub>')
+        .replace(/\_\(([^)]+)\)/g, '<sub>$1</sub>')
+        .replace(/\_(\d+)/g, '<sub>$1</sub>')
+        .replace(/\_([a-zA-Z])/g, '<sub>$1</sub>')
+        .replace(/\b([a-zA-Z])2\b/g, '$1<sup>2</sup>')
+        .replace(/\b([a-zA-Z])3\b/g, '$1<sup>3</sup>')
+        // Fractions.
+        .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '<sup>$1</sup>⁄<sub>$2</sub>')
+        .replace(/(\d+)\/(\d+)/g, '<sup>$1</sup>⁄<sub>$2</sub>')
+        // Mathematical operators and symbols.
         .replace(/\+\/-/g, '±')
         .replace(/\+-/g, '±')
         .replace(/\*\*/g, '×')
-        .replace(/\s+x\s+/gi, ' × ')
         .replace(/\s+÷\s+/g, ' ÷ ')
         .replace(/sqrt\(/gi, '√(')
         .replace(/\bsqrt\b/gi, '√')
-        // Fractions (simple a/b format) - wrap in span for better styling
-        .replace(/(\d+)\/(\d+)/g, '<sup>$1</sup>⁄<sub>$2</sub>')
-        // Greek letters (common in math)
+        // Greek letters and common words.
         .replace(/\bpi\b/gi, 'π')
         .replace(/\btheta\b/gi, 'θ')
         .replace(/\balpha\b/gi, 'α')
