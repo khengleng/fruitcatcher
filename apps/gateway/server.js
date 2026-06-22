@@ -3593,9 +3593,14 @@ function submitPlayerAnswer(roomCode, playerId, choice) {
   room.answerCount += 1;
   broadcastRoomState(roomCode);
 
+  // Check if all players (including host if active) have answered
   const connectedPlayers = [...room.players.values()].filter((entry) =>
     !entry.isHost && Boolean(entry.ws && entry.ws.readyState === WebSocket.OPEN));
-  if (connectedPlayers.length > 0 && connectedPlayers.every((entry) => entry.answeredQuestionIndex === room.questionIndex)) {
+  const hostPlayer = room.hostPlayerId ? room.players.get(room.hostPlayerId) : null;
+  const allNonHostAnswered = connectedPlayers.length > 0 && connectedPlayers.every((entry) => entry.answeredQuestionIndex === room.questionIndex);
+  const hostAnswered = !hostPlayer || hostPlayer.answeredQuestionIndex === room.questionIndex;
+  
+  if (allNonHostAnswered && hostAnswered) {
     revealQuestion(roomCode);
   }
 }
