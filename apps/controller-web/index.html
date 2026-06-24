@@ -450,6 +450,92 @@
       font-size: clamp(14px, 1.2vw, 18px);
     }
 
+    /* Fit-to-screen quiz question view. While answering, the question + 4
+       answers fill the device's actual screen and scale to it via viewport
+       units (dvh/vmin) so nothing scrolls. JS adds body.solo-playing only
+       during the ANSWERING/LOADING states; every other screen scrolls
+       normally. */
+    body.solo-playing {
+      overflow: hidden;
+    }
+
+    body.solo-playing main {
+      width: 100%;
+      max-width: min(100%, 820px);
+      height: 100vh;
+      height: 100dvh;
+      padding: clamp(10px, 2vh, 22px) clamp(12px, 4vw, 26px);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    body.solo-playing #startPanel,
+    body.solo-playing #soloTrustPanel {
+      display: none;
+    }
+
+    body.solo-playing #quizPanel {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      margin: 0;
+      padding: clamp(12px, 2.2vh, 22px);
+    }
+
+    body.solo-playing #brandTitle,
+    body.solo-playing #quizPanel #explanation,
+    body.solo-playing #quizPanel #results,
+    body.solo-playing #quizPanel #leaderboard,
+    body.solo-playing #quizPanel #hostActions {
+      display: none;
+    }
+
+    body.solo-playing .meta {
+      margin: 0 0 clamp(6px, 1vh, 10px);
+      font-size: clamp(12px, 1.7vh, 15px);
+      flex: 0 0 auto;
+    }
+
+    body.solo-playing #questionText {
+      flex: 0 1 auto;
+      min-height: 0;
+      max-height: 40dvh;
+      overflow: auto;
+      margin: 0;
+      font-size: clamp(18px, 3.8vmin, 36px);
+      line-height: 1.25;
+    }
+
+    body.solo-playing #answers {
+      flex: 1 1 auto;
+      min-height: 0;
+      margin-top: clamp(10px, 1.8vh, 18px);
+      display: grid;
+      grid-template-rows: repeat(4, 1fr);
+      gap: clamp(8px, 1.5vh, 14px);
+    }
+
+    body.solo-playing #answers .answer-btn {
+      min-height: 0;
+      height: 100%;
+      margin: 0;
+      padding: clamp(8px, 1.4vh, 16px) clamp(12px, 2vw, 18px);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: clamp(15px, 2.5vmin, 22px);
+      line-height: 1.2;
+      overflow: hidden;
+    }
+
+    body.solo-playing #answers .answer-btn b {
+      width: auto;
+      min-width: clamp(20px, 3vmin, 30px);
+      flex: 0 0 auto;
+    }
+
     @media (max-width: 420px) {
       h1 {
         font-size: 29px;
@@ -472,7 +558,7 @@
 </head>
 <body>
   <main>
-    <section class="panel">
+    <section id="startPanel" class="panel">
       <div id="eyebrow" class="eyebrow" hidden>Student Portal</div>
       <h1 id="appTitle">LyHuor Learning</h1>
       <p id="leadText" class="lead">Join the TV room, then answer the live quiz from your phone.</p>
@@ -540,7 +626,7 @@
       <div id="status" class="status" style="margin-top:12px;">Disconnected</div>
     </section>
 
-    <section class="panel">
+    <section id="quizPanel" class="panel">
       <h2 id="brandTitle">Quiz Ready</h2>
       <div class="meta">
         <span id="questionMeta">Waiting for room</span>
@@ -747,6 +833,10 @@
 
     function updateButtons() {
       const status = latestState?.status || "LOBBY";
+      document.body.classList.toggle(
+        "solo-playing",
+        isSoloMode && (status === "ANSWERING" || status === "LOADING")
+      );
       if (isSoloMode) {
         hostActionsEl.hidden = !soloSessionId;
         startButton.hidden = true;
