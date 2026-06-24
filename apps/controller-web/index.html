@@ -47,6 +47,13 @@
       padding: 22px 16px 36px;
     }
 
+    /* Solo quiz grows to fill larger screens (laptop/desktop) while staying
+       phone-perfect: clamp lower bounds match the original mobile sizing. */
+    body.solo-mode main {
+      width: min(100%, clamp(540px, 70vw, 860px));
+      padding: clamp(22px, 3vw, 40px) clamp(16px, 2.2vw, 32px) clamp(36px, 4vw, 56px);
+    }
+
     .panel {
       background: linear-gradient(180deg, rgba(17, 31, 52, 0.98), rgba(10, 18, 30, 0.96));
       border: 1px solid rgba(255, 255, 255, 0.08);
@@ -382,6 +389,65 @@
 
     .result-card.wrong {
       border-color: rgba(255, 155, 125, 0.45);
+    }
+
+    /* Fluid scaling for the solo quiz taker. Text and controls grow smoothly
+       with the viewport so a laptop uses its screen instead of showing a
+       phone-sized column. Lower clamp bounds equal the original mobile values. */
+    body.solo-mode .panel {
+      padding: clamp(18px, 1.8vw, 28px);
+      border-radius: clamp(24px, 2vw, 30px);
+    }
+
+    body.solo-mode h1 {
+      font-size: clamp(34px, 4.2vw, 52px);
+    }
+
+    body.solo-mode .solo-hero h2 {
+      font-size: clamp(20px, 2vw, 28px);
+    }
+
+    body.solo-mode .lead,
+    body.solo-mode .status {
+      font-size: clamp(15px, 1.25vw, 19px);
+    }
+
+    body.solo-mode select {
+      font-size: clamp(16px, 1.3vw, 20px);
+    }
+
+    body.solo-mode .question {
+      font-size: clamp(24px, 2.6vw, 38px);
+    }
+
+    body.solo-mode .answers {
+      gap: clamp(12px, 1.3vw, 18px);
+    }
+
+    body.solo-mode .answer-btn {
+      font-size: clamp(18px, 1.8vw, 26px);
+      min-height: clamp(84px, 8vw, 104px);
+    }
+
+    body.solo-mode button {
+      font-size: clamp(18px, 1.6vw, 24px);
+      min-height: clamp(62px, 5.5vw, 76px);
+    }
+
+    body.solo-mode .explanation {
+      font-size: clamp(15px, 1.35vw, 20px);
+    }
+
+    body.solo-mode .leaderboard-row {
+      font-size: clamp(15px, 1.25vw, 19px);
+    }
+
+    body.solo-mode .result-card {
+      font-size: clamp(14px, 1.2vw, 18px);
+    }
+
+    body.solo-mode .trust-item span {
+      font-size: clamp(14px, 1.2vw, 18px);
     }
 
     @media (max-width: 420px) {
