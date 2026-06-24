@@ -103,6 +103,22 @@ CONFIG_PATH=/data/game-config.json
 APP_VERSION=1.0.0
 ```
 
+Optional abuse/cost protection variables (sensible defaults are built in):
+
+```bash
+SOLO_RATE_LIMIT_MAX=40          # solo requests per IP per window
+SOLO_RATE_LIMIT_WINDOW_MS=60000
+MAX_SOLO_SESSIONS=2000          # cap on concurrent in-memory solo sessions
+SOLO_SESSION_TTL_MS=3600000     # idle solo sessions are swept after this
+MAX_ROOMS=500                   # cap on concurrent TV rooms
+ROOM_IDLE_TTL_MS=10800000       # idle TV rooms are closed after this
+MAX_WS_CONNECTIONS_PER_IP=20    # WebSocket connections allowed per IP
+OPENAI_TIMEOUT_MS=20000         # abort OpenAI calls that hang past this
+SWEEP_INTERVAL_MS=300000        # how often idle resources are reclaimed
+```
+
+The gateway runs behind a single proxy hop on Railway (`trust proxy` is set to `1`), so admin and solo rate limits key on the real client IP from `X-Forwarded-For`.
+
 Notes:
 
 - Attach Railway Postgres to the gateway service so Railway injects `DATABASE_URL`.

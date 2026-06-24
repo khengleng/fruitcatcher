@@ -7,6 +7,7 @@ const WebSocket = require("ws");
 const { Pool } = require("pg");
 
 const app = express();
+app.set("trust proxy", 1);
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
@@ -60,6 +61,17 @@ const SUPPORTED_QUESTION_SOURCES = [
 const MIN_GRADE_LEVEL = 2;
 const MAX_GRADE_LEVEL = 12;
 const MAX_ROOM_PLAYERS = 40;
+const MAX_ROOMS = Number(process.env.MAX_ROOMS || 500);
+const ROOM_IDLE_TTL_MS = Number(process.env.ROOM_IDLE_TTL_MS || 3 * 60 * 60 * 1000);
+const MAX_SOLO_SESSIONS = Number(process.env.MAX_SOLO_SESSIONS || 2000);
+const SOLO_SESSION_TTL_MS = Number(process.env.SOLO_SESSION_TTL_MS || 60 * 60 * 1000);
+const SOLO_RATE_LIMIT_WINDOW_MS = Number(process.env.SOLO_RATE_LIMIT_WINDOW_MS || 60 * 1000);
+const SOLO_RATE_LIMIT_MAX = Number(process.env.SOLO_RATE_LIMIT_MAX || 40);
+const SWEEP_INTERVAL_MS = Number(process.env.SWEEP_INTERVAL_MS || 5 * 60 * 1000);
+const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || 20000);
+const MAX_WS_CONNECTIONS_PER_IP = Number(process.env.MAX_WS_CONNECTIONS_PER_IP || 20);
+const soloRateBuckets = new Map();
+const wsConnectionCounts = new Map();
 
 const defaultGameConfig = {
   brandTitle: process.env.BRAND_TITLE || "LyHuor Learning",
@@ -1023,6 +1035,35 @@ function rateLimitAdmin(req, res, next) {
   next();
 }
 
+function rateLimitSolo(req, res, next) {
+  if (!req.path.startsWith("/solo")) {
+    next();
+    return;
+  }
+
+  const key = req.ip || req.socket?.remoteAddress || "unknown";
+  const now = Date.now();
+  const bucket = soloRateBuckets.get(key) || { count: 0, resetAt: now + SOLO_RATE_LIMIT_WINDOW_MS };
+
+  if (now > bucket.resetAt) {
+    bucket.count = 0;
+    bucket.resetAt = now + SOLO_RATE_LIMIT_WINDOW_MS;
+  }
+
+  bucket.count += 1;
+  soloRateBuckets.set(key, bucket);
+  res.setHeader("X-RateLimit-Limit", String(SOLO_RATE_LIMIT_MAX));
+  res.setHeader("X-RateLimit-Remaining", String(Math.max(0, SOLO_RATE_LIMIT_MAX - bucket.count)));
+  res.setHeader("X-RateLimit-Reset", String(Math.ceil(bucket.resetAt / 1000)));
+
+  if (bucket.count > SOLO_RATE_LIMIT_MAX) {
+    res.status(429).json({ error: "Too many quiz requests. Please wait and try again." });
+    return;
+  }
+
+  next();
+}
+
 async function dbQuery(text, params = []) {
   if (!db) {
     return null;
@@ -1701,6 +1742,7 @@ app.use((req, res, next) => {
   next();
 });
 app.use(rateLimitAdmin);
+app.use(rateLimitSolo);
 
 app.get("/health", (_req, res) => {
   res.json({
@@ -1923,6 +1965,11 @@ app.get("/solo/options", (_req, res) => {
 
 app.post("/solo/sessions", async (req, res) => {
   try {
+    if (soloSessions.size >= MAX_SOLO_SESSIONS) {
+      res.status(503).json({ error: "Quiz capacity is temporarily full. Please try again shortly." });
+      return;
+    }
+
     const config = sanitizeSoloConfig(req.body || {});
     const source = normalizeSoloSource(req.body?.source);
     const sourceUserId = normalizeClientId(req.body?.sourceUserId || req.body?.source_user_id || "");
@@ -1949,7 +1996,8 @@ app.post("/solo/sessions", async (req, res) => {
       history: [],
       results: [],
       currentQuestion: null,
-      currentAnswer: null
+      currentAnswer: null,
+      lastActivityAt: Date.now()
     };
 
     soloSessions.set(session.id, session);
@@ -1967,6 +2015,8 @@ app.post("/solo/sessions/:id/next", async (req, res) => {
     res.status(404).json({ error: "Solo session not found" });
     return;
   }
+
+  session.lastActivityAt = Date.now();
 
   try {
     if (session.results.length >= session.config.questionsPerRound) {
@@ -1997,6 +2047,8 @@ app.post("/solo/sessions/:id/answer", async (req, res) => {
     res.status(404).json({ error: "Solo session not found" });
     return;
   }
+
+  session.lastActivityAt = Date.now();
 
   const choice = String(req.body?.choice || "").trim().toUpperCase();
   if (!["A", "B", "C", "D"].includes(choice)) {
@@ -2336,6 +2388,8 @@ function broadcastRoomState(roomCode) {
   if (!room) {
     return;
   }
+
+  room.lastActivityAt = Date.now();
 
   send(room.tv, {
     type: "room_state",
@@ -3302,6 +3356,60 @@ function cleanupRoom(roomCode, ws) {
   }
 }
 
+function expireIdleRoom(roomCode, room) {
+  clearRoomTimer(room);
+  for (const player of room.players.values()) {
+    send(player.ws, {
+      type: "room_closed",
+      roomCode
+    });
+  }
+  send(room.tv, {
+    type: "room_closed",
+    roomCode
+  });
+  void persistSessionStatus(room, "CLOSED");
+  rooms.delete(roomCode);
+}
+
+function sweepStaleResources() {
+  const now = Date.now();
+
+  for (const [roomCode, room] of rooms) {
+    if (now - (room.lastActivityAt || 0) > ROOM_IDLE_TTL_MS) {
+      expireIdleRoom(roomCode, room);
+    }
+  }
+
+  for (const [sessionId, session] of soloSessions) {
+    if (now - (session.lastActivityAt || 0) > SOLO_SESSION_TTL_MS) {
+      soloSessions.delete(sessionId);
+    }
+  }
+
+  for (const [key, bucket] of soloRateBuckets) {
+    if (now > bucket.resetAt) {
+      soloRateBuckets.delete(key);
+    }
+  }
+
+  for (const [key, bucket] of adminRateBuckets) {
+    if (now > bucket.resetAt) {
+      adminRateBuckets.delete(key);
+    }
+  }
+}
+
+async function fetchWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function fetchOpenAIQuestion(room) {
   if (!OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is not configured");
@@ -3329,7 +3437,7 @@ Requirements:
 - ${getDifficultyInstruction(config.difficultyMode)}
 - If the subject is English and the curriculum is Cambodia MoEYS, focus on school-level English learning that is realistic for Cambodia classrooms.`;
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
+  const response = await fetchWithTimeout("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -3382,7 +3490,7 @@ Requirements:
       },
       store: false
     })
-  });
+  }, OPENAI_TIMEOUT_MS);
 
   if (!response.ok) {
     const message = await response.text();
@@ -3740,11 +3848,27 @@ async function handleAction(roomCode, action, payload = {}) {
   }
 }
 
-wss.on("connection", (ws) => {
+wss.on("connection", (ws, req) => {
+  const forwarded = String(req?.headers?.["x-forwarded-for"] || "").split(",")[0].trim();
+  const clientIp = forwarded || req?.socket?.remoteAddress || "unknown";
+  const activeForIp = wsConnectionCounts.get(clientIp) || 0;
+
+  if (activeForIp >= MAX_WS_CONNECTIONS_PER_IP) {
+    send(ws, {
+      type: "error",
+      message: "Too many connections from this network. Please try again shortly."
+    });
+    ws.close(1013, "Too many connections");
+    return;
+  }
+
+  wsConnectionCounts.set(clientIp, activeForIp + 1);
+
   ws.meta = {
     roomCode: null,
     role: null,
-    playerId: null
+    playerId: null,
+    clientIp
   };
 
   send(ws, { type: "connected" });
@@ -3764,6 +3888,14 @@ wss.on("connection", (ws) => {
       }
 
       if (data.type === "create_room") {
+        if (rooms.size >= MAX_ROOMS) {
+          send(ws, {
+            type: "error",
+            message: "Server is at capacity. Please try again shortly."
+          });
+          return;
+        }
+
         const roomCode = makeUniqueRoomCode();
         const hostPlayerId = createPlayerId();
         rooms.set(roomCode, {
@@ -3784,7 +3916,8 @@ wss.on("connection", (ws) => {
           deadlineAt: null,
           timerId: null,
           history: [],
-          answerCount: 0
+          answerCount: 0,
+          lastActivityAt: Date.now()
         });
 
         const room = rooms.get(roomCode);
@@ -4007,6 +4140,15 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("close", () => {
+    const ip = ws.meta?.clientIp;
+    if (ip) {
+      const remaining = (wsConnectionCounts.get(ip) || 1) - 1;
+      if (remaining > 0) {
+        wsConnectionCounts.set(ip, remaining);
+      } else {
+        wsConnectionCounts.delete(ip);
+      }
+    }
     cleanupRoom(ws.meta.roomCode, ws);
   });
 });
@@ -4027,6 +4169,9 @@ async function startServer() {
   } else if (databaseReady) {
     await persistDbConfig(gameConfig);
   }
+
+  const sweepTimer = setInterval(sweepStaleResources, SWEEP_INTERVAL_MS);
+  sweepTimer.unref();
 
   server.listen(PORT, "0.0.0.0", () => {
     if (!ADMIN_TOKEN) {
