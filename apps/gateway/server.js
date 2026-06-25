@@ -1295,6 +1295,22 @@ async function initDatabase() {
   `);
   await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_worksheets_owner ON worksheets(created_by_id, created_at DESC)");
 
+  // AI token-usage events, one row per OpenAI request.
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS ai_usage (
+      id TEXT PRIMARY KEY,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      source TEXT NOT NULL,
+      operation TEXT NOT NULL,
+      model TEXT,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      total_tokens INTEGER NOT NULL DEFAULT 0,
+      created_by TEXT
+    )
+  `);
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_ai_usage_created_at ON ai_usage(created_at DESC)");
+
   // Audit log table
   await dbQueryRequired(`
     CREATE TABLE IF NOT EXISTS audit_logs (
@@ -2044,7 +2060,8 @@ app.post("/solo/sessions", async (req, res) => {
       results: [],
       currentQuestion: null,
       currentAnswer: null,
-      lastActivityAt: Date.now()
+      lastActivityAt: Date.now(),
+      usageSource: "solo"
     };
 
     soloSessions.set(session.id, session);
@@ -2459,7 +2476,14 @@ app.post("/admin/worksheets/question", requireStaff, async (req, res) => {
     const avoidPrompts = Array.isArray(req.body?.avoidPrompts)
       ? req.body.avoidPrompts.map((p) => normalizePrompt(String(p))).filter(Boolean)
       : [];
-    const ctx = { config, history: avoidPrompts.slice(-20), questionIndex: avoidPrompts.length };
+    const usageSource = req.body?.source === "question_bank" ? "question_bank" : "worksheet";
+    const ctx = {
+      config,
+      history: avoidPrompts.slice(-20),
+      questionIndex: avoidPrompts.length,
+      usageSource,
+      usageBy: req.adminUser?.username || null
+    };
     const question = await generateQuestion(ctx);
     if (!question) {
       res.status(502).json({ error: "Could not generate a question. Please try again." });
@@ -3004,6 +3028,73 @@ async function runAdminAction(res, action) {
     res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : "Database operation failed" });
   }
 }
+
+app.get("/admin/reports/ai-usage", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+  try {
+    const groupBy = ["hour", "day", "week", "month"].includes(String(req.query.groupBy)) ? String(req.query.groupBy) : "day";
+    const now = Date.now();
+    const defaultDays = groupBy === "hour" ? 2 : 30;
+    const parseDate = (value, fallbackMs) => {
+      const date = value ? new Date(String(value)) : new Date(fallbackMs);
+      return Number.isNaN(date.getTime()) ? new Date(fallbackMs) : date;
+    };
+    const fromIso = parseDate(req.query.from, now - defaultDays * 86400000).toISOString();
+    const toIso = parseDate(req.query.to, now).toISOString();
+
+    const bucketResult = await dbQuery(
+      `SELECT date_trunc($1, created_at) AS bucket, source,
+              COUNT(*)::int AS requests,
+              SUM(input_tokens)::int AS input_tokens,
+              SUM(output_tokens)::int AS output_tokens,
+              SUM(total_tokens)::int AS total_tokens
+       FROM ai_usage
+       WHERE created_at >= $2 AND created_at <= $3
+       GROUP BY bucket, source
+       ORDER BY bucket DESC, source`,
+      [groupBy, fromIso, toIso]
+    );
+    const totalsResult = await dbQuery(
+      `SELECT source, COUNT(*)::int AS requests,
+              SUM(input_tokens)::int AS input_tokens,
+              SUM(output_tokens)::int AS output_tokens,
+              SUM(total_tokens)::int AS total_tokens
+       FROM ai_usage
+       WHERE created_at >= $1 AND created_at <= $2
+       GROUP BY source ORDER BY source`,
+      [fromIso, toIso]
+    );
+
+    const rows = (bucketResult?.rows || []).map((row) => ({
+      bucket: row.bucket,
+      source: row.source,
+      requests: row.requests,
+      inputTokens: row.input_tokens,
+      outputTokens: row.output_tokens,
+      totalTokens: row.total_tokens
+    }));
+    const totals = (totalsResult?.rows || []).map((row) => ({
+      source: row.source,
+      requests: row.requests,
+      inputTokens: row.input_tokens,
+      outputTokens: row.output_tokens,
+      totalTokens: row.total_tokens
+    }));
+    const grandTotal = totals.reduce((acc, t) => ({
+      requests: acc.requests + t.requests,
+      inputTokens: acc.inputTokens + t.inputTokens,
+      outputTokens: acc.outputTokens + t.outputTokens,
+      totalTokens: acc.totalTokens + t.totalTokens
+    }), { requests: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+
+    res.json({ groupBy, from: fromIso, to: toIso, sources: AI_USAGE_SOURCES, rows, totals, grandTotal });
+  } catch (error) {
+    console.error("AI usage report failed:", error);
+    res.status(500).json({ error: "Could not load AI usage report" });
+  }
+});
 
 app.get("/admin/reports/overview", requireAdmin, async (_req, res) => {
   if (!requireDatabase(res)) {
@@ -4018,6 +4109,7 @@ Requirements:
   }
 
   const data = await response.json();
+  recordAiUsage(room, "generate", OPENAI_MODEL, extractUsage(data));
   const rawText = extractOpenAIJsonText(data);
 
   if (!rawText) {
@@ -4041,11 +4133,35 @@ function extractOpenAIJsonText(data) {
     : textFromContent;
 }
 
+// Pull token counts from an OpenAI response (Responses API uses input/output;
+// fall back to Chat Completions naming just in case).
+function extractUsage(data) {
+  const usage = data?.usage || {};
+  const input = Number(usage.input_tokens ?? usage.prompt_tokens ?? 0) || 0;
+  const output = Number(usage.output_tokens ?? usage.completion_tokens ?? 0) || 0;
+  const total = Number(usage.total_tokens ?? input + output) || 0;
+  return { input, output, total };
+}
+
+const AI_USAGE_SOURCES = ["worksheet", "question_bank", "live_quiz", "solo"];
+
+function recordAiUsage(context, operation, model, usage) {
+  if (!db || !usage) {
+    return;
+  }
+  const source = AI_USAGE_SOURCES.includes(context?.usageSource) ? context.usageSource : "live_quiz";
+  void dbQuery(
+    `INSERT INTO ai_usage (id, source, operation, model, input_tokens, output_tokens, total_tokens, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [createId(), source, operation, model || null, usage.input, usage.output, usage.total, context?.usageBy || null]
+  ).catch((error) => console.error("Failed to record AI usage:", error.message));
+}
+
 // Independent answer-key check: a second model re-solves the question from
 // scratch and reports which single option is correct (or NONE). Used to reject
 // questions whose generated answer key is wrong or whose options contain no
 // correct answer.
-async function verifyOpenAIQuestion(question) {
+async function verifyOpenAIQuestion(question, context) {
   const choicesText = (question.choices || [])
     .map((choice) => `${choice.id}) ${choice.text}`)
     .join("\n");
@@ -4095,7 +4211,9 @@ Rules:
     throw new Error(`OpenAI verification request failed: ${response.status} ${message}`);
   }
 
-  const rawText = extractOpenAIJsonText(await response.json());
+  const data = await response.json();
+  recordAiUsage(context, "verify", OPENAI_VERIFY_MODEL, extractUsage(data));
+  const rawText = extractOpenAIJsonText(data);
   if (!rawText) {
     throw new Error("OpenAI verification returned no JSON text");
   }
@@ -4224,7 +4342,7 @@ async function generateQuestion(room) {
         }
 
         if (OPENAI_VERIFY_ENABLED) {
-          const verdict = await verifyOpenAIQuestion(question);
+          const verdict = await verifyOpenAIQuestion(question, room);
           const verifiedChoice = String(verdict?.correctChoice || "").toUpperCase();
           const generatedChoice = String(question.correctChoice || "").toUpperCase();
           if (!["A", "B", "C", "D"].includes(verifiedChoice)) {
@@ -4552,7 +4670,8 @@ wss.on("connection", (ws, req) => {
           timerId: null,
           history: [],
           answerCount: 0,
-          lastActivityAt: Date.now()
+          lastActivityAt: Date.now(),
+          usageSource: "live_quiz"
         });
 
         const room = rooms.get(roomCode);

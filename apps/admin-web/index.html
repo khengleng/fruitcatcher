@@ -430,6 +430,34 @@
       gap: 12px;
       margin-top: 16px;
     }
+    .usage-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .usage-card {
+      border: 1px solid #e0e4e0;
+      border-radius: 12px;
+      padding: 12px 14px;
+      background: #fafbfa;
+    }
+    .usage-card .label {
+      font-size: 12px;
+      color: #6a756d;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .usage-card .value {
+      font-size: 22px;
+      font-weight: 800;
+      margin-top: 4px;
+    }
+    .usage-card .sub {
+      font-size: 12px;
+      color: #6a756d;
+      margin-top: 2px;
+    }
     .ws-card {
       border: 1px solid #e0e4e0;
       border-radius: 12px;
@@ -511,6 +539,7 @@
         <button class="tab" data-tab="activeSessions" data-role="admin">Active Sessions</button>
         <button class="tab" data-tab="analytics" data-role="admin">Analytics</button>
         <button class="tab" data-tab="audit" data-role="admin">Audit Log</button>
+        <button class="tab" data-tab="aiUsage" data-role="admin">📊 AI Usage</button>
         <button class="tab" data-tab="worksheets" data-role="staff">📄 Worksheets</button>
         <button class="tab" data-tab="users" data-role="admin">Users</button>
       </nav>
@@ -1030,6 +1059,52 @@
               </tr>
             </thead>
             <tbody id="auditBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="aiUsagePanel" class="panel" hidden>
+        <h2>📊 AI Token Usage</h2>
+        <p class="muted">OpenAI token usage per request, by purpose (worksheet, question bank, live quiz, solo) and time. Each generated question makes a generate call plus a verify call.</p>
+
+        <div class="ws-grid">
+          <label>Group by
+            <select id="usageGroupBy">
+              <option value="hour">Hour</option>
+              <option value="day" selected>Day</option>
+              <option value="week">Week</option>
+              <option value="month">Month</option>
+            </select>
+          </label>
+          <label>From
+            <input id="usageFrom" type="date">
+          </label>
+          <label>To
+            <input id="usageTo" type="date">
+          </label>
+        </div>
+        <div class="actions" style="margin-top:14px;">
+          <button id="usageLoadButton">Load Report</button>
+          <button id="usageExportButton" class="secondary small">📥 Export CSV</button>
+          <span id="usageStatus" class="muted" style="align-self:center;"></span>
+        </div>
+
+        <div id="usageSummary" class="usage-summary"></div>
+
+        <div class="table-wrap" style="margin-top:14px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Worksheet</th>
+                <th>Question Bank</th>
+                <th>Live Quiz</th>
+                <th>Solo</th>
+                <th>Total tokens</th>
+                <th>Requests</th>
+              </tr>
+            </thead>
+            <tbody id="usageBody"></tbody>
           </table>
         </div>
       </section>
@@ -2269,6 +2344,7 @@
       document.getElementById("activeSessionsPanel").hidden = tabName !== "activeSessions";
       document.getElementById("analyticsPanel").hidden = tabName !== "analytics";
       document.getElementById("auditPanel").hidden = tabName !== "audit";
+      document.getElementById("aiUsagePanel").hidden = tabName !== "aiUsage";
       document.getElementById("worksheetsPanel").hidden = tabName !== "worksheets";
       document.getElementById("usersPanel").hidden = tabName !== "users";
 
@@ -2288,6 +2364,8 @@
         loadWorksheets();
       } else if (tabName === "users") {
         loadUsers();
+      } else if (tabName === "aiUsage") {
+        loadAiUsage();
       }
     }
 
@@ -2407,10 +2485,10 @@
       });
     }
 
-    async function requestWorksheetQuestion(cfg, avoidPrompts) {
+    async function requestWorksheetQuestion(cfg, avoidPrompts, source = "worksheet") {
       const data = await api("/admin/worksheets/question", {
         method: "POST",
-        body: JSON.stringify({ ...cfg, avoidPrompts })
+        body: JSON.stringify({ ...cfg, avoidPrompts, source })
       });
       return data.question;
     }
@@ -2773,7 +2851,7 @@
       try {
         for (let i = 0; i < count; i++) {
           setStatus(wsEl("qaiProgress"), `Generating ${i + 1} / ${count}…`, "#85321e");
-          const question = await requestWorksheetQuestion(cfg, qaiQuestions.map((q) => q.question));
+          const question = await requestWorksheetQuestion(cfg, qaiQuestions.map((q) => q.question), "question_bank");
           qaiQuestions.push(question);
           renderQaiPreview();
         }
@@ -2793,7 +2871,7 @@
       updateQaiButtons();
       try {
         const avoid = qaiQuestions.filter((_, i) => i !== index).map((q) => q.question);
-        qaiQuestions[index] = await requestWorksheetQuestion(qaiConfig(), avoid);
+        qaiQuestions[index] = await requestWorksheetQuestion(qaiConfig(), avoid, "question_bank");
         setStatus(wsEl("qaiProgress"), "Question regenerated.", "#1f7a4d");
       } catch (error) {
         setStatus(wsEl("qaiProgress"), error.message, "#a33d3d");
@@ -2824,8 +2902,102 @@
       }
     }
 
+    // ===== AI token usage report =====
+    let lastUsageReport = null;
+    const USAGE_SOURCE_LABELS = { worksheet: "Worksheet", question_bank: "Question Bank", live_quiz: "Live Quiz", solo: "Solo" };
+    const fmtNum = (n) => Number(n || 0).toLocaleString();
+
+    function formatUsageBucket(value, groupBy) {
+      const d = new Date(value);
+      if (groupBy === "hour") return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit" });
+      if (groupBy === "day") return d.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+      return d.toLocaleDateString();
+    }
+
+    async function loadAiUsage() {
+      try {
+        setStatus(wsEl("usageStatus"), "Loading…", "#85321e");
+        const params = new URLSearchParams({ groupBy: wsEl("usageGroupBy").value });
+        const from = wsEl("usageFrom").value;
+        const to = wsEl("usageTo").value;
+        if (from) params.set("from", from);
+        if (to) params.set("to", to + "T23:59:59");
+        const data = await api(`/admin/reports/ai-usage?${params.toString()}`);
+        lastUsageReport = data;
+        renderAiUsage(data);
+        setStatus(wsEl("usageStatus"), `${fmtNum(data.grandTotal.totalTokens)} tokens · ${fmtNum(data.grandTotal.requests)} requests.`, "#1f7a4d");
+      } catch (error) {
+        setStatus(wsEl("usageStatus"), error.message, "#a33d3d");
+      }
+    }
+
+    function renderAiUsage(data) {
+      const summary = wsEl("usageSummary");
+      summary.innerHTML = "";
+      const totalsBySource = {};
+      (data.totals || []).forEach((t) => { totalsBySource[t.source] = t; });
+      const cards = [{ label: "Total tokens", value: fmtNum(data.grandTotal.totalTokens), sub: `${fmtNum(data.grandTotal.requests)} requests` }];
+      ["worksheet", "question_bank", "live_quiz", "solo"].forEach((s) => {
+        const t = totalsBySource[s] || { totalTokens: 0, requests: 0, inputTokens: 0, outputTokens: 0 };
+        cards.push({ label: USAGE_SOURCE_LABELS[s], value: fmtNum(t.totalTokens), sub: `${fmtNum(t.requests)} req · in ${fmtNum(t.inputTokens)} / out ${fmtNum(t.outputTokens)}` });
+      });
+      cards.forEach((c) => {
+        const el = document.createElement("div");
+        el.className = "usage-card";
+        el.innerHTML = `<div class="label">${c.label}</div><div class="value">${c.value}</div><div class="sub">${c.sub}</div>`;
+        summary.appendChild(el);
+      });
+
+      const byBucket = new Map();
+      (data.rows || []).forEach((r) => {
+        if (!byBucket.has(r.bucket)) byBucket.set(r.bucket, { bucket: r.bucket, worksheet: 0, question_bank: 0, live_quiz: 0, solo: 0, total: 0, requests: 0 });
+        const b = byBucket.get(r.bucket);
+        b[r.source] = (b[r.source] || 0) + r.totalTokens;
+        b.total += r.totalTokens;
+        b.requests += r.requests;
+      });
+
+      const tbody = wsEl("usageBody");
+      tbody.innerHTML = "";
+      if (!byBucket.size) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 7;
+        cell.textContent = "No AI usage in this range yet.";
+        cell.style.color = "#6a756d";
+        row.appendChild(cell);
+        tbody.appendChild(row);
+        return;
+      }
+      for (const b of byBucket.values()) {
+        const row = document.createElement("tr");
+        appendCell(row, formatUsageBucket(b.bucket, data.groupBy));
+        appendCell(row, fmtNum(b.worksheet));
+        appendCell(row, fmtNum(b.question_bank));
+        appendCell(row, fmtNum(b.live_quiz));
+        appendCell(row, fmtNum(b.solo));
+        appendCell(row, fmtNum(b.total));
+        appendCell(row, fmtNum(b.requests));
+        tbody.appendChild(row);
+      }
+    }
+
+    function exportUsageCSV() {
+      if (!lastUsageReport) return;
+      const rows = [["time", "source", "requests", "input_tokens", "output_tokens", "total_tokens"]];
+      (lastUsageReport.rows || []).forEach((r) => rows.push([r.bucket, r.source, r.requests, r.inputTokens, r.outputTokens, r.totalTokens]));
+      const csv = rows.map((r) => r.join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "ai-usage.csv";
+      a.click();
+    }
+
     initWorksheetGrades();
     initQaiGrades();
+    wsEl("usageLoadButton").addEventListener("click", loadAiUsage);
+    wsEl("usageExportButton").addEventListener("click", exportUsageCSV);
     wsEl("wsGenerateButton").addEventListener("click", generateWorksheet);
     wsEl("wsSaveButton").addEventListener("click", saveWorksheet);
     wsEl("wsPrintButton").addEventListener("click", () => printWorksheet(null));
