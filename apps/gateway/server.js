@@ -3858,6 +3858,9 @@ Requirements:
 - Exactly 4 answer choices labeled A, B, C, and D
 - Exactly ONE option must be correct; the text of that option must equal the answer you computed in "workedSolution"
 - The other three options must be plausible but definitely incorrect, and no two options may be equal
+- Each wrong option must reflect a realistic mistake or misconception a student could actually make (e.g. a common miscalculation or a believable misunderstanding), never an obviously absurd value
+- All four options must use the same style, length, format, units, and level of detail, so the correct answer cannot be guessed from surface clues. A student who has not learned the topic must have no better than a 1-in-4 chance of choosing correctly
+- Do not use "all of the above", "none of the above", "both A and B", or options that overlap with or contain one another
 - Set "correctChoice" to the letter of the option whose text equals your computed answer
 - Do not write a question whose correct answer is not among the four options
 - Safe, classroom-appropriate language
