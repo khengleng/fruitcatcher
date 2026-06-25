@@ -3284,9 +3284,59 @@ app.post("/admin/questions", requireAdmin, async (req, res) => {
       ]
     );
     await logAuditAction("question.create", "question_bank", questionId, { subject: question.subject, grade_level: question.gradeLevel }, req);
-    
+
     res.json({ ok: true, id: questionId });
   });
+});
+
+// Bulk-insert AI-generated (already verified) questions into the bank.
+app.post("/admin/questions/bulk", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) {
+    return;
+  }
+  try {
+    const config = buildWorksheetConfig(req.body || {});
+    const rawQuestions = Array.isArray(req.body?.questions) ? req.body.questions : [];
+    if (!rawQuestions.length) {
+      res.status(400).json({ error: "No questions provided." });
+      return;
+    }
+
+    let saved = 0;
+    for (const raw of rawQuestions.slice(0, 50)) {
+      try {
+        const question = validateQuestionPayload({
+          curriculum: config.curriculum,
+          language: config.language,
+          subject: config.subject,
+          gradeLevel: config.gradeLevel,
+          difficultyMode: config.difficultyMode,
+          prompt: raw.question,
+          choices: raw.choices,
+          correctChoice: raw.correctChoice,
+          shortExplanation: raw.shortExplanation,
+          elaboration: raw.elaboration
+        });
+        const questionId = createId();
+        await dbQueryRequired(
+          `INSERT INTO question_bank (
+            id, curriculum, language, subject, grade_level, difficulty_mode,
+            prompt, choices, correct_choice, short_explanation, elaboration, created_by
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12)`,
+          [questionId, question.curriculum, question.language, question.subject, question.gradeLevel, question.difficultyMode, question.prompt, JSON.stringify(question.choices), question.correctChoice, question.shortExplanation, question.elaboration, getAdminUsername(req)]
+        );
+        saved += 1;
+      } catch (questionError) {
+        console.warn("Skipped one bulk question:", questionError.message);
+      }
+    }
+
+    await logAuditAction("question.bulk_create", "question_bank", null, { saved, subject: config.subject, grade_level: config.gradeLevel }, req);
+    res.json({ ok: true, saved, skipped: rawQuestions.length - saved });
+  } catch (error) {
+    console.error("Bulk question save failed:", error);
+    res.status(500).json({ error: "Could not save questions" });
+  }
 });
 
 app.put("/admin/questions/:id", requireAdmin, async (req, res) => {

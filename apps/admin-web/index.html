@@ -784,6 +784,61 @@
         <div class="actions">
           <button id="loadQuestionsButton" class="secondary small">Load Questions</button>
           <button id="createQuestionButton" class="success small">➕ Create New Question</button>
+          <button id="aiQuestionButton" class="success small">🤖 AI Generate</button>
+        </div>
+
+        <div id="qaiModal" class="detail" hidden style="margin-top:18px;">
+          <h3>🤖 AI-Generate Questions</h3>
+          <p class="muted">Generate verified questions and add them to the bank. Every question is independently re-solved for a correct answer key before you save.</p>
+          <div class="ws-grid">
+            <label>Subject
+              <select id="qaiSubject">
+                <option value="math">Math</option>
+                <option value="general_science">General Science</option>
+                <option value="biology">Biology</option>
+                <option value="chemistry">Chemistry</option>
+                <option value="physics">Physics</option>
+                <option value="english">English</option>
+              </select>
+            </label>
+            <label>Curriculum
+              <select id="qaiCurriculum">
+                <option value="international">International</option>
+                <option value="cambodia_moeys">Cambodia MoEYS</option>
+              </select>
+            </label>
+            <label>Language
+              <select id="qaiLanguage">
+                <option value="english">English</option>
+                <option value="khmer">Khmer</option>
+                <option value="bilingual">Bilingual</option>
+              </select>
+            </label>
+            <label>Grade
+              <select id="qaiGrade"></select>
+            </label>
+            <label>Difficulty
+              <select id="qaiDifficulty">
+                <option value="easy">Easy</option>
+                <option value="standard" selected>Standard</option>
+                <option value="challenge">Challenge</option>
+              </select>
+            </label>
+            <label>Number of questions
+              <input id="qaiCount" type="number" min="1" max="20" value="10">
+            </label>
+          </div>
+          <label class="ws-brief">✨ Tell the AI what you need (optional)
+            <textarea id="qaiBrief" maxlength="800" rows="3" placeholder="e.g. Challenging multi-step word problems on ratios and proportions, with real-life contexts. Avoid trivial questions."></textarea>
+            <span class="muted" style="font-weight:400;">Subject, grade, and difficulty above still apply.</span>
+          </label>
+          <div class="actions" style="margin-top:14px;">
+            <button id="qaiGenerateButton">Generate</button>
+            <button id="qaiSaveButton" class="success small" disabled>➕ Add to Question Bank</button>
+            <button id="qaiCancelButton" class="secondary small">Close</button>
+            <span id="qaiProgress" class="muted" style="align-self:center;"></span>
+          </div>
+          <div id="qaiPreview" class="ws-preview"></div>
         </div>
 
         <div class="table-wrap" style="margin-top:14px;">
@@ -2630,11 +2685,157 @@
       }
     }
 
+    // ===== Question Bank: AI generation (reuses the verified worksheet generator) =====
+    let qaiQuestions = [];
+    let qaiBusy = false;
+
+    function initQaiGrades() {
+      const grade = wsEl("qaiGrade");
+      if (grade && !grade.options.length) {
+        for (let g = 2; g <= 12; g++) {
+          const opt = document.createElement("option");
+          opt.value = String(g);
+          opt.textContent = `Grade ${g}`;
+          if (g === 6) opt.selected = true;
+          grade.appendChild(opt);
+        }
+      }
+    }
+
+    function qaiConfig() {
+      return {
+        subject: wsEl("qaiSubject").value,
+        curriculum: wsEl("qaiCurriculum").value,
+        language: wsEl("qaiLanguage").value,
+        gradeLevel: Number(wsEl("qaiGrade").value) || 6,
+        difficultyMode: wsEl("qaiDifficulty").value,
+        teacherPrompt: wsEl("qaiBrief").value.trim()
+      };
+    }
+
+    function updateQaiButtons() {
+      const has = qaiQuestions.length > 0;
+      const saveBtn = wsEl("qaiSaveButton");
+      saveBtn.disabled = !has || qaiBusy;
+      saveBtn.textContent = has ? `➕ Add ${qaiQuestions.length} to Question Bank` : "➕ Add to Question Bank";
+      wsEl("qaiGenerateButton").disabled = qaiBusy;
+    }
+
+    function renderQaiPreview() {
+      const host = wsEl("qaiPreview");
+      host.innerHTML = "";
+      qaiQuestions.forEach((q, index) => {
+        const card = document.createElement("div");
+        card.className = "ws-card";
+        const prompt = document.createElement("div");
+        prompt.className = "ws-q";
+        prompt.innerHTML = `${index + 1}. ${formatMathHTML(q.question)}`;
+        card.appendChild(prompt);
+        (q.choices || []).forEach((c) => {
+          const opt = document.createElement("div");
+          opt.className = "ws-opt" + (c.id === q.correctChoice ? " correct" : "");
+          opt.innerHTML = `${c.id}) ${formatMathHTML(c.text)}${c.id === q.correctChoice ? " ✓" : ""}`;
+          card.appendChild(opt);
+        });
+        if (q.shortExplanation) {
+          const meta = document.createElement("div");
+          meta.className = "ws-meta";
+          meta.innerHTML = `Answer: ${q.correctChoice}. ${formatMathHTML(q.shortExplanation)}`;
+          card.appendChild(meta);
+        }
+        const actions = document.createElement("div");
+        actions.className = "ws-card-actions";
+        const regen = document.createElement("button");
+        regen.className = "secondary small";
+        regen.textContent = "Regenerate";
+        regen.disabled = qaiBusy;
+        regen.addEventListener("click", () => regenerateQaiQuestion(index));
+        const remove = document.createElement("button");
+        remove.className = "secondary small";
+        remove.textContent = "Remove";
+        remove.disabled = qaiBusy;
+        remove.addEventListener("click", () => { qaiQuestions.splice(index, 1); renderQaiPreview(); updateQaiButtons(); });
+        actions.appendChild(regen);
+        actions.appendChild(remove);
+        card.appendChild(actions);
+        host.appendChild(card);
+      });
+    }
+
+    async function generateQai() {
+      if (qaiBusy) return;
+      const count = Math.min(20, Math.max(1, Number(wsEl("qaiCount").value) || 10));
+      const cfg = qaiConfig();
+      qaiBusy = true;
+      qaiQuestions = [];
+      renderQaiPreview();
+      updateQaiButtons();
+      try {
+        for (let i = 0; i < count; i++) {
+          setStatus(wsEl("qaiProgress"), `Generating ${i + 1} / ${count}…`, "#85321e");
+          const question = await requestWorksheetQuestion(cfg, qaiQuestions.map((q) => q.question));
+          qaiQuestions.push(question);
+          renderQaiPreview();
+        }
+        setStatus(wsEl("qaiProgress"), `Generated ${qaiQuestions.length}. Review, then Add to Question Bank.`, "#1f7a4d");
+      } catch (error) {
+        setStatus(wsEl("qaiProgress"), error.message, "#a33d3d");
+      } finally {
+        qaiBusy = false;
+        updateQaiButtons();
+        renderQaiPreview();
+      }
+    }
+
+    async function regenerateQaiQuestion(index) {
+      if (qaiBusy) return;
+      qaiBusy = true;
+      updateQaiButtons();
+      try {
+        const avoid = qaiQuestions.filter((_, i) => i !== index).map((q) => q.question);
+        qaiQuestions[index] = await requestWorksheetQuestion(qaiConfig(), avoid);
+        setStatus(wsEl("qaiProgress"), "Question regenerated.", "#1f7a4d");
+      } catch (error) {
+        setStatus(wsEl("qaiProgress"), error.message, "#a33d3d");
+      } finally {
+        qaiBusy = false;
+        renderQaiPreview();
+        updateQaiButtons();
+      }
+    }
+
+    async function saveQaiToBank() {
+      if (!qaiQuestions.length) return;
+      try {
+        const cfg = qaiConfig();
+        const data = await api("/admin/questions/bulk", {
+          method: "POST",
+          body: JSON.stringify({ ...cfg, questions: qaiQuestions })
+        });
+        setStatus(wsEl("qaiProgress"), `Added ${data.saved} question(s) to the bank${data.skipped ? `, ${data.skipped} skipped` : ""}.`, "#1f7a4d");
+        qaiQuestions = [];
+        renderQaiPreview();
+        updateQaiButtons();
+        wsEl("qaiModal").hidden = true;
+        loadQuestions();
+      } catch (error) {
+        setStatus(wsEl("qaiProgress"), error.message, "#a33d3d");
+      }
+    }
+
     initWorksheetGrades();
+    initQaiGrades();
     wsEl("wsGenerateButton").addEventListener("click", generateWorksheet);
     wsEl("wsSaveButton").addEventListener("click", saveWorksheet);
     wsEl("wsPrintButton").addEventListener("click", () => printWorksheet(null));
     wsEl("createUserButton").addEventListener("click", createUser);
+    wsEl("aiQuestionButton").addEventListener("click", () => {
+      const modal = wsEl("qaiModal");
+      modal.hidden = !modal.hidden;
+    });
+    wsEl("qaiGenerateButton").addEventListener("click", generateQai);
+    wsEl("qaiSaveButton").addEventListener("click", saveQaiToBank);
+    wsEl("qaiCancelButton").addEventListener("click", () => { wsEl("qaiModal").hidden = true; });
 
     document.querySelectorAll("button.tab").forEach((button) => {
       button.addEventListener("click", () => showTab(button.dataset.tab));
