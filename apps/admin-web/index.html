@@ -392,6 +392,53 @@
 	        grid-column: 1;
 	      }
 	    }
+
+    .ws-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .ws-grid label {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #44514a;
+    }
+    .ws-preview {
+      display: grid;
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .ws-card {
+      border: 1px solid #e0e4e0;
+      border-radius: 12px;
+      padding: 14px 16px;
+      background: #fafbfa;
+    }
+    .ws-card .ws-q {
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .ws-card .ws-opt {
+      padding: 3px 0;
+    }
+    .ws-card .ws-opt.correct {
+      color: #1f7a4d;
+      font-weight: 700;
+    }
+    .ws-card .ws-meta {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #6a756d;
+    }
+    .ws-card-actions {
+      margin-top: 10px;
+      display: flex;
+      gap: 8px;
+    }
   </style>
 	</head>
 	<body>
@@ -438,14 +485,16 @@
 
 	    <div class="shell">
 	      <nav class="tabs">
-        <button class="tab active" data-tab="settings">Settings</button>
-        <button class="tab" data-tab="sessions">Quiz Sessions</button>
-        <button class="tab" data-tab="students">Students</button>
-        <button class="tab" data-tab="questions">Question Bank</button>
-        <button class="tab" data-tab="groups">Groups</button>
-        <button class="tab" data-tab="activeSessions">Active Sessions</button>
-        <button class="tab" data-tab="analytics">Analytics</button>
-        <button class="tab" data-tab="audit">Audit Log</button>
+        <button class="tab active" data-tab="settings" data-role="admin">Settings</button>
+        <button class="tab" data-tab="sessions" data-role="admin">Quiz Sessions</button>
+        <button class="tab" data-tab="students" data-role="admin">Students</button>
+        <button class="tab" data-tab="questions" data-role="admin">Question Bank</button>
+        <button class="tab" data-tab="groups" data-role="admin">Groups</button>
+        <button class="tab" data-tab="activeSessions" data-role="admin">Active Sessions</button>
+        <button class="tab" data-tab="analytics" data-role="admin">Analytics</button>
+        <button class="tab" data-tab="audit" data-role="admin">Audit Log</button>
+        <button class="tab" data-tab="worksheets" data-role="staff">📄 Worksheets</button>
+        <button class="tab" data-tab="users" data-role="admin">Users</button>
       </nav>
 
       <section id="settingsPanel" class="panel">
@@ -911,6 +960,122 @@
           </table>
         </div>
       </section>
+
+      <section id="worksheetsPanel" class="panel" hidden>
+        <h2>📄 Printable Worksheets</h2>
+        <p class="muted">Prepare a set of quiz questions and print an A4 worksheet with a score box for students to solve offline — away from the TV or any device.</p>
+
+        <div class="ws-grid">
+          <label>Title
+            <input id="wsTitle" type="text" maxlength="120" placeholder="e.g. Grade 6 Math — Week 3 Homework">
+          </label>
+          <label>Subject
+            <select id="wsSubject">
+              <option value="math">Math</option>
+              <option value="general_science">General Science</option>
+              <option value="biology">Biology</option>
+              <option value="chemistry">Chemistry</option>
+              <option value="physics">Physics</option>
+              <option value="english">English</option>
+            </select>
+          </label>
+          <label>Curriculum
+            <select id="wsCurriculum">
+              <option value="international">International</option>
+              <option value="cambodia_moeys">Cambodia MoEYS</option>
+            </select>
+          </label>
+          <label>Language
+            <select id="wsLanguage">
+              <option value="english">English</option>
+              <option value="khmer">Khmer</option>
+              <option value="bilingual">Bilingual</option>
+            </select>
+          </label>
+          <label>Grade
+            <select id="wsGrade"></select>
+          </label>
+          <label>Difficulty
+            <select id="wsDifficulty">
+              <option value="easy">Easy</option>
+              <option value="standard" selected>Standard</option>
+              <option value="challenge">Challenge</option>
+            </select>
+          </label>
+          <label>Number of questions
+            <input id="wsCount" type="number" min="1" max="20" value="10">
+          </label>
+          <label>Instructions (optional)
+            <input id="wsInstructions" type="text" maxlength="300" placeholder="e.g. Show your working. Circle the correct letter.">
+          </label>
+        </div>
+
+        <div class="actions" style="margin-top:14px;">
+          <button id="wsGenerateButton">Generate Questions</button>
+          <button id="wsSaveButton" class="success small" disabled>💾 Save Worksheet</button>
+          <button id="wsPrintButton" class="secondary small" disabled>🖨️ Print Student Sheet</button>
+          <span id="wsProgress" class="muted" style="align-self:center;"></span>
+        </div>
+
+        <div id="wsPreview" class="ws-preview"></div>
+
+        <h3 style="margin-top:26px;">Saved Worksheets</h3>
+        <div class="table-wrap" style="margin-top:10px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Subject</th>
+                <th>Grade</th>
+                <th>Questions</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="wsListBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="usersPanel" class="panel" hidden>
+        <h2>Users &amp; Roles</h2>
+        <p class="muted">Create teacher/facilitator accounts. Teachers can only build and print worksheets — they cannot see settings, students, or reports.</p>
+
+        <div class="ws-grid">
+          <label>Username
+            <input id="newUserName" type="text" maxlength="40" placeholder="e.g. teacher.dara">
+          </label>
+          <label>Password
+            <input id="newUserPassword" type="password" minlength="8" placeholder="At least 8 characters">
+          </label>
+          <label>Role
+            <select id="newUserRole">
+              <option value="teacher">Teacher</option>
+              <option value="facilitator">Facilitator</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+        </div>
+        <div class="actions" style="margin-top:14px;">
+          <button id="createUserButton">Create User</button>
+          <span id="usersStatus" class="muted" style="align-self:center;"></span>
+        </div>
+
+        <div class="table-wrap" style="margin-top:16px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Last login</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="usersBody"></tbody>
+          </table>
+        </div>
+      </section>
     </div>
   </main>
 
@@ -983,8 +1148,11 @@
 	      loginScreen.hidden = isAuthenticated;
 	      adminApp.hidden = !isAuthenticated;
 	      adminUserBadge.textContent = isAuthenticated
-	        ? `Admin: ${adminSession?.user?.username || "token-admin"}`
+	        ? `${(adminSession?.user?.role || "admin")}: ${adminSession?.user?.username || "token-admin"}`
 	        : "Signed out";
+	      if (isAuthenticated) {
+	        applyRoleView();
+	      }
 	    }
 
     function getHeaders() {
@@ -1113,6 +1281,7 @@
     }
 
     async function loadConfig() {
+      if (currentRole() !== "admin") return;
       setStatus(authStatus, "Loading settings...", "#85321e");
       const config = await api("/admin/config");
       fillForm(config);
@@ -1150,6 +1319,7 @@
     }
 
     async function loadPresets() {
+      if (currentRole() !== "admin") return;
       setStatus(saveStatus, "Loading presets...", "#85321e");
       const data = await api("/admin/presets");
       allPresets = data.presets || [];
@@ -2021,7 +2191,9 @@
       document.getElementById("activeSessionsPanel").hidden = tabName !== "activeSessions";
       document.getElementById("analyticsPanel").hidden = tabName !== "analytics";
       document.getElementById("auditPanel").hidden = tabName !== "audit";
-      
+      document.getElementById("worksheetsPanel").hidden = tabName !== "worksheets";
+      document.getElementById("usersPanel").hidden = tabName !== "users";
+
       if (tabName === "sessions" || tabName === "students") {
         refreshReports();
       } else if (tabName === "analytics") {
@@ -2034,8 +2206,410 @@
         loadActiveSessions();
       } else if (tabName === "audit") {
         loadAuditLogs();
+      } else if (tabName === "worksheets") {
+        loadWorksheets();
+      } else if (tabName === "users") {
+        loadUsers();
       }
     }
+
+    function currentRole() {
+      // Emergency-token sessions have no user object and are treated as full admin.
+      return adminSession?.user?.role || "admin";
+    }
+
+    function applyRoleView() {
+      const role = currentRole();
+      const isAdmin = role === "admin";
+      document.querySelectorAll("button.tab").forEach((button) => {
+        const needsAdmin = button.dataset.role === "admin";
+        button.hidden = needsAdmin && !isAdmin;
+      });
+      // Land teachers/facilitators straight on the worksheet builder.
+      showTab(isAdmin ? "settings" : "worksheets");
+    }
+
+    // ===== Math rendering (mirrors the TV/controller renderer) =====
+    function formatMathHTML(text) {
+      if (!text) return "";
+      const escapeHtml = (value) => String(value)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+      const normalized = String(text)
+        .replace(/\\\(([\s\S]*?)\\\)/g, "$1").replace(/\\\[([\s\S]*?)\\\]/g, "$1")
+        .replace(/\$\$([\s\S]*?)\$\$/g, "$1").replace(/\$([^$]+)\$/g, "$1")
+        .replace(/\\times/g, "×").replace(/\\div/g, "÷").replace(/\\pm/g, "±")
+        .replace(/\\cdot/g, "·").replace(/\\sqrt/g, "√").replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "$1/$2")
+        .replace(/\\pi/g, "π").replace(/\\theta/g, "θ").replace(/\\le(q)?/g, "≤").replace(/\\ge(q)?/g, "≥").replace(/\\neq?/g, "≠");
+      return escapeHtml(normalized)
+        .replace(/&lt;=/g, "≤").replace(/&gt;=/g, "≥").replace(/<=/g, "≤").replace(/>=/g, "≥").replace(/!=/g, "≠")
+        .replace(/\^\{([^}]+)\}/g, "<sup>$1</sup>").replace(/\^(\d+)/g, "<sup>$1</sup>").replace(/\^([a-zA-Z])/g, "<sup>$1</sup>")
+        .replace(/\_\{([^}]+)\}/g, "<sub>$1</sub>").replace(/\_(\d+)/g, "<sub>$1</sub>")
+        .replace(/([A-Z][a-z]?)(\d+)(?![+-])/g, "$1<sub>$2</sub>")
+        .replace(/(\d+)\/(\d+)/g, "<sup>$1</sup>⁄<sub>$2</sub>")
+        .replace(/\s{2,}/g, " ");
+    }
+
+    // ===== Worksheet builder =====
+    let wsQuestions = [];
+    let wsBusy = false;
+    const wsEl = (id) => document.getElementById(id);
+
+    function initWorksheetGrades() {
+      const grade = wsEl("wsGrade");
+      if (grade && !grade.options.length) {
+        for (let g = 2; g <= 12; g++) {
+          const opt = document.createElement("option");
+          opt.value = String(g);
+          opt.textContent = `Grade ${g}`;
+          if (g === 6) opt.selected = true;
+          grade.appendChild(opt);
+        }
+      }
+    }
+
+    function worksheetConfig() {
+      return {
+        title: wsEl("wsTitle").value.trim() || "Untitled Worksheet",
+        instructions: wsEl("wsInstructions").value.trim(),
+        subject: wsEl("wsSubject").value,
+        curriculum: wsEl("wsCurriculum").value,
+        language: wsEl("wsLanguage").value,
+        gradeLevel: Number(wsEl("wsGrade").value) || 6,
+        difficultyMode: wsEl("wsDifficulty").value
+      };
+    }
+
+    function updateWorksheetButtons() {
+      const has = wsQuestions.length > 0;
+      wsEl("wsSaveButton").disabled = !has || wsBusy;
+      wsEl("wsPrintButton").disabled = !has || wsBusy;
+      wsEl("wsGenerateButton").disabled = wsBusy;
+    }
+
+    function renderWorksheetPreview() {
+      const host = wsEl("wsPreview");
+      host.innerHTML = "";
+      wsQuestions.forEach((q, index) => {
+        const card = document.createElement("div");
+        card.className = "ws-card";
+        const prompt = document.createElement("div");
+        prompt.className = "ws-q";
+        prompt.innerHTML = `${index + 1}. ${formatMathHTML(q.question)}`;
+        card.appendChild(prompt);
+        (q.choices || []).forEach((c) => {
+          const opt = document.createElement("div");
+          opt.className = "ws-opt" + (c.id === q.correctChoice ? " correct" : "");
+          opt.innerHTML = `${c.id}) ${formatMathHTML(c.text)}${c.id === q.correctChoice ? " ✓" : ""}`;
+          card.appendChild(opt);
+        });
+        if (q.shortExplanation) {
+          const meta = document.createElement("div");
+          meta.className = "ws-meta";
+          meta.innerHTML = `Answer: ${q.correctChoice}. ${formatMathHTML(q.shortExplanation)}`;
+          card.appendChild(meta);
+        }
+        const actions = document.createElement("div");
+        actions.className = "ws-card-actions";
+        const regen = document.createElement("button");
+        regen.className = "secondary small";
+        regen.textContent = "Regenerate";
+        regen.disabled = wsBusy;
+        regen.addEventListener("click", () => regenerateWorksheetQuestion(index));
+        const remove = document.createElement("button");
+        remove.className = "secondary small";
+        remove.textContent = "Remove";
+        remove.disabled = wsBusy;
+        remove.addEventListener("click", () => { wsQuestions.splice(index, 1); renderWorksheetPreview(); updateWorksheetButtons(); });
+        actions.appendChild(regen);
+        actions.appendChild(remove);
+        card.appendChild(actions);
+        host.appendChild(card);
+      });
+    }
+
+    async function requestWorksheetQuestion(cfg, avoidPrompts) {
+      const data = await api("/admin/worksheets/question", {
+        method: "POST",
+        body: JSON.stringify({ ...cfg, avoidPrompts })
+      });
+      return data.question;
+    }
+
+    async function generateWorksheet() {
+      if (wsBusy) return;
+      const count = Math.min(20, Math.max(1, Number(wsEl("wsCount").value) || 10));
+      const cfg = worksheetConfig();
+      wsBusy = true;
+      wsQuestions = [];
+      renderWorksheetPreview();
+      updateWorksheetButtons();
+      try {
+        for (let i = 0; i < count; i++) {
+          setStatus(wsEl("wsProgress"), `Generating ${i + 1} / ${count}…`, "#85321e");
+          const question = await requestWorksheetQuestion(cfg, wsQuestions.map((q) => q.question));
+          wsQuestions.push(question);
+          renderWorksheetPreview();
+        }
+        setStatus(wsEl("wsProgress"), `Generated ${wsQuestions.length} questions. Review, then Save or Print.`, "#1f7a4d");
+      } catch (error) {
+        setStatus(wsEl("wsProgress"), error.message, "#a33d3d");
+      } finally {
+        wsBusy = false;
+        updateWorksheetButtons();
+        renderWorksheetPreview();
+      }
+    }
+
+    async function regenerateWorksheetQuestion(index) {
+      if (wsBusy) return;
+      wsBusy = true;
+      updateWorksheetButtons();
+      try {
+        const avoid = wsQuestions.filter((_, i) => i !== index).map((q) => q.question);
+        const question = await requestWorksheetQuestion(worksheetConfig(), avoid);
+        wsQuestions[index] = question;
+        setStatus(wsEl("wsProgress"), "Question regenerated.", "#1f7a4d");
+      } catch (error) {
+        setStatus(wsEl("wsProgress"), error.message, "#a33d3d");
+      } finally {
+        wsBusy = false;
+        renderWorksheetPreview();
+        updateWorksheetButtons();
+      }
+    }
+
+    async function saveWorksheet() {
+      if (!wsQuestions.length) return;
+      try {
+        const cfg = worksheetConfig();
+        await api("/admin/worksheets", {
+          method: "POST",
+          body: JSON.stringify({ ...cfg, questions: wsQuestions })
+        });
+        setStatus(wsEl("wsProgress"), "Worksheet saved.", "#1f7a4d");
+        loadWorksheets();
+      } catch (error) {
+        setStatus(wsEl("wsProgress"), error.message, "#a33d3d");
+      }
+    }
+
+    async function loadWorksheets() {
+      try {
+        const data = await api("/admin/worksheets");
+        const tbody = wsEl("wsListBody");
+        tbody.innerHTML = "";
+        (data.worksheets || []).forEach((ws) => {
+          const row = document.createElement("tr");
+          appendCell(row, ws.title);
+          appendCell(row, ws.subject);
+          appendCell(row, ws.gradeLevel);
+          appendCell(row, ws.questionCount);
+          appendCell(row, formatDate(ws.createdAt));
+          const actions = document.createElement("td");
+          const openBtn = document.createElement("button");
+          openBtn.className = "secondary small";
+          openBtn.textContent = "Open";
+          openBtn.addEventListener("click", () => openWorksheet(ws.id));
+          const printBtn = document.createElement("button");
+          printBtn.className = "secondary small";
+          printBtn.textContent = "🖨️ Print";
+          printBtn.addEventListener("click", () => openWorksheet(ws.id, true));
+          const delBtn = document.createElement("button");
+          delBtn.className = "danger small";
+          delBtn.textContent = "Delete";
+          delBtn.addEventListener("click", () => deleteWorksheet(ws.id));
+          actions.appendChild(openBtn);
+          actions.appendChild(printBtn);
+          actions.appendChild(delBtn);
+          row.appendChild(actions);
+          tbody.appendChild(row);
+        });
+      } catch (error) {
+        setStatus(wsEl("wsProgress"), error.message, "#a33d3d");
+      }
+    }
+
+    async function openWorksheet(id, alsoPrint) {
+      try {
+        const data = await api(`/admin/worksheets/${id}`);
+        const ws = data.worksheet;
+        wsEl("wsTitle").value = ws.title || "";
+        wsEl("wsInstructions").value = ws.instructions || "";
+        wsEl("wsSubject").value = ws.subject;
+        wsEl("wsCurriculum").value = ws.curriculum;
+        wsEl("wsLanguage").value = ws.language;
+        wsEl("wsGrade").value = String(ws.gradeLevel);
+        wsEl("wsDifficulty").value = ws.difficultyMode;
+        wsQuestions = ws.questions || [];
+        renderWorksheetPreview();
+        updateWorksheetButtons();
+        setStatus(wsEl("wsProgress"), `Loaded "${ws.title}".`, "#1f7a4d");
+        if (alsoPrint) printWorksheet(ws);
+      } catch (error) {
+        setStatus(wsEl("wsProgress"), error.message, "#a33d3d");
+      }
+    }
+
+    async function deleteWorksheet(id) {
+      if (!confirm("Delete this worksheet?")) return;
+      try {
+        await api(`/admin/worksheets/${id}`, { method: "DELETE" });
+        loadWorksheets();
+      } catch (error) {
+        setStatus(wsEl("wsProgress"), error.message, "#a33d3d");
+      }
+    }
+
+    function subjectLabel(value) {
+      return String(value || "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    }
+
+    function printWorksheet(source) {
+      const ws = source || { ...worksheetConfig(), questions: wsQuestions };
+      const questions = ws.questions || wsQuestions;
+      if (!questions.length) {
+        setStatus(wsEl("wsProgress"), "Nothing to print yet.", "#a33d3d");
+        return;
+      }
+      const title = ws.title || "Worksheet";
+      const instructions = ws.instructions || "";
+      const heading = `${subjectLabel(ws.subject)} · Grade ${ws.gradeLevel}`;
+      const items = questions.map((q, i) => {
+        const opts = (q.choices || []).map((c) =>
+          `<div class="q-opt">${c.id})&nbsp; ${formatMathHTML(c.text)}</div>`).join("");
+        return `<div class="q"><div class="q-prompt">${i + 1}.&nbsp; ${formatMathHTML(q.question)}</div>
+          <div class="q-opts">${opts}</div>
+          <div class="ans-line">Answer: ____</div></div>`;
+      }).join("");
+      const doc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escapeForHtml(title)}</title>
+        <style>
+          @page { size: A4; margin: 16mm; }
+          * { box-sizing: border-box; }
+          body { font-family: 'Segoe UI', system-ui, Arial, sans-serif; color:#111; font-size:13px; }
+          .head { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #111; padding-bottom:8px; }
+          .title { font-size:20px; font-weight:800; }
+          .sub { font-size:12px; color:#444; margin-top:2px; }
+          .score { border:2px solid #111; border-radius:8px; padding:8px 14px; font-weight:800; font-size:14px; white-space:nowrap; }
+          .fields { display:flex; gap:28px; margin:12px 0 6px; font-size:13px; }
+          .fields span u { display:inline-block; min-width:140px; }
+          .instructions { font-style:italic; color:#333; margin:6px 0 14px; }
+          .q { margin:0 0 14px; page-break-inside:avoid; }
+          .q-prompt { font-weight:700; margin-bottom:6px; }
+          .q-opts { display:grid; grid-template-columns:1fr 1fr; gap:3px 24px; margin-left:14px; }
+          .q-opt { padding:1px 0; }
+          .ans-line { margin:6px 0 0 14px; color:#555; letter-spacing:2px; }
+          sup { font-size:.7em; } sub { font-size:.7em; }
+          @media print { .noprint { display:none; } }
+        </style></head><body>
+        <div class="head">
+          <div><div class="title">${escapeForHtml(title)}</div><div class="sub">${escapeForHtml(heading)}</div></div>
+          <div class="score">Score: ______ / ${questions.length}</div>
+        </div>
+        <div class="fields"><span>Name: <u></u></span><span>Date: <u></u></span></div>
+        ${instructions ? `<div class="instructions">${escapeForHtml(instructions)}</div>` : ""}
+        ${items}
+        <button class="noprint" onclick="window.print()" style="margin-top:18px;padding:8px 16px;">Print</button>
+        </body></html>`;
+      const win = window.open("", "_blank");
+      if (!win) {
+        setStatus(wsEl("wsProgress"), "Pop-up blocked. Allow pop-ups to print.", "#a33d3d");
+        return;
+      }
+      win.document.open();
+      win.document.write(doc);
+      win.document.close();
+      win.focus();
+      setTimeout(() => { try { win.print(); } catch (e) {} }, 400);
+    }
+
+    function escapeForHtml(value) {
+      return String(value || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    // ===== Users & roles =====
+    async function loadUsers() {
+      try {
+        const data = await api("/admin/users");
+        const tbody = wsEl("usersBody");
+        tbody.innerHTML = "";
+        (data.users || []).forEach((user) => {
+          const row = document.createElement("tr");
+          appendCell(row, user.username);
+          appendCell(row, user.role);
+          appendCell(row, user.isActive ? "Active" : "Disabled");
+          appendCell(row, user.lastLoginAt ? formatDate(user.lastLoginAt) : "—");
+          const actions = document.createElement("td");
+          const toggle = document.createElement("button");
+          toggle.className = "secondary small";
+          toggle.textContent = user.isActive ? "Disable" : "Enable";
+          toggle.addEventListener("click", () => updateUser(user.id, { isActive: !user.isActive }));
+          const reset = document.createElement("button");
+          reset.className = "secondary small";
+          reset.textContent = "Reset password";
+          reset.addEventListener("click", () => {
+            const pw = prompt(`New password for ${user.username} (min 8 chars):`);
+            if (pw) updateUser(user.id, { password: pw });
+          });
+          const del = document.createElement("button");
+          del.className = "danger small";
+          del.textContent = "Delete";
+          del.addEventListener("click", () => {
+            if (confirm(`Delete user ${user.username}?`)) deleteUser(user.id);
+          });
+          actions.appendChild(toggle);
+          actions.appendChild(reset);
+          actions.appendChild(del);
+          row.appendChild(actions);
+          tbody.appendChild(row);
+        });
+      } catch (error) {
+        setStatus(wsEl("usersStatus"), error.message, "#a33d3d");
+      }
+    }
+
+    async function createUser() {
+      try {
+        const username = wsEl("newUserName").value.trim();
+        const password = wsEl("newUserPassword").value;
+        const role = wsEl("newUserRole").value;
+        await api("/admin/users", {
+          method: "POST",
+          body: JSON.stringify({ username, password, role })
+        });
+        wsEl("newUserName").value = "";
+        wsEl("newUserPassword").value = "";
+        setStatus(wsEl("usersStatus"), `Created ${username}.`, "#1f7a4d");
+        loadUsers();
+      } catch (error) {
+        setStatus(wsEl("usersStatus"), error.message, "#a33d3d");
+      }
+    }
+
+    async function updateUser(id, patch) {
+      try {
+        await api(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify(patch) });
+        setStatus(wsEl("usersStatus"), "User updated.", "#1f7a4d");
+        loadUsers();
+      } catch (error) {
+        setStatus(wsEl("usersStatus"), error.message, "#a33d3d");
+      }
+    }
+
+    async function deleteUser(id) {
+      try {
+        await api(`/admin/users/${id}`, { method: "DELETE" });
+        loadUsers();
+      } catch (error) {
+        setStatus(wsEl("usersStatus"), error.message, "#a33d3d");
+      }
+    }
+
+    initWorksheetGrades();
+    wsEl("wsGenerateButton").addEventListener("click", generateWorksheet);
+    wsEl("wsSaveButton").addEventListener("click", saveWorksheet);
+    wsEl("wsPrintButton").addEventListener("click", () => printWorksheet(null));
+    wsEl("createUserButton").addEventListener("click", createUser);
 
     document.querySelectorAll("button.tab").forEach((button) => {
       button.addEventListener("click", () => showTab(button.dataset.tab));

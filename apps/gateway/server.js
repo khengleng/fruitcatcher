@@ -1257,6 +1257,26 @@ async function initDatabase() {
     )
   `);
   
+  // Printable worksheets prepared by facilitators/teachers
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS worksheets (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      curriculum TEXT NOT NULL,
+      language TEXT NOT NULL,
+      grade_level INTEGER NOT NULL,
+      difficulty_mode TEXT NOT NULL,
+      question_count INTEGER NOT NULL,
+      instructions TEXT,
+      questions JSONB NOT NULL,
+      created_by TEXT,
+      created_by_id TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_worksheets_owner ON worksheets(created_by_id, created_at DESC)");
+
   // Audit log table
   await dbQueryRequired(`
     CREATE TABLE IF NOT EXISTS audit_logs (
@@ -2124,19 +2144,35 @@ async function isAuthorized(req) {
   return true;
 }
 
-async function requireAdmin(req, res, next) {
-  try {
-    if (!(await isAuthorized(req))) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
+const STAFF_ROLES = ["admin", "teacher", "facilitator"];
 
-    next();
-  } catch (error) {
-    console.error("Admin authorization failed:", error);
-    res.status(401).json({ error: "Unauthorized" });
-  }
+function getUserRole(req) {
+  return req.adminUser?.role || "admin";
 }
+
+function requireRole(...allowedRoles) {
+  return async function roleGuard(req, res, next) {
+    try {
+      if (!(await isAuthorized(req))) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+      if (!allowedRoles.includes(getUserRole(req))) {
+        res.status(403).json({ error: "You do not have permission to do this." });
+        return;
+      }
+      next();
+    } catch (error) {
+      console.error("Admin authorization failed:", error);
+      res.status(401).json({ error: "Unauthorized" });
+    }
+  };
+}
+
+// Full admins only.
+const requireAdmin = requireRole("admin");
+// Any signed-in staff member (admin, teacher, or facilitator).
+const requireStaff = requireRole(...STAFF_ROLES);
 
 app.post("/admin/login", async (req, res) => {
   if (!requireDatabase(res)) {
@@ -2181,6 +2217,330 @@ app.post("/admin/login", async (req, res) => {
   } catch (error) {
     console.error("Admin login failed:", error);
     res.status(500).json({ error: "Admin login failed" });
+  }
+});
+
+// ---- Admin user management (full admins only) ----
+
+function publicAdminUser(row) {
+  return {
+    id: row.id,
+    username: row.username,
+    role: row.role,
+    isActive: row.is_active,
+    lastLoginAt: row.last_login_at,
+    createdAt: row.created_at
+  };
+}
+
+app.get("/admin/users", requireAdmin, async (_req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const result = await dbQueryRequired(
+      `SELECT id, username, role, is_active, last_login_at, created_at
+       FROM admin_users ORDER BY created_at ASC`
+    );
+    res.json({ users: result.rows.map(publicAdminUser) });
+  } catch (error) {
+    console.error("List admin users failed:", error);
+    res.status(500).json({ error: "Could not load users" });
+  }
+});
+
+app.post("/admin/users", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const username = String(req.body?.username || "").trim().toLowerCase();
+    const password = String(req.body?.password || "");
+    const role = String(req.body?.role || "teacher").trim().toLowerCase();
+    if (!/^[a-z0-9._-]{3,40}$/.test(username)) {
+      res.status(400).json({ error: "Username must be 3-40 characters (letters, numbers, . _ -)." });
+      return;
+    }
+    if (password.length < 8) {
+      res.status(400).json({ error: "Password must be at least 8 characters." });
+      return;
+    }
+    if (!STAFF_ROLES.includes(role)) {
+      res.status(400).json({ error: "Role must be admin, teacher, or facilitator." });
+      return;
+    }
+    const existing = await dbQueryRequired("SELECT id FROM admin_users WHERE username = $1", [username]);
+    if (existing.rows[0]) {
+      res.status(409).json({ error: "That username already exists." });
+      return;
+    }
+    const id = createId();
+    await dbQueryRequired(
+      `INSERT INTO admin_users (id, username, password_hash, role, is_active, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, TRUE, NOW(), NOW())`,
+      [id, username, hashPassword(password), role]
+    );
+    await logAuditAction("admin.user.create", "admin_users", id, { username, role }, req);
+    res.status(201).json({ ok: true, user: { id, username, role, isActive: true } });
+  } catch (error) {
+    console.error("Create admin user failed:", error);
+    res.status(500).json({ error: "Could not create user" });
+  }
+});
+
+app.put("/admin/users/:id", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const id = String(req.params.id || "").trim();
+    const result = await dbQueryRequired("SELECT id, username, role, is_active FROM admin_users WHERE id = $1", [id]);
+    const target = result.rows[0];
+    if (!target) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const updates = [];
+    const values = [];
+    let i = 1;
+
+    if (req.body?.role !== undefined) {
+      const role = String(req.body.role).trim().toLowerCase();
+      if (!STAFF_ROLES.includes(role)) {
+        res.status(400).json({ error: "Role must be admin, teacher, or facilitator." });
+        return;
+      }
+      updates.push(`role = $${i++}`);
+      values.push(role);
+    }
+
+    if (req.body?.password) {
+      const password = String(req.body.password);
+      if (password.length < 8) {
+        res.status(400).json({ error: "Password must be at least 8 characters." });
+        return;
+      }
+      updates.push(`password_hash = $${i++}`);
+      values.push(hashPassword(password));
+    }
+
+    if (req.body?.isActive !== undefined) {
+      updates.push(`is_active = $${i++}`);
+      values.push(Boolean(req.body.isActive));
+    }
+
+    if (!updates.length) {
+      res.status(400).json({ error: "Nothing to update." });
+      return;
+    }
+
+    const demotingOrDisabling =
+      (req.body?.role !== undefined && String(req.body.role).toLowerCase() !== "admin" && target.role === "admin") ||
+      (req.body?.isActive === false && target.role === "admin");
+    if (demotingOrDisabling) {
+      const admins = await dbQueryRequired("SELECT COUNT(*)::int AS n FROM admin_users WHERE role = 'admin' AND is_active = TRUE");
+      if ((admins.rows[0]?.n || 0) <= 1) {
+        res.status(400).json({ error: "Cannot remove the last active admin." });
+        return;
+      }
+    }
+
+    values.push(id);
+    await dbQueryRequired(`UPDATE admin_users SET ${updates.join(", ")}, updated_at = NOW() WHERE id = $${i}`, values);
+    await logAuditAction("admin.user.update", "admin_users", id, { username: target.username }, req);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Update admin user failed:", error);
+    res.status(500).json({ error: "Could not update user" });
+  }
+});
+
+app.delete("/admin/users/:id", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const id = String(req.params.id || "").trim();
+    const result = await dbQueryRequired("SELECT id, username, role, is_active FROM admin_users WHERE id = $1", [id]);
+    const target = result.rows[0];
+    if (!target) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+    if (req.adminUser?.sub && req.adminUser.sub === id) {
+      res.status(400).json({ error: "You cannot delete your own account." });
+      return;
+    }
+    if (target.role === "admin" && target.is_active) {
+      const admins = await dbQueryRequired("SELECT COUNT(*)::int AS n FROM admin_users WHERE role = 'admin' AND is_active = TRUE");
+      if ((admins.rows[0]?.n || 0) <= 1) {
+        res.status(400).json({ error: "Cannot delete the last active admin." });
+        return;
+      }
+    }
+    await dbQueryRequired("DELETE FROM admin_users WHERE id = $1", [id]);
+    await logAuditAction("admin.user.delete", "admin_users", id, { username: target.username }, req);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Delete admin user failed:", error);
+    res.status(500).json({ error: "Could not delete user" });
+  }
+});
+
+// ---- Printable worksheets (teachers/facilitators + admins) ----
+
+function buildWorksheetConfig(input = {}) {
+  const config = sanitizeConfig({
+    subject: input.subject,
+    curriculum: input.curriculum,
+    language: input.language,
+    gradeLevel: input.gradeLevel ?? input.grade,
+    difficultyMode: input.difficultyMode
+  });
+  config.questionSource = "openai_fallback";
+  return config;
+}
+
+function normalizeWorksheetQuestion(q) {
+  return {
+    question: String(q.question || "").slice(0, 1000),
+    choices: Array.isArray(q.choices)
+      ? q.choices.slice(0, 4).map((c) => ({ id: String(c.id || "").toUpperCase(), text: String(c.text || "").slice(0, 400) }))
+      : [],
+    correctChoice: String(q.correctChoice || "").toUpperCase(),
+    shortExplanation: String(q.shortExplanation || "").slice(0, 400),
+    elaboration: String(q.elaboration || "").slice(0, 800)
+  };
+}
+
+app.post("/admin/worksheets/question", requireStaff, async (req, res) => {
+  try {
+    const config = buildWorksheetConfig(req.body || {});
+    const avoidPrompts = Array.isArray(req.body?.avoidPrompts)
+      ? req.body.avoidPrompts.map((p) => normalizePrompt(String(p))).filter(Boolean)
+      : [];
+    const ctx = { config, history: avoidPrompts.slice(-20), questionIndex: avoidPrompts.length };
+    const question = await generateQuestion(ctx);
+    if (!question) {
+      res.status(502).json({ error: "Could not generate a question. Please try again." });
+      return;
+    }
+    res.json({ question: normalizeWorksheetQuestion(question) });
+  } catch (error) {
+    console.error("Worksheet question generation failed:", error);
+    res.status(500).json({ error: "Could not generate a question" });
+  }
+});
+
+app.post("/admin/worksheets", requireStaff, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const title = normalizeAdminText(req.body?.title, 120, "Untitled Worksheet");
+    const instructions = normalizeAdminText(req.body?.instructions, 300, "");
+    const config = buildWorksheetConfig(req.body || {});
+    const rawQuestions = Array.isArray(req.body?.questions) ? req.body.questions : [];
+    if (!rawQuestions.length) {
+      res.status(400).json({ error: "A worksheet needs at least one question." });
+      return;
+    }
+    const questions = rawQuestions
+      .slice(0, 50)
+      .map(normalizeWorksheetQuestion)
+      .filter((q) => q.question && q.choices.length === 4 && ["A", "B", "C", "D"].includes(q.correctChoice));
+    if (!questions.length) {
+      res.status(400).json({ error: "No valid questions to save." });
+      return;
+    }
+    const id = createId();
+    await dbQueryRequired(
+      `INSERT INTO worksheets
+       (id, title, subject, curriculum, language, grade_level, difficulty_mode, question_count, instructions, questions, created_by, created_by_id, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW())`,
+      [id, title, config.subject, config.curriculum, config.language, config.gradeLevel, config.difficultyMode, questions.length, instructions, JSON.stringify(questions), req.adminUser?.username || "admin", req.adminUser?.sub || null]
+    );
+    await logAuditAction("worksheet.create", "worksheets", id, { title, count: questions.length }, req);
+    res.status(201).json({ ok: true, id });
+  } catch (error) {
+    console.error("Save worksheet failed:", error);
+    res.status(500).json({ error: "Could not save worksheet" });
+  }
+});
+
+app.get("/admin/worksheets", requireStaff, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const isAdmin = getUserRole(req) === "admin";
+    const cols = "id, title, subject, curriculum, language, grade_level, difficulty_mode, question_count, created_by, created_at";
+    const result = isAdmin
+      ? await dbQueryRequired(`SELECT ${cols} FROM worksheets ORDER BY created_at DESC LIMIT 200`)
+      : await dbQueryRequired(`SELECT ${cols} FROM worksheets WHERE created_by_id = $1 ORDER BY created_at DESC LIMIT 200`, [req.adminUser?.sub || ""]);
+    res.json({
+      worksheets: result.rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        subject: row.subject,
+        curriculum: row.curriculum,
+        language: row.language,
+        gradeLevel: row.grade_level,
+        difficultyMode: row.difficulty_mode,
+        questionCount: row.question_count,
+        createdBy: row.created_by,
+        createdAt: row.created_at
+      }))
+    });
+  } catch (error) {
+    console.error("List worksheets failed:", error);
+    res.status(500).json({ error: "Could not load worksheets" });
+  }
+});
+
+app.get("/admin/worksheets/:id", requireStaff, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const result = await dbQueryRequired("SELECT * FROM worksheets WHERE id = $1", [String(req.params.id)]);
+    const row = result.rows[0];
+    if (!row) {
+      res.status(404).json({ error: "Worksheet not found" });
+      return;
+    }
+    if (getUserRole(req) !== "admin" && row.created_by_id && row.created_by_id !== req.adminUser?.sub) {
+      res.status(403).json({ error: "You can only open your own worksheets." });
+      return;
+    }
+    res.json({
+      worksheet: {
+        id: row.id,
+        title: row.title,
+        subject: row.subject,
+        curriculum: row.curriculum,
+        language: row.language,
+        gradeLevel: row.grade_level,
+        difficultyMode: row.difficulty_mode,
+        questionCount: row.question_count,
+        instructions: row.instructions || "",
+        questions: Array.isArray(row.questions) ? row.questions : JSON.parse(row.questions || "[]"),
+        createdBy: row.created_by,
+        createdAt: row.created_at
+      }
+    });
+  } catch (error) {
+    console.error("Get worksheet failed:", error);
+    res.status(500).json({ error: "Could not load worksheet" });
+  }
+});
+
+app.delete("/admin/worksheets/:id", requireStaff, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const result = await dbQueryRequired("SELECT id, created_by_id, title FROM worksheets WHERE id = $1", [String(req.params.id)]);
+    const row = result.rows[0];
+    if (!row) {
+      res.status(404).json({ error: "Worksheet not found" });
+      return;
+    }
+    if (getUserRole(req) !== "admin" && row.created_by_id && row.created_by_id !== req.adminUser?.sub) {
+      res.status(403).json({ error: "You can only delete your own worksheets." });
+      return;
+    }
+    await dbQueryRequired("DELETE FROM worksheets WHERE id = $1", [row.id]);
+    await logAuditAction("worksheet.delete", "worksheets", row.id, { title: row.title }, req);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Delete worksheet failed:", error);
+    res.status(500).json({ error: "Could not delete worksheet" });
   }
 });
 
