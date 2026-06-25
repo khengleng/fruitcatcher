@@ -865,14 +865,30 @@ function getDifficultyInstruction(difficultyMode) {
 
 function getLanguageInstruction(language) {
   if (language === "khmer") {
-    return "Write all student-facing text in Khmer script.";
+    return "CRITICAL: Write ALL student-facing text — the question, every answer choice, and the explanations — entirely in Khmer script (ភាសាខ្មែរ). Do not use English words or sentences anywhere except for numerals and mathematical symbols.";
   }
 
   if (language === "bilingual") {
-    return "Write all student-facing text bilingually with Khmer first and English second in the same field.";
+    return "CRITICAL: Write every student-facing field bilingually — Khmer first, then the English translation in the same field. Both languages must appear in the question, every choice, and the explanations.";
   }
 
-  return "Write all student-facing text in English.";
+  return "CRITICAL: Write ALL student-facing text — the question, every answer choice, and the explanations — entirely in English. Do not use Khmer script anywhere.";
+}
+
+function hasKhmerScript(text) {
+  return /[ក-៿]/.test(String(text || ""));
+}
+
+// Enforce the selected language so a single off-language question can't slip
+// into a set (e.g. one English question in a Khmer worksheet/bank batch).
+function questionMatchesLanguage(question, language) {
+  const blob = [question?.question, ...((question?.choices || []).map((c) => c?.text))].join(" ");
+  const khmer = hasKhmerScript(blob);
+  if (language === "khmer" || language === "bilingual") {
+    return khmer;
+  }
+  // English: no Khmer characters allowed (numerals/symbols are fine).
+  return !khmer;
 }
 
 function getCurriculumInstruction(curriculum) {
@@ -2424,6 +2440,12 @@ app.post("/admin/worksheets/question", requireStaff, async (req, res) => {
     const question = await generateQuestion(ctx);
     if (!question) {
       res.status(502).json({ error: "Could not generate a question. Please try again." });
+      return;
+    }
+    // Never hand back an off-language question (e.g. an English fallback in a
+    // Khmer batch) — keep the whole set in the selected language.
+    if (!questionMatchesLanguage(question, config.language)) {
+      res.status(502).json({ error: `Could not generate a question in ${getLanguageLabel(config.language)}. Please try again.` });
       return;
     }
     res.json({ question: normalizeWorksheetQuestion(question) });
@@ -4134,6 +4156,10 @@ async function generateQuestion(room) {
 
         if (room.history.includes(normalizedQuestion)) {
           throw new Error(`Duplicate question generated: ${question.question}`);
+        }
+
+        if (!questionMatchesLanguage(question, config.language)) {
+          throw new Error(`Question is not in the selected language (${config.language}): ${question.question}`);
         }
 
         if (OPENAI_VERIFY_ENABLED) {
