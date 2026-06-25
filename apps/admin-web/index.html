@@ -2812,7 +2812,8 @@
           method: "POST",
           body: JSON.stringify({ ...cfg, questions: qaiQuestions })
         });
-        setStatus(wsEl("qaiProgress"), `Added ${data.saved} question(s) to the bank${data.skipped ? `, ${data.skipped} skipped` : ""}.`, "#1f7a4d");
+        const dupMsg = data.duplicates ? `, ${data.duplicates} duplicate(s) skipped` : "";
+        setStatus(wsEl("qaiProgress"), `Added ${data.saved} question(s) to the bank${dupMsg}.`, data.saved ? "#1f7a4d" : "#85321e");
         qaiQuestions = [];
         renderQaiPreview();
         updateQaiButtons();

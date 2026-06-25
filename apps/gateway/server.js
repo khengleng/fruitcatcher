@@ -1286,6 +1286,7 @@ async function initDatabase() {
       question_count INTEGER NOT NULL,
       instructions TEXT,
       prompt_brief TEXT,
+      content_hash TEXT,
       questions JSONB NOT NULL,
       created_by TEXT,
       created_by_id TEXT,
@@ -1413,6 +1414,7 @@ async function runDatabaseMigrations() {
     "ALTER TABLE quiz_presets ADD COLUMN IF NOT EXISTS created_by TEXT",
     "ALTER TABLE quiz_presets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
     "ALTER TABLE worksheets ADD COLUMN IF NOT EXISTS prompt_brief TEXT",
+    "ALTER TABLE worksheets ADD COLUMN IF NOT EXISTS content_hash TEXT",
     "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS source_user_id TEXT",
     "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS student_name TEXT",
     "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS curriculum TEXT",
@@ -2418,6 +2420,27 @@ function buildWorksheetConfig(input = {}) {
   return config;
 }
 
+function worksheetContentHash(questions) {
+  const prompts = questions
+    .map((q) => normalizePrompt(q.question))
+    .filter(Boolean)
+    .sort();
+  return crypto.createHash("sha256").update(prompts.join("\n")).digest("hex");
+}
+
+// Normalized prompts already in the active bank for a subject/grade, used to
+// reject duplicate questions on insert.
+async function existingBankPrompts(subject, gradeLevel) {
+  if (!db) {
+    return new Set();
+  }
+  const result = await dbQuery(
+    "SELECT prompt FROM question_bank WHERE is_active = TRUE AND subject = $1 AND grade_level = $2",
+    [subject, gradeLevel]
+  );
+  return new Set((result?.rows || []).map((row) => normalizePrompt(row.prompt)));
+}
+
 function normalizeWorksheetQuestion(q) {
   return {
     question: String(q.question || "").slice(0, 1000),
@@ -2466,20 +2489,44 @@ app.post("/admin/worksheets", requireStaff, async (req, res) => {
       res.status(400).json({ error: "A worksheet needs at least one question." });
       return;
     }
+    const seenPrompts = new Set();
     const questions = rawQuestions
       .slice(0, 50)
       .map(normalizeWorksheetQuestion)
-      .filter((q) => q.question && q.choices.length === 4 && ["A", "B", "C", "D"].includes(q.correctChoice));
+      .filter((q) => {
+        if (!(q.question && q.choices.length === 4 && ["A", "B", "C", "D"].includes(q.correctChoice))) {
+          return false;
+        }
+        // Drop repeated questions within the same worksheet.
+        const key = normalizePrompt(q.question);
+        if (seenPrompts.has(key)) {
+          return false;
+        }
+        seenPrompts.add(key);
+        return true;
+      });
     if (!questions.length) {
       res.status(400).json({ error: "No valid questions to save." });
       return;
     }
+
+    // Reject saving a worksheet whose exact question set this owner already saved.
+    const contentHash = worksheetContentHash(questions);
+    const duplicate = await dbQuery(
+      "SELECT id, title FROM worksheets WHERE created_by_id IS NOT DISTINCT FROM $1 AND content_hash = $2 LIMIT 1",
+      [req.adminUser?.sub || null, contentHash]
+    );
+    if (duplicate?.rows?.[0]) {
+      res.status(409).json({ error: `You already saved a worksheet with these exact questions ("${duplicate.rows[0].title}").` });
+      return;
+    }
+
     const id = createId();
     await dbQueryRequired(
       `INSERT INTO worksheets
-       (id, title, subject, curriculum, language, grade_level, difficulty_mode, question_count, instructions, prompt_brief, questions, created_by, created_by_id, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, NOW())`,
-      [id, title, config.subject, config.curriculum, config.language, config.gradeLevel, config.difficultyMode, questions.length, instructions, config.teacherPrompt || null, JSON.stringify(questions), req.adminUser?.username || "admin", req.adminUser?.sub || null]
+       (id, title, subject, curriculum, language, grade_level, difficulty_mode, question_count, instructions, prompt_brief, content_hash, questions, created_by, created_by_id, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, NOW())`,
+      [id, title, config.subject, config.curriculum, config.language, config.gradeLevel, config.difficultyMode, questions.length, instructions, config.teacherPrompt || null, contentHash, JSON.stringify(questions), req.adminUser?.username || "admin", req.adminUser?.sub || null]
     );
     await logAuditAction("worksheet.create", "worksheets", id, { title, count: questions.length }, req);
     res.status(201).json({ ok: true, id });
@@ -3283,7 +3330,12 @@ app.post("/admin/questions", requireAdmin, async (req, res) => {
 
   await runAdminAction(res, async () => {
     const question = validateQuestionPayload(req.body);
-    
+
+    const existing = await existingBankPrompts(question.subject, question.gradeLevel);
+    if (existing.has(normalizePrompt(question.prompt))) {
+      throw makeHttpError(409, "A question with this exact wording already exists in the bank for this subject and grade.");
+    }
+
     const questionId = createId();
     await dbQueryRequired(
       `INSERT INTO question_bank (
@@ -3324,7 +3376,9 @@ app.post("/admin/questions/bulk", requireAdmin, async (req, res) => {
       return;
     }
 
+    const seen = await existingBankPrompts(config.subject, config.gradeLevel);
     let saved = 0;
+    let duplicates = 0;
     for (const raw of rawQuestions.slice(0, 50)) {
       try {
         const question = validateQuestionPayload({
@@ -3339,6 +3393,13 @@ app.post("/admin/questions/bulk", requireAdmin, async (req, res) => {
           shortExplanation: raw.shortExplanation,
           elaboration: raw.elaboration
         });
+        // Skip duplicates against the bank and earlier items in this batch.
+        const key = normalizePrompt(question.prompt);
+        if (seen.has(key)) {
+          duplicates += 1;
+          continue;
+        }
+        seen.add(key);
         const questionId = createId();
         await dbQueryRequired(
           `INSERT INTO question_bank (
@@ -3353,8 +3414,8 @@ app.post("/admin/questions/bulk", requireAdmin, async (req, res) => {
       }
     }
 
-    await logAuditAction("question.bulk_create", "question_bank", null, { saved, subject: config.subject, grade_level: config.gradeLevel }, req);
-    res.json({ ok: true, saved, skipped: rawQuestions.length - saved });
+    await logAuditAction("question.bulk_create", "question_bank", null, { saved, duplicates, subject: config.subject, grade_level: config.gradeLevel }, req);
+    res.json({ ok: true, saved, duplicates, skipped: rawQuestions.length - saved });
   } catch (error) {
     console.error("Bulk question save failed:", error);
     res.status(500).json({ error: "Could not save questions" });
