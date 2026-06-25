@@ -4071,6 +4071,41 @@ async function getQuestionBankQuestion(room) {
   return selected;
 }
 
+// Randomly permute the four options so the correct answer is uniformly
+// distributed across A/B/C/D. Removes the positional bias from the model and
+// the static bank (where blindly always picking one letter beat 25%).
+function shuffleChoices(question) {
+  const choices = Array.isArray(question?.choices) ? question.choices : [];
+  if (choices.length !== 4) {
+    return question;
+  }
+
+  const correctId = String(question.correctChoice || "").toUpperCase();
+  // Track the correct option by reference, not by text, so duplicate-looking
+  // option texts can never mislabel the key.
+  const items = choices.map((choice) => ({
+    text: choice.text,
+    correct: String(choice.id || "").toUpperCase() === correctId
+  }));
+
+  for (let i = items.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [items[i], items[j]] = [items[j], items[i]];
+  }
+
+  const correctIndex = items.findIndex((item) => item.correct);
+  if (correctIndex < 0) {
+    return question;
+  }
+
+  const ids = ["A", "B", "C", "D"];
+  return {
+    ...question,
+    choices: items.map((item, index) => ({ id: ids[index], text: item.text })),
+    correctChoice: ids[correctIndex]
+  };
+}
+
 async function generateQuestion(room) {
   const config = getSessionConfig(room);
 
@@ -4078,7 +4113,7 @@ async function generateQuestion(room) {
     room.history.push(normalizePrompt(question.question));
     room.history = room.history.slice(-20);
     return {
-      ...question,
+      ...shuffleChoices(question),
       source,
       model
     };
