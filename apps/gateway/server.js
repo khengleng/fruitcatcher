@@ -30,6 +30,32 @@ const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5.4-mini";
 const OPENAI_VERIFY_MODEL = process.env.OPENAI_VERIFY_MODEL || OPENAI_MODEL;
 const OPENAI_VERIFY_ENABLED = process.env.OPENAI_VERIFY !== "false";
 const OPENAI_MAX_GEN_ATTEMPTS = Math.max(1, Number(process.env.OPENAI_MAX_GEN_ATTEMPTS || 3));
+// Token pricing in USD per 1,000,000 tokens. Defaults assume "mini"-tier rates;
+// override per deployment. OPENAI_PRICING can hold a JSON map of per-model rates,
+// e.g. {"gpt-5.4-mini":{"input":0.15,"output":0.60}}.
+const OPENAI_PRICE_INPUT_PER_M = Number(process.env.OPENAI_PRICE_INPUT_PER_M || 0.15);
+const OPENAI_PRICE_OUTPUT_PER_M = Number(process.env.OPENAI_PRICE_OUTPUT_PER_M || 0.60);
+const OPENAI_PRICING = (() => {
+  try {
+    return process.env.OPENAI_PRICING ? JSON.parse(process.env.OPENAI_PRICING) : {};
+  } catch (error) {
+    console.warn("Invalid OPENAI_PRICING JSON, ignoring:", error.message);
+    return {};
+  }
+})();
+
+function modelPricing(model) {
+  const entry = (model && OPENAI_PRICING[model]) || OPENAI_PRICING.default || {};
+  return {
+    input: Number(entry.input ?? OPENAI_PRICE_INPUT_PER_M),
+    output: Number(entry.output ?? OPENAI_PRICE_OUTPUT_PER_M)
+  };
+}
+
+function tokenCostUsd(model, inputTokens, outputTokens) {
+  const price = modelPricing(model);
+  return (Number(inputTokens || 0) / 1e6) * price.input + (Number(outputTokens || 0) / 1e6) * price.output;
+}
 const DATABASE_URL = process.env.DATABASE_URL || "";
 const CONFIG_PATH = process.env.CONFIG_PATH || path.join(__dirname, "data", "game-config.json");
 const APP_VERSION = process.env.APP_VERSION || "1.0.0";
@@ -3044,52 +3070,56 @@ app.get("/admin/reports/ai-usage", requireAdmin, async (req, res) => {
     const fromIso = parseDate(req.query.from, now - defaultDays * 86400000).toISOString();
     const toIso = parseDate(req.query.to, now).toISOString();
 
-    const bucketResult = await dbQuery(
-      `SELECT date_trunc($1, created_at) AS bucket, source,
+    // Group by model too, so per-model pricing is applied before aggregating.
+    const detailResult = await dbQuery(
+      `SELECT date_trunc($1, created_at) AS bucket, source, model,
               COUNT(*)::int AS requests,
               SUM(input_tokens)::int AS input_tokens,
               SUM(output_tokens)::int AS output_tokens,
               SUM(total_tokens)::int AS total_tokens
        FROM ai_usage
        WHERE created_at >= $2 AND created_at <= $3
-       GROUP BY bucket, source
+       GROUP BY bucket, source, model
        ORDER BY bucket DESC, source`,
       [groupBy, fromIso, toIso]
     );
-    const totalsResult = await dbQuery(
-      `SELECT source, COUNT(*)::int AS requests,
-              SUM(input_tokens)::int AS input_tokens,
-              SUM(output_tokens)::int AS output_tokens,
-              SUM(total_tokens)::int AS total_tokens
-       FROM ai_usage
-       WHERE created_at >= $1 AND created_at <= $2
-       GROUP BY source ORDER BY source`,
-      [fromIso, toIso]
-    );
 
-    const rows = (bucketResult?.rows || []).map((row) => ({
-      bucket: row.bucket,
-      source: row.source,
-      requests: row.requests,
-      inputTokens: row.input_tokens,
-      outputTokens: row.output_tokens,
-      totalTokens: row.total_tokens
-    }));
-    const totals = (totalsResult?.rows || []).map((row) => ({
-      source: row.source,
-      requests: row.requests,
-      inputTokens: row.input_tokens,
-      outputTokens: row.output_tokens,
-      totalTokens: row.total_tokens
-    }));
-    const grandTotal = totals.reduce((acc, t) => ({
-      requests: acc.requests + t.requests,
-      inputTokens: acc.inputTokens + t.inputTokens,
-      outputTokens: acc.outputTokens + t.outputTokens,
-      totalTokens: acc.totalTokens + t.totalTokens
-    }), { requests: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+    const blank = () => ({ requests: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0 });
+    const add = (target, detail, cost) => {
+      target.requests += detail.requests;
+      target.inputTokens += detail.input_tokens;
+      target.outputTokens += detail.output_tokens;
+      target.totalTokens += detail.total_tokens;
+      target.costUsd += cost;
+    };
 
-    res.json({ groupBy, from: fromIso, to: toIso, sources: AI_USAGE_SOURCES, rows, totals, grandTotal });
+    const rowMap = new Map();
+    const totalMap = new Map();
+    const grandTotal = blank();
+
+    for (const detail of detailResult?.rows || []) {
+      const cost = tokenCostUsd(detail.model, detail.input_tokens, detail.output_tokens);
+
+      const rowKey = `${detail.bucket}|${detail.source}`;
+      if (!rowMap.has(rowKey)) rowMap.set(rowKey, { bucket: detail.bucket, source: detail.source, ...blank() });
+      add(rowMap.get(rowKey), detail, cost);
+
+      if (!totalMap.has(detail.source)) totalMap.set(detail.source, { source: detail.source, ...blank() });
+      add(totalMap.get(detail.source), detail, cost);
+
+      add(grandTotal, detail, cost);
+    }
+
+    res.json({
+      groupBy,
+      from: fromIso,
+      to: toIso,
+      sources: AI_USAGE_SOURCES,
+      pricing: { inputPerMillion: OPENAI_PRICE_INPUT_PER_M, outputPerMillion: OPENAI_PRICE_OUTPUT_PER_M, models: OPENAI_PRICING },
+      rows: [...rowMap.values()],
+      totals: [...totalMap.values()],
+      grandTotal
+    });
   } catch (error) {
     console.error("AI usage report failed:", error);
     res.status(500).json({ error: "Could not load AI usage report" });

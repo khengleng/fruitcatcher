@@ -1101,6 +1101,7 @@
                 <th>Live Quiz</th>
                 <th>Solo</th>
                 <th>Total tokens</th>
+                <th>Cost (USD)</th>
                 <th>Requests</th>
               </tr>
             </thead>
@@ -2906,6 +2907,10 @@
     let lastUsageReport = null;
     const USAGE_SOURCE_LABELS = { worksheet: "Worksheet", question_bank: "Question Bank", live_quiz: "Live Quiz", solo: "Solo" };
     const fmtNum = (n) => Number(n || 0).toLocaleString();
+    const fmtUsd = (n) => {
+      const v = Number(n || 0);
+      return v > 0 && v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`;
+    };
 
     function formatUsageBucket(value, groupBy) {
       const d = new Date(value);
@@ -2925,7 +2930,7 @@
         const data = await api(`/admin/reports/ai-usage?${params.toString()}`);
         lastUsageReport = data;
         renderAiUsage(data);
-        setStatus(wsEl("usageStatus"), `${fmtNum(data.grandTotal.totalTokens)} tokens · ${fmtNum(data.grandTotal.requests)} requests.`, "#1f7a4d");
+        setStatus(wsEl("usageStatus"), `${fmtNum(data.grandTotal.totalTokens)} tokens · ${fmtUsd(data.grandTotal.costUsd)} · ${fmtNum(data.grandTotal.requests)} requests.`, "#1f7a4d");
       } catch (error) {
         setStatus(wsEl("usageStatus"), error.message, "#a33d3d");
       }
@@ -2936,10 +2941,12 @@
       summary.innerHTML = "";
       const totalsBySource = {};
       (data.totals || []).forEach((t) => { totalsBySource[t.source] = t; });
-      const cards = [{ label: "Total tokens", value: fmtNum(data.grandTotal.totalTokens), sub: `${fmtNum(data.grandTotal.requests)} requests` }];
+      const cards = [
+        { label: "Total cost", value: fmtUsd(data.grandTotal.costUsd), sub: `${fmtNum(data.grandTotal.totalTokens)} tokens · ${fmtNum(data.grandTotal.requests)} requests` }
+      ];
       ["worksheet", "question_bank", "live_quiz", "solo"].forEach((s) => {
-        const t = totalsBySource[s] || { totalTokens: 0, requests: 0, inputTokens: 0, outputTokens: 0 };
-        cards.push({ label: USAGE_SOURCE_LABELS[s], value: fmtNum(t.totalTokens), sub: `${fmtNum(t.requests)} req · in ${fmtNum(t.inputTokens)} / out ${fmtNum(t.outputTokens)}` });
+        const t = totalsBySource[s] || { totalTokens: 0, requests: 0, costUsd: 0 };
+        cards.push({ label: USAGE_SOURCE_LABELS[s], value: fmtUsd(t.costUsd), sub: `${fmtNum(t.totalTokens)} tokens · ${fmtNum(t.requests)} req` });
       });
       cards.forEach((c) => {
         const el = document.createElement("div");
@@ -2950,10 +2957,11 @@
 
       const byBucket = new Map();
       (data.rows || []).forEach((r) => {
-        if (!byBucket.has(r.bucket)) byBucket.set(r.bucket, { bucket: r.bucket, worksheet: 0, question_bank: 0, live_quiz: 0, solo: 0, total: 0, requests: 0 });
+        if (!byBucket.has(r.bucket)) byBucket.set(r.bucket, { bucket: r.bucket, worksheet: 0, question_bank: 0, live_quiz: 0, solo: 0, total: 0, cost: 0, requests: 0 });
         const b = byBucket.get(r.bucket);
         b[r.source] = (b[r.source] || 0) + r.totalTokens;
         b.total += r.totalTokens;
+        b.cost += r.costUsd || 0;
         b.requests += r.requests;
       });
 
@@ -2962,7 +2970,7 @@
       if (!byBucket.size) {
         const row = document.createElement("tr");
         const cell = document.createElement("td");
-        cell.colSpan = 7;
+        cell.colSpan = 8;
         cell.textContent = "No AI usage in this range yet.";
         cell.style.color = "#6a756d";
         row.appendChild(cell);
@@ -2977,6 +2985,7 @@
         appendCell(row, fmtNum(b.live_quiz));
         appendCell(row, fmtNum(b.solo));
         appendCell(row, fmtNum(b.total));
+        appendCell(row, fmtUsd(b.cost));
         appendCell(row, fmtNum(b.requests));
         tbody.appendChild(row);
       }
@@ -2984,8 +2993,8 @@
 
     function exportUsageCSV() {
       if (!lastUsageReport) return;
-      const rows = [["time", "source", "requests", "input_tokens", "output_tokens", "total_tokens"]];
-      (lastUsageReport.rows || []).forEach((r) => rows.push([r.bucket, r.source, r.requests, r.inputTokens, r.outputTokens, r.totalTokens]));
+      const rows = [["time", "source", "requests", "input_tokens", "output_tokens", "total_tokens", "cost_usd"]];
+      (lastUsageReport.rows || []).forEach((r) => rows.push([r.bucket, r.source, r.requests, r.inputTokens, r.outputTokens, r.totalTokens, Number(r.costUsd || 0).toFixed(6)]));
       const csv = rows.map((r) => r.join(",")).join("\n");
       const blob = new Blob([csv], { type: "text/csv" });
       const a = document.createElement("a");
