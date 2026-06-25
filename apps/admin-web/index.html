@@ -407,6 +407,24 @@
       font-weight: 600;
       color: #44514a;
     }
+    .ws-brief {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 14px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #44514a;
+    }
+    .ws-brief textarea {
+      width: 100%;
+      resize: vertical;
+      font: inherit;
+      font-weight: 400;
+      padding: 10px 12px;
+      border: 1px solid #cdd5cf;
+      border-radius: 10px;
+    }
     .ws-preview {
       display: grid;
       gap: 12px;
@@ -1009,6 +1027,11 @@
             <input id="wsInstructions" type="text" maxlength="300" placeholder="e.g. Show your working. Circle the correct letter.">
           </label>
         </div>
+
+        <label class="ws-brief">✨ Tell the AI what you need (optional)
+          <textarea id="wsBrief" maxlength="800" rows="3" placeholder="e.g. Fraction word problems about cooking and recipes — use halves and quarters, with real-life Cambodian market examples. Keep the wording simple."></textarea>
+          <span class="muted" style="font-weight:400;">Describe the topic, style, or focus. The subject, grade, and difficulty above still apply.</span>
+        </label>
 
         <div class="actions" style="margin-top:14px;">
           <button id="wsGenerateButton">Generate Questions</button>
@@ -2272,6 +2295,7 @@
       return {
         title: wsEl("wsTitle").value.trim() || "Untitled Worksheet",
         instructions: wsEl("wsInstructions").value.trim(),
+        teacherPrompt: wsEl("wsBrief").value.trim(),
         subject: wsEl("wsSubject").value,
         curriculum: wsEl("wsCurriculum").value,
         language: wsEl("wsLanguage").value,
@@ -2436,6 +2460,7 @@
         const ws = data.worksheet;
         wsEl("wsTitle").value = ws.title || "";
         wsEl("wsInstructions").value = ws.instructions || "";
+        wsEl("wsBrief").value = ws.promptBrief || "";
         wsEl("wsSubject").value = ws.subject;
         wsEl("wsCurriculum").value = ws.curriculum;
         wsEl("wsLanguage").value = ws.language;

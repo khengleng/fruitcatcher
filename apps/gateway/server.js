@@ -1269,6 +1269,7 @@ async function initDatabase() {
       difficulty_mode TEXT NOT NULL,
       question_count INTEGER NOT NULL,
       instructions TEXT,
+      prompt_brief TEXT,
       questions JSONB NOT NULL,
       created_by TEXT,
       created_by_id TEXT,
@@ -1395,6 +1396,7 @@ async function runDatabaseMigrations() {
     "ALTER TABLE quiz_presets ADD COLUMN IF NOT EXISTS description TEXT",
     "ALTER TABLE quiz_presets ADD COLUMN IF NOT EXISTS created_by TEXT",
     "ALTER TABLE quiz_presets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+    "ALTER TABLE worksheets ADD COLUMN IF NOT EXISTS prompt_brief TEXT",
     "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS source_user_id TEXT",
     "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS student_name TEXT",
     "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS curriculum TEXT",
@@ -2391,6 +2393,12 @@ function buildWorksheetConfig(input = {}) {
     difficultyMode: input.difficultyMode
   });
   config.questionSource = "openai_fallback";
+  const teacherPrompt = String(input.teacherPrompt ?? input.brief ?? "").replace(/\s+/g, " ").trim().slice(0, 800);
+  if (teacherPrompt) {
+    // A custom brief should come from the AI engine, not the static bank.
+    config.teacherPrompt = teacherPrompt;
+    config.questionSource = "openai_only";
+  }
   return config;
 }
 
@@ -2447,9 +2455,9 @@ app.post("/admin/worksheets", requireStaff, async (req, res) => {
     const id = createId();
     await dbQueryRequired(
       `INSERT INTO worksheets
-       (id, title, subject, curriculum, language, grade_level, difficulty_mode, question_count, instructions, questions, created_by, created_by_id, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW())`,
-      [id, title, config.subject, config.curriculum, config.language, config.gradeLevel, config.difficultyMode, questions.length, instructions, JSON.stringify(questions), req.adminUser?.username || "admin", req.adminUser?.sub || null]
+       (id, title, subject, curriculum, language, grade_level, difficulty_mode, question_count, instructions, prompt_brief, questions, created_by, created_by_id, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, NOW())`,
+      [id, title, config.subject, config.curriculum, config.language, config.gradeLevel, config.difficultyMode, questions.length, instructions, config.teacherPrompt || null, JSON.stringify(questions), req.adminUser?.username || "admin", req.adminUser?.sub || null]
     );
     await logAuditAction("worksheet.create", "worksheets", id, { title, count: questions.length }, req);
     res.status(201).json({ ok: true, id });
@@ -2511,6 +2519,7 @@ app.get("/admin/worksheets/:id", requireStaff, async (req, res) => {
         difficultyMode: row.difficulty_mode,
         questionCount: row.question_count,
         instructions: row.instructions || "",
+        promptBrief: row.prompt_brief || "",
         questions: Array.isArray(row.questions) ? row.questions : JSON.parse(row.questions || "[]"),
         createdBy: row.created_by,
         createdAt: row.created_at
@@ -3790,7 +3799,10 @@ Subject: ${getSubjectLabel(config.subject)}
 Difficulty mode: ${config.difficultyMode}
 Question number: ${room.questionIndex + 1} of ${config.questionsPerRound}
 Avoid repeating any of these recent prompts: ${room.history.join(" | ") || "none"}.
-
+${config.teacherPrompt ? `
+The teacher has given this specific request for the worksheet. Follow it closely while keeping the question correct and appropriate for the grade and subject:
+"${config.teacherPrompt}"
+` : ""}
 Requirements:
 - First, in "workedSolution", solve the problem yourself step by step and recheck every calculation before writing the options. This field is for your reasoning and is not shown to students.
 - Exactly 4 answer choices labeled A, B, C, and D
