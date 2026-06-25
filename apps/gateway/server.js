@@ -25,6 +25,11 @@ const ADMIN_RATE_LIMIT_MAX = Number(process.env.ADMIN_RATE_LIMIT_MAX || 120);
 const ADMIN_LOGIN_RATE_LIMIT_MAX = Number(process.env.ADMIN_LOGIN_RATE_LIMIT_MAX || 10);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5.4-mini";
+// Independent answer-key verification. Defaults to the same model, but set a
+// stronger reasoning model here (e.g. via Railway env) for best accuracy.
+const OPENAI_VERIFY_MODEL = process.env.OPENAI_VERIFY_MODEL || OPENAI_MODEL;
+const OPENAI_VERIFY_ENABLED = process.env.OPENAI_VERIFY !== "false";
+const OPENAI_MAX_GEN_ATTEMPTS = Math.max(1, Number(process.env.OPENAI_MAX_GEN_ATTEMPTS || 3));
 const DATABASE_URL = process.env.DATABASE_URL || "";
 const CONFIG_PATH = process.env.CONFIG_PATH || path.join(__dirname, "data", "game-config.json");
 const APP_VERSION = process.env.APP_VERSION || "1.0.0";
@@ -1754,6 +1759,8 @@ app.get("/health", (_req, res) => {
     adminConfigured: Boolean(ADMIN_TOKEN),
     openaiConfigured: Boolean(OPENAI_API_KEY),
     openaiModel: OPENAI_MODEL,
+    answerVerification: OPENAI_VERIFY_ENABLED,
+    verifyModel: OPENAI_VERIFY_MODEL,
     databaseConfigured: Boolean(db),
     configPath: CONFIG_PATH,
     configPersisted: fs.existsSync(CONFIG_PATH)
@@ -3425,8 +3432,12 @@ Question number: ${room.questionIndex + 1} of ${config.questionsPerRound}
 Avoid repeating any of these recent prompts: ${room.history.join(" | ") || "none"}.
 
 Requirements:
+- First, in "workedSolution", solve the problem yourself step by step and recheck every calculation before writing the options. This field is for your reasoning and is not shown to students.
 - Exactly 4 answer choices labeled A, B, C, and D
-- Only one correct answer
+- Exactly ONE option must be correct; the text of that option must equal the answer you computed in "workedSolution"
+- The other three options must be plausible but definitely incorrect, and no two options may be equal
+- Set "correctChoice" to the letter of the option whose text equals your computed answer
+- Do not write a question whose correct answer is not among the four options
 - Safe, classroom-appropriate language
 - Match the reading level and background knowledge of Grade ${config.gradeLevel}
 - A short explanation under 30 words
@@ -3454,8 +3465,9 @@ Requirements:
           schema: {
             type: "object",
             additionalProperties: false,
-            required: ["question", "choices", "correctChoice", "shortExplanation", "elaboration", "subject"],
+            required: ["workedSolution", "question", "choices", "correctChoice", "shortExplanation", "elaboration", "subject"],
             properties: {
+              workedSolution: { type: "string" },
               question: { type: "string" },
               choices: {
                 type: "array",
@@ -3498,6 +3510,16 @@ Requirements:
   }
 
   const data = await response.json();
+  const rawText = extractOpenAIJsonText(data);
+
+  if (!rawText) {
+    throw new Error(`OpenAI response did not include JSON text: ${JSON.stringify(data).slice(0, 1200)}`);
+  }
+
+  return JSON.parse(rawText);
+}
+
+function extractOpenAIJsonText(data) {
   const textFromContent = Array.isArray(data.output)
     ? data.output
         .flatMap((item) => Array.isArray(item.content) ? item.content : [])
@@ -3506,16 +3528,70 @@ Requirements:
         .join("\n")
         .trim()
     : "";
-  const rawText = typeof data.output_text === "string" && data.output_text.trim()
+  return typeof data.output_text === "string" && data.output_text.trim()
     ? data.output_text.trim()
     : textFromContent;
+}
 
-  if (!rawText) {
-    throw new Error(`OpenAI response did not include JSON text: ${JSON.stringify(data).slice(0, 1200)}`);
+// Independent answer-key check: a second model re-solves the question from
+// scratch and reports which single option is correct (or NONE). Used to reject
+// questions whose generated answer key is wrong or whose options contain no
+// correct answer.
+async function verifyOpenAIQuestion(question) {
+  const choicesText = (question.choices || [])
+    .map((choice) => `${choice.id}) ${choice.text}`)
+    .join("\n");
+  const prompt = `You are checking a multiple-choice quiz question for correctness.
+Solve it yourself, carefully and step by step, then decide which single option is correct.
+
+Question: ${question.question}
+Options:
+${choicesText}
+
+Rules:
+- Work out the answer independently. Do not assume any listed option is correct.
+- If exactly one option is correct, return its letter in "correctChoice".
+- If none of the options is correct, or more than one is correct, or the question is ambiguous or unsolvable, return "NONE".`;
+
+  const response = await fetchWithTimeout("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: OPENAI_VERIFY_MODEL,
+      input: prompt,
+      text: {
+        format: {
+          type: "json_schema",
+          name: "lyhuor_quiz_verification",
+          strict: true,
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            required: ["workedSolution", "correctChoice"],
+            properties: {
+              workedSolution: { type: "string" },
+              correctChoice: { type: "string", enum: ["A", "B", "C", "D", "NONE"] }
+            }
+          }
+        }
+      },
+      store: false
+    })
+  }, OPENAI_TIMEOUT_MS);
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`OpenAI verification request failed: ${response.status} ${message}`);
   }
 
-  const parsed = JSON.parse(rawText);
-  return parsed;
+  const rawText = extractOpenAIJsonText(await response.json());
+  if (!rawText) {
+    throw new Error("OpenAI verification returned no JSON text");
+  }
+  return JSON.parse(rawText);
 }
 
 function normalizeQuestionBankRow(row) {
@@ -3591,13 +3667,25 @@ async function generateQuestion(room) {
       return null;
     }
 
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; attempt < OPENAI_MAX_GEN_ATTEMPTS; attempt += 1) {
       try {
         const question = await fetchOpenAIQuestion(room);
         const normalizedQuestion = normalizePrompt(question.question);
 
         if (room.history.includes(normalizedQuestion)) {
           throw new Error(`Duplicate question generated: ${question.question}`);
+        }
+
+        if (OPENAI_VERIFY_ENABLED) {
+          const verdict = await verifyOpenAIQuestion(question);
+          const verifiedChoice = String(verdict?.correctChoice || "").toUpperCase();
+          const generatedChoice = String(question.correctChoice || "").toUpperCase();
+          if (!["A", "B", "C", "D"].includes(verifiedChoice)) {
+            throw new Error(`Verifier found no single correct option: ${question.question}`);
+          }
+          if (verifiedChoice !== generatedChoice) {
+            throw new Error(`Answer-key disagreement (generator ${generatedChoice} vs verifier ${verifiedChoice}): ${question.question}`);
+          }
         }
 
         return useQuestion(question, "openai", OPENAI_MODEL);
