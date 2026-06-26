@@ -1116,7 +1116,15 @@
 
       <section id="aiUsagePanel" class="panel" hidden>
         <h2>📊 AI Token Usage</h2>
-        <p class="muted">OpenAI token usage per request, by purpose (worksheet, question bank, live quiz, solo) and time. Each generated question makes a generate call plus a verify call.</p>
+        <p class="muted">OpenAI token usage per request, by purpose (worksheet, question bank, live quiz, solo, support) and time. Each generated question makes a generate call plus a verify call.</p>
+
+        <div class="usage-card" style="margin:6px 0 4px;">
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:600;">
+            <input type="checkbox" id="videoEmbedToggle" style="width:auto;">
+            Embed real YouTube videos in quiz results
+          </label>
+          <div class="sub" id="videoEmbedNote">When off (or no API key), results show a YouTube <em>search link</em> instead — no API quota is used.</div>
+        </div>
 
         <div class="ws-grid">
           <label>Group by
@@ -3230,7 +3238,20 @@
       return d.toLocaleDateString();
     }
 
+    async function loadVideoEmbedSetting() {
+      try {
+        const data = await api("/admin/settings/video-embed");
+        const toggle = wsEl("videoEmbedToggle");
+        toggle.checked = !!data.enabled;
+        toggle.disabled = !data.hasKey;
+        wsEl("videoEmbedNote").innerHTML = data.hasKey
+          ? "When off, results show a YouTube <em>search link</em> instead — no API quota is used."
+          : "No YOUTUBE_API_KEY is set on the gateway, so results always use a YouTube search link.";
+      } catch (e) { /* non-fatal */ }
+    }
+
     async function loadAiUsage() {
+      loadVideoEmbedSetting();
       try {
         setStatus(wsEl("usageStatus"), "Loading…", "#85321e");
         const params = new URLSearchParams({ groupBy: wsEl("usageGroupBy").value });
@@ -3659,6 +3680,15 @@
     wsEl("supportRefresh").addEventListener("click", loadSupport);
     wsEl("usageLoadButton").addEventListener("click", loadAiUsage);
     wsEl("usageExportButton").addEventListener("click", exportUsageCSV);
+    wsEl("videoEmbedToggle").addEventListener("change", async (ev) => {
+      try {
+        await api("/admin/settings/video-embed", { method: "PUT", body: JSON.stringify({ enabled: ev.target.checked }) });
+        setStatus(wsEl("usageStatus"), `YouTube video embedding ${ev.target.checked ? "enabled" : "disabled"}.`, "#1f7a4d");
+      } catch (e) {
+        setStatus(wsEl("usageStatus"), e.message, "#a33d3d");
+        loadVideoEmbedSetting();
+      }
+    });
     wsEl("wsGenerateButton").addEventListener("click", generateWorksheet);
     wsEl("wsSaveButton").addEventListener("click", saveWorksheet);
     wsEl("wsPrintButton").addEventListener("click", () => printWorksheet(null));

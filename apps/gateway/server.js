@@ -1868,6 +1868,23 @@ async function initDatabase() {
   await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_support_messages_conv ON support_messages(conversation_id, created_at)");
   await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_support_conversations_last ON support_conversations(last_at DESC)");
 
+  // Simple key/value flags, and a persistent cache of resolved YouTube videos.
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS video_cache (
+      query_key TEXT PRIMARY KEY,
+      url TEXT NOT NULL,
+      embed_url TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
   // Audit log table
   await dbQueryRequired(`
     CREATE TABLE IF NOT EXISTS audit_logs (
@@ -2442,9 +2459,49 @@ function youtubeSearchUrl(query) {
 }
 
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY || "";
-// Cache resolved videos by query to protect the small daily quota
-// (a search costs 100 of ~10,000 units/day). Videos rarely change.
+// Admin-controllable: when off, results always use the YouTube search link
+// (no API quota spent). Defaults on; persisted in app_settings.
+let videoEmbedEnabled = process.env.YOUTUBE_EMBED_ENABLED !== "false";
+// In-memory layer over the persistent video_cache table; both protect the
+// small daily quota (a search costs 100 of ~10,000 units/day).
 const videoCache = new Map();
+
+async function loadAppSettings() {
+  if (!db) return;
+  try {
+    const result = await dbQuery("SELECT key, value FROM app_settings");
+    for (const row of result?.rows || []) {
+      if (row.key === "video_embed_enabled") videoEmbedEnabled = row.value === "true";
+    }
+  } catch (error) {
+    console.error("Failed to load app settings:", error.message);
+  }
+}
+
+async function setAppSetting(key, value) {
+  if (!db) return;
+  await dbQuery(
+    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+    [key, String(value)]
+  );
+}
+
+async function getCachedVideo(key) {
+  if (!db) return null;
+  const result = await dbQuery("SELECT url, embed_url FROM video_cache WHERE query_key = $1", [key]);
+  const row = result?.rows?.[0];
+  return row ? { url: row.url, embedUrl: row.embed_url } : null;
+}
+
+async function putCachedVideo(key, video) {
+  if (!db) return;
+  await dbQuery(
+    `INSERT INTO video_cache (query_key, url, embed_url, created_at) VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (query_key) DO NOTHING`,
+    [key, video.url, video.embedUrl || null]
+  );
+}
 
 function videoQueryFor(question, config) {
   let query = String(question?.videoQuery || "").trim();
@@ -2477,20 +2534,27 @@ async function youtubeSearchVideoId(query) {
 async function resolveVideo(question, config) {
   const query = videoQueryFor(question, config);
   const fallback = { url: youtubeSearchUrl(query), embedUrl: null };
-  if (!YOUTUBE_API_KEY || !query) {
+  if (!YOUTUBE_API_KEY || !videoEmbedEnabled || !query) {
     return fallback;
   }
   const key = normalizePrompt(query);
   if (videoCache.has(key)) {
     return videoCache.get(key);
   }
+  const cached = await getCachedVideo(key);
+  if (cached) {
+    videoCache.set(key, cached);
+    return cached;
+  }
   try {
     const videoId = await youtubeSearchVideoId(query);
-    const resolved = videoId
-      ? { url: `https://www.youtube.com/watch?v=${videoId}`, embedUrl: `https://www.youtube.com/embed/${videoId}` }
-      : fallback;
+    if (!videoId) {
+      return fallback;
+    }
+    const resolved = { url: `https://www.youtube.com/watch?v=${videoId}`, embedUrl: `https://www.youtube.com/embed/${videoId}` };
     if (videoCache.size > 5000) videoCache.clear();
     videoCache.set(key, resolved);
+    await putCachedVideo(key, resolved);
     return resolved;
   } catch (error) {
     console.error("YouTube resolve failed:", error.message);
@@ -4019,6 +4083,22 @@ app.get("/admin/support/conversations/:id", requireAdmin, async (req, res) => {
   } catch (error) {
     console.error("Get support conversation failed:", error);
     res.status(500).json({ error: "Could not load conversation" });
+  }
+});
+
+app.get("/admin/settings/video-embed", requireAdmin, (_req, res) => {
+  res.json({ enabled: videoEmbedEnabled, hasKey: Boolean(YOUTUBE_API_KEY) });
+});
+
+app.put("/admin/settings/video-embed", requireAdmin, async (req, res) => {
+  try {
+    videoEmbedEnabled = Boolean(req.body?.enabled);
+    await setAppSetting("video_embed_enabled", videoEmbedEnabled);
+    await logAuditAction("settings.video_embed", "app_settings", "video_embed_enabled", { enabled: videoEmbedEnabled }, req);
+    res.json({ ok: true, enabled: videoEmbedEnabled });
+  } catch (error) {
+    console.error("Update video-embed setting failed:", error);
+    res.status(500).json({ error: "Could not update setting" });
   }
 });
 
@@ -6410,6 +6490,7 @@ process.on("unhandledRejection", (error) => {
 
 async function startServer() {
   const databaseReady = await initDatabase();
+  await loadAppSettings();
   const dbConfig = await loadDbConfig();
   if (dbConfig) {
     Object.assign(gameConfig, sanitizeConfig(dbConfig));
