@@ -544,6 +544,7 @@
         <button class="tab" data-tab="worksheets" data-role="staff">📄 Worksheets</button>
         <button class="tab" data-tab="shares" data-role="staff">🔗 Shared Quizzes</button>
         <button class="tab" data-tab="classrooms" data-role="staff">🏫 Classrooms</button>
+        <button class="tab" data-tab="support" data-role="admin">🎧 Support</button>
         <button class="tab" data-tab="users" data-role="admin">Users</button>
       </nav>
 
@@ -1335,6 +1336,24 @@
         </div>
 
         <div id="classroomDetail" class="detail" hidden style="margin-top:18px;"></div>
+      </section>
+
+      <section id="supportPanel" class="panel" hidden>
+        <h2>🎧 Support Conversations</h2>
+        <p class="muted">Every support chatbot conversation is logged here for audit. The bot only answers questions about this platform.</p>
+        <div class="actions" style="margin-top:12px;">
+          <button id="supportRefresh" class="secondary small">↻ Refresh</button>
+          <span id="supportStatus" class="muted" style="align-self:center;"></span>
+        </div>
+        <div class="table-wrap" style="margin-top:14px;">
+          <table>
+            <thead>
+              <tr><th>First question</th><th>User</th><th>Messages</th><th>Last activity</th><th></th></tr>
+            </thead>
+            <tbody id="supportBody"></tbody>
+          </table>
+        </div>
+        <div id="supportDetail" class="detail" hidden style="margin-top:18px;"></div>
       </section>
 
       <section id="usersPanel" class="panel" hidden>
@@ -2589,6 +2608,7 @@
       document.getElementById("worksheetsPanel").hidden = tabName !== "worksheets";
       document.getElementById("sharesPanel").hidden = tabName !== "shares";
       document.getElementById("classroomsPanel").hidden = tabName !== "classrooms";
+      document.getElementById("supportPanel").hidden = tabName !== "support";
       document.getElementById("usersPanel").hidden = tabName !== "users";
 
       if (tabName === "sessions" || tabName === "students") {
@@ -2615,6 +2635,8 @@
         loadShares();
       } else if (tabName === "classrooms") {
         loadClassrooms();
+      } else if (tabName === "support") {
+        loadSupport();
       }
     }
 
@@ -3588,6 +3610,53 @@
     wsEl("shSubject").addEventListener("change", () => populateGradeSelect(wsEl("shGrade"), wsEl("shSubject").value));
     wsEl("shCreateButton").addEventListener("click", createShare);
     wsEl("clCreateButton").addEventListener("click", createClassroom);
+
+    // ===== Support audit =====
+    async function loadSupport() {
+      try {
+        setStatus(wsEl("supportStatus"), "Loading…", "#85321e");
+        const data = await api("/admin/support/conversations");
+        const tbody = wsEl("supportBody");
+        tbody.innerHTML = "";
+        (data.conversations || []).forEach((c) => {
+          const row = document.createElement("tr");
+          appendCell(row, (c.firstQuestion || "(no question)").slice(0, 70));
+          appendCell(row, c.userLabel || "guest");
+          appendCell(row, c.messageCount);
+          appendCell(row, formatDate(c.lastAt));
+          const actions = document.createElement("td");
+          const open = document.createElement("button");
+          open.className = "secondary small";
+          open.textContent = "View";
+          open.addEventListener("click", () => openSupportConversation(c.id));
+          actions.appendChild(open);
+          row.appendChild(actions);
+          tbody.appendChild(row);
+        });
+        setStatus(wsEl("supportStatus"), `${(data.conversations || []).length} conversation(s).`, "#1f7a4d");
+      } catch (e) { setStatus(wsEl("supportStatus"), e.message, "#a33d3d"); }
+    }
+
+    async function openSupportConversation(id) {
+      const host = wsEl("supportDetail");
+      host.hidden = false;
+      host.innerHTML = "Loading…";
+      try {
+        const data = await api(`/admin/support/conversations/${id}`);
+        const turns = (data.messages || []).map((m) => `
+          <div style="margin:8px 0;">
+            <div class="muted" style="font-size:11px;text-transform:uppercase;">${m.role === "assistant" ? "Assistant" : "User"} · ${formatDate(m.createdAt)}</div>
+            <div style="white-space:pre-wrap;">${escapeForHtml(m.content)}</div>
+          </div>`).join("");
+        host.innerHTML = `<h3>Conversation transcript</h3>${turns || "<p class='muted'>No messages.</p>"}
+          <div class="actions" style="margin-top:10px;"><button id="supportClose" class="secondary small">Close</button></div>`;
+        wsEl("supportClose").addEventListener("click", () => { host.hidden = true; });
+      } catch (e) {
+        host.innerHTML = `<span style="color:#a33d3d;">${escapeForHtml(e.message)}</span>`;
+      }
+    }
+
+    wsEl("supportRefresh").addEventListener("click", loadSupport);
     wsEl("usageLoadButton").addEventListener("click", loadAiUsage);
     wsEl("usageExportButton").addEventListener("click", exportUsageCSV);
     wsEl("wsGenerateButton").addEventListener("click", generateWorksheet);
