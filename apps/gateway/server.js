@@ -3583,12 +3583,13 @@ app.get("/admin/shares", requireStaff, async (req, res) => {
           `SELECT s.*, COUNT(ss.id)::int AS attempts,
                   COUNT(ss.id) FILTER (WHERE ss.status = 'FINISHED')::int AS completed
            FROM quiz_shares s LEFT JOIN solo_sessions ss ON ss.share_id = s.id
+           WHERE s.is_active = TRUE
            GROUP BY s.id ORDER BY s.created_at DESC LIMIT 200`)
       : await dbQueryRequired(
           `SELECT s.*, COUNT(ss.id)::int AS attempts,
                   COUNT(ss.id) FILTER (WHERE ss.status = 'FINISHED')::int AS completed
            FROM quiz_shares s LEFT JOIN solo_sessions ss ON ss.share_id = s.id
-           WHERE s.created_by_id = $1
+           WHERE s.is_active = TRUE AND s.created_by_id = $1
            GROUP BY s.id ORDER BY s.created_at DESC LIMIT 200`,
           [req.adminUser?.sub || ""]);
     res.json({
