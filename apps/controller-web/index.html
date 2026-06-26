@@ -599,6 +599,10 @@
           <label for="soloSubject">Subject</label>
           <select id="soloSubject">
             <option value="math">Math</option>
+            <option value="algebra_1">Algebra 1</option>
+            <option value="algebra_2">Algebra 2</option>
+            <option value="geometry">Geometry</option>
+            <option value="precalculus">Precalculus</option>
             <option value="english">English</option>
             <option value="general_science">General Science</option>
             <option value="biology">Biology</option>
@@ -698,6 +702,33 @@
     const soloSubjectEl = document.getElementById("soloSubject");
     const soloGradeEl = document.getElementById("soloGrade");
     const soloTrustPanelEl = document.getElementById("soloTrustPanel");
+
+    // Math-track courses only offer the grades they are taught in (mirror of the gateway).
+    const SUBJECT_GRADE_RANGES = {
+      algebra_1: [8, 9],
+      algebra_2: [10, 11],
+      geometry: [9, 10],
+      precalculus: [11, 12]
+    };
+    function populateSoloGrade(subject, desired) {
+      const range = SUBJECT_GRADE_RANGES[subject];
+      const min = range ? range[0] : 2;
+      const max = range ? range[1] : 12;
+      const current = desired != null ? Number(desired) : Number(soloGradeEl.value);
+      const allowed = [];
+      soloGradeEl.innerHTML = "";
+      for (let g = min; g <= max; g++) {
+        allowed.push(g);
+        const opt = document.createElement("option");
+        opt.value = String(g);
+        opt.textContent = `Grade ${g}`;
+        soloGradeEl.appendChild(opt);
+      }
+      if (allowed.includes(current)) soloGradeEl.value = String(current);
+      else if (allowed.includes(6)) soloGradeEl.value = "6";
+      else soloGradeEl.value = String(allowed[0]);
+    }
+    soloSubjectEl.addEventListener("change", () => populateSoloGrade(soloSubjectEl.value));
     const sessionStorageKey = "fruitcatcher-controller-session-v2";
 
     const params = new URLSearchParams(window.location.search);
@@ -764,7 +795,17 @@
       soloCurriculumEl.value = params.get("curriculum") || "cambodia_moeys";
       soloLanguageEl.value = params.get("language") || "khmer";
       soloSubjectEl.value = params.get("subject") || "math";
-      soloGradeEl.value = params.get("grade") || "6";
+      populateSoloGrade(soloSubjectEl.value, params.get("grade") || "6");
+
+      // A teacher-shared quiz locks the settings so the student takes exactly
+      // what the teacher assigned.
+      if (params.get("lock") === "1" || params.get("shareId")) {
+        soloCurriculumEl.disabled = true;
+        soloLanguageEl.disabled = true;
+        soloSubjectEl.disabled = true;
+        soloGradeEl.disabled = true;
+        soloHeroEl.querySelector("h2") && (soloHeroEl.querySelector("h2").textContent = "Your teacher's quiz");
+      }
     }
 
     function getCurriculumLabel(value) {
@@ -790,6 +831,8 @@
       if (value === "physics") return "Physics";
       if (value === "math") return "Math";
       if (value === "english") return "English";
+      // Math-track courses (algebra_1, geometry, precalculus, ...) format cleanly.
+      if (typeof value === "string" && value) return value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
       return value;
     }
 
@@ -927,6 +970,7 @@
           body: {
             studentName: normalizedPlayerName || "Student",
             clientId: savedSession.clientId,
+            shareId: params.get("shareId") || "",
             source: params.get("source") || "web",
             sourceUserId: params.get("sourceUserId") || params.get("uid") || "",
             curriculum: soloCurriculumEl.value,

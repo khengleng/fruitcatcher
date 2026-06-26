@@ -44,6 +44,11 @@ const OPENAI_PRICING = (() => {
   }
 })();
 
+// Where the student-facing solo quiz lives, and the Telegram bot token used to
+// push shared quiz links directly to a chat.
+const CONTROLLER_URL = (process.env.CONTROLLER_URL || "https://mytv.cambobia.com").replace(/\/+$/, "");
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+
 function modelPricing(model) {
   const entry = (model && OPENAI_PRICING[model]) || OPENAI_PRICING.default || {};
   return {
@@ -73,12 +78,24 @@ const db = DATABASE_URL
   : null;
 const SUPPORTED_SUBJECTS = [
   "math",
+  "algebra_1",
+  "algebra_2",
+  "geometry",
+  "precalculus",
   "general_science",
   "biology",
   "chemistry",
   "physics",
   "english"
 ];
+// Math-track high-school courses are attached to the grades where they are normally
+// taught. The UI uses this to offer only the relevant grades for each subject.
+const SUBJECT_GRADE_RANGES = {
+  algebra_1: [8, 9],
+  algebra_2: [10, 11],
+  geometry: [9, 10],
+  precalculus: [11, 12]
+};
 const SUPPORTED_CURRICULUMS = ["international", "cambodia_moeys"];
 const SUPPORTED_LANGUAGES = ["english", "khmer", "bilingual"];
 const SUPPORTED_DIFFICULTY_MODES = ["easy", "standard", "challenge"];
@@ -814,6 +831,338 @@ const FALLBACK_QUESTION_BANK = {
         elaboration: "In passive voice, the subject receives the action. The plan was approved by the committee follows that structure."
       }
     ]
+  },
+  algebra_1: {
+    lower: [
+      {
+        question: "Solve for x: x + 6 = 13.",
+        choices: [
+          { id: "A", text: "5" },
+          { id: "B", text: "6" },
+          { id: "C", text: "7" },
+          { id: "D", text: "19" }
+        ],
+        correctChoice: "C",
+        shortExplanation: "Subtract 6 from both sides.",
+        elaboration: "x + 6 = 13 means x = 13 - 6, so x = 7."
+      }
+    ],
+    middle: [
+      {
+        question: "Solve for x: 3x - 5 = 16.",
+        choices: [
+          { id: "A", text: "3" },
+          { id: "B", text: "7" },
+          { id: "C", text: "11" },
+          { id: "D", text: "21" }
+        ],
+        correctChoice: "B",
+        shortExplanation: "Add 5, then divide by 3.",
+        elaboration: "3x - 5 = 16 gives 3x = 21, so x = 7."
+      },
+      {
+        question: "What is the slope of the line y = 4x - 9?",
+        choices: [
+          { id: "A", text: "-9" },
+          { id: "B", text: "4" },
+          { id: "C", text: "9" },
+          { id: "D", text: "-4" }
+        ],
+        correctChoice: "B",
+        shortExplanation: "In y = mx + b, m is the slope.",
+        elaboration: "The equation is in slope-intercept form, so the coefficient of x, which is 4, is the slope."
+      },
+      {
+        question: "Factor: x^2 + 5x + 6.",
+        choices: [
+          { id: "A", text: "(x + 1)(x + 6)" },
+          { id: "B", text: "(x + 2)(x + 3)" },
+          { id: "C", text: "(x + 5)(x + 1)" },
+          { id: "D", text: "(x + 6)(x - 1)" }
+        ],
+        correctChoice: "B",
+        shortExplanation: "Find two numbers that multiply to 6 and add to 5.",
+        elaboration: "2 and 3 multiply to 6 and add to 5, so x^2 + 5x + 6 = (x + 2)(x + 3)."
+      }
+    ],
+    upper: [
+      {
+        question: "Solve the system y = 2x and x + y = 9. What is x?",
+        choices: [
+          { id: "A", text: "2" },
+          { id: "B", text: "3" },
+          { id: "C", text: "6" },
+          { id: "D", text: "9" }
+        ],
+        correctChoice: "B",
+        shortExplanation: "Substitute y = 2x into the second equation.",
+        elaboration: "x + 2x = 9 gives 3x = 9, so x = 3 (and y = 6)."
+      },
+      {
+        question: "Simplify: (2x^3)(3x^4).",
+        choices: [
+          { id: "A", text: "6x^7" },
+          { id: "B", text: "5x^7" },
+          { id: "C", text: "6x^12" },
+          { id: "D", text: "5x^12" }
+        ],
+        correctChoice: "A",
+        shortExplanation: "Multiply coefficients and add exponents.",
+        elaboration: "2 times 3 is 6, and x^3 times x^4 is x^(3+4) = x^7, so the product is 6x^7."
+      },
+      {
+        question: "Solve the inequality 2x + 4 < 10.",
+        choices: [
+          { id: "A", text: "x < 3" },
+          { id: "B", text: "x > 3" },
+          { id: "C", text: "x < 7" },
+          { id: "D", text: "x > 7" }
+        ],
+        correctChoice: "A",
+        shortExplanation: "Subtract 4, then divide by 2.",
+        elaboration: "2x + 4 < 10 gives 2x < 6, so x < 3. The inequality sign stays the same when dividing by a positive number."
+      }
+    ]
+  },
+  algebra_2: {
+    lower: [
+      {
+        question: "Solve x^2 = 49 for the positive value of x.",
+        choices: [
+          { id: "A", text: "7" },
+          { id: "B", text: "24" },
+          { id: "C", text: "98" },
+          { id: "D", text: "343" }
+        ],
+        correctChoice: "A",
+        shortExplanation: "Take the square root of both sides.",
+        elaboration: "The square root of 49 is 7, so the positive solution is x = 7."
+      }
+    ],
+    middle: [
+      {
+        question: "What are the solutions of x^2 - 5x + 6 = 0?",
+        choices: [
+          { id: "A", text: "x = 2 and x = 3" },
+          { id: "B", text: "x = -2 and x = -3" },
+          { id: "C", text: "x = 1 and x = 6" },
+          { id: "D", text: "x = 2 and x = -3" }
+        ],
+        correctChoice: "A",
+        shortExplanation: "Factor into (x - 2)(x - 3).",
+        elaboration: "x^2 - 5x + 6 = (x - 2)(x - 3), so the roots are x = 2 and x = 3."
+      }
+    ],
+    upper: [
+      {
+        question: "What is the discriminant of 2x^2 + 3x - 5 = 0?",
+        choices: [
+          { id: "A", text: "49" },
+          { id: "B", text: "9" },
+          { id: "C", text: "-31" },
+          { id: "D", text: "29" }
+        ],
+        correctChoice: "A",
+        shortExplanation: "The discriminant is b^2 - 4ac.",
+        elaboration: "With a = 2, b = 3, c = -5: 3^2 - 4(2)(-5) = 9 + 40 = 49."
+      },
+      {
+        question: "Evaluate log base 2 of 8.",
+        choices: [
+          { id: "A", text: "2" },
+          { id: "B", text: "3" },
+          { id: "C", text: "4" },
+          { id: "D", text: "16" }
+        ],
+        correctChoice: "B",
+        shortExplanation: "Ask: 2 to what power equals 8?",
+        elaboration: "Because 2^3 = 8, log base 2 of 8 equals 3."
+      },
+      {
+        question: "What is the value of i^2, where i is the imaginary unit?",
+        choices: [
+          { id: "A", text: "1" },
+          { id: "B", text: "-1" },
+          { id: "C", text: "i" },
+          { id: "D", text: "-i" }
+        ],
+        correctChoice: "B",
+        shortExplanation: "i is defined as the square root of -1.",
+        elaboration: "Since i = sqrt(-1), squaring both sides gives i^2 = -1."
+      },
+      {
+        question: "Solve for x: 3^x = 81.",
+        choices: [
+          { id: "A", text: "3" },
+          { id: "B", text: "4" },
+          { id: "C", text: "9" },
+          { id: "D", text: "27" }
+        ],
+        correctChoice: "B",
+        shortExplanation: "Write 81 as a power of 3.",
+        elaboration: "81 = 3^4, so 3^x = 3^4 means x = 4."
+      }
+    ]
+  },
+  geometry: {
+    lower: [
+      {
+        question: "How many degrees are in a right angle?",
+        choices: [
+          { id: "A", text: "45" },
+          { id: "B", text: "90" },
+          { id: "C", text: "180" },
+          { id: "D", text: "360" }
+        ],
+        correctChoice: "B",
+        shortExplanation: "A right angle is a quarter turn.",
+        elaboration: "A full turn is 360 degrees; a right angle is one quarter of that, which is 90 degrees."
+      }
+    ],
+    middle: [
+      {
+        question: "What is the sum of the interior angles of a triangle?",
+        choices: [
+          { id: "A", text: "90 degrees" },
+          { id: "B", text: "180 degrees" },
+          { id: "C", text: "270 degrees" },
+          { id: "D", text: "360 degrees" }
+        ],
+        correctChoice: "B",
+        shortExplanation: "The three angles of any triangle add to 180 degrees.",
+        elaboration: "No matter the shape, the interior angles of a triangle always sum to 180 degrees."
+      }
+    ],
+    upper: [
+      {
+        question: "A right triangle has legs of length 6 and 8. What is the length of the hypotenuse?",
+        choices: [
+          { id: "A", text: "10" },
+          { id: "B", text: "14" },
+          { id: "C", text: "48" },
+          { id: "D", text: "100" }
+        ],
+        correctChoice: "A",
+        shortExplanation: "Use the Pythagorean theorem.",
+        elaboration: "6^2 + 8^2 = 36 + 64 = 100, and the square root of 100 is 10, so the hypotenuse is 10."
+      },
+      {
+        question: "Two triangles are similar with a scale factor of 3. A side of the smaller triangle is 5. What is the matching side of the larger triangle?",
+        choices: [
+          { id: "A", text: "8" },
+          { id: "B", text: "15" },
+          { id: "C", text: "2" },
+          { id: "D", text: "45" }
+        ],
+        correctChoice: "B",
+        shortExplanation: "Multiply the side by the scale factor.",
+        elaboration: "Similar figures scale by a constant factor, so 5 times 3 equals 15."
+      },
+      {
+        question: "What is the area of a circle with radius 5? Use pi approximately 3.14.",
+        choices: [
+          { id: "A", text: "15.7" },
+          { id: "B", text: "78.5" },
+          { id: "C", text: "31.4" },
+          { id: "D", text: "25" }
+        ],
+        correctChoice: "B",
+        shortExplanation: "Area equals pi times radius squared.",
+        elaboration: "Area = 3.14 times 5^2 = 3.14 times 25 = 78.5."
+      },
+      {
+        question: "The angles of a triangle measure 50 degrees, 60 degrees, and x. What is x?",
+        choices: [
+          { id: "A", text: "70 degrees" },
+          { id: "B", text: "80 degrees" },
+          { id: "C", text: "60 degrees" },
+          { id: "D", text: "110 degrees" }
+        ],
+        correctChoice: "A",
+        shortExplanation: "The angles add to 180 degrees.",
+        elaboration: "50 + 60 = 110, and 180 - 110 = 70, so x = 70 degrees."
+      }
+    ]
+  },
+  precalculus: {
+    lower: [
+      {
+        question: "What is the value of sin(0)?",
+        choices: [
+          { id: "A", text: "0" },
+          { id: "B", text: "1" },
+          { id: "C", text: "-1" },
+          { id: "D", text: "undefined" }
+        ],
+        correctChoice: "A",
+        shortExplanation: "On the unit circle, the height at angle 0 is 0.",
+        elaboration: "Sine measures the vertical coordinate on the unit circle. At an angle of 0, that coordinate is 0."
+      }
+    ],
+    middle: [
+      {
+        question: "What is the value of cos(0)?",
+        choices: [
+          { id: "A", text: "0" },
+          { id: "B", text: "1" },
+          { id: "C", text: "-1" },
+          { id: "D", text: "1/2" }
+        ],
+        correctChoice: "B",
+        shortExplanation: "On the unit circle, the horizontal coordinate at angle 0 is 1.",
+        elaboration: "Cosine measures the horizontal coordinate on the unit circle, which is 1 at an angle of 0."
+      }
+    ],
+    upper: [
+      {
+        question: "What is the value of sin(90 degrees)?",
+        choices: [
+          { id: "A", text: "0" },
+          { id: "B", text: "1" },
+          { id: "C", text: "-1" },
+          { id: "D", text: "1/2" }
+        ],
+        correctChoice: "B",
+        shortExplanation: "At 90 degrees the unit-circle height is at its maximum.",
+        elaboration: "Sine is the vertical coordinate on the unit circle; at 90 degrees the point is (0, 1), so sin(90 degrees) = 1."
+      },
+      {
+        question: "What is the period of the function y = sin(x)?",
+        choices: [
+          { id: "A", text: "pi" },
+          { id: "B", text: "2 pi" },
+          { id: "C", text: "pi/2" },
+          { id: "D", text: "4 pi" }
+        ],
+        correctChoice: "B",
+        shortExplanation: "The sine curve repeats every full revolution.",
+        elaboration: "The basic sine function completes one cycle over an interval of 2 pi, so its period is 2 pi."
+      },
+      {
+        question: "Evaluate log base 10 of 1000.",
+        choices: [
+          { id: "A", text: "2" },
+          { id: "B", text: "3" },
+          { id: "C", text: "10" },
+          { id: "D", text: "100" }
+        ],
+        correctChoice: "B",
+        shortExplanation: "Ask: 10 to what power equals 1000?",
+        elaboration: "Because 10^3 = 1000, log base 10 of 1000 equals 3."
+      },
+      {
+        question: "What is the next term in the geometric sequence 2, 6, 18, ...?",
+        choices: [
+          { id: "A", text: "24" },
+          { id: "B", text: "54" },
+          { id: "C", text: "36" },
+          { id: "D", text: "72" }
+        ],
+        correctChoice: "B",
+        shortExplanation: "Each term is multiplied by 3.",
+        elaboration: "The common ratio is 3 (6/2 = 3 and 18/6 = 3), so the next term is 18 times 3 = 54."
+      }
+    ]
   }
 };
 
@@ -858,11 +1207,50 @@ function getSubjectLabel(subject) {
     return "Math";
   }
 
+  if (subject === "algebra_1") {
+    return "Algebra 1";
+  }
+
+  if (subject === "algebra_2") {
+    return "Algebra 2";
+  }
+
+  if (subject === "geometry") {
+    return "Geometry";
+  }
+
+  if (subject === "precalculus") {
+    return "Precalculus";
+  }
+
   if (subject === "english") {
     return "English";
   }
 
   return subject;
+}
+
+// Topic scope for the math-track courses so the AI generates on-syllabus problems
+// instead of generic "math". Returns an empty string for subjects that need no extra
+// steer (the subject label alone is enough).
+function getSubjectInstruction(subject) {
+  if (subject === "algebra_1") {
+    return "This is an Algebra 1 course. Draw from: linear equations and inequalities, slope and graphing lines, systems of two linear equations, exponent rules, polynomials, factoring, and basic quadratics. Do not use geometry-proof, trigonometry, or calculus content.";
+  }
+
+  if (subject === "algebra_2") {
+    return "This is an Algebra 2 course. Draw from: quadratic functions and the quadratic formula, polynomial and rational functions, radicals and complex numbers, exponential and logarithmic functions, systems, and sequences/series. Keep it pre-calculus level; do not use limits or derivatives.";
+  }
+
+  if (subject === "geometry") {
+    return "This is a Geometry course. Draw from: angles and parallel lines, triangle congruence and similarity, the Pythagorean theorem, properties of polygons and circles, perimeter/area/volume, coordinate geometry, and basic geometric reasoning. Avoid heavy algebraic manipulation unrelated to geometry.";
+  }
+
+  if (subject === "precalculus") {
+    return "This is a Precalculus course. Draw from: function families and transformations, polynomial/rational/exponential/logarithmic functions, trigonometry (unit circle, identities, graphs), sequences and series, and an intuitive introduction to limits. Do not require derivatives or integrals.";
+  }
+
+  return "";
 }
 
 function getLanguageLabel(language) {
@@ -1006,6 +1394,7 @@ function signAdminSession(user) {
     sub: user.id,
     username: user.username,
     role: user.role || "admin",
+    tv: Number(user.token_version || 0),
     exp: Date.now() + ADMIN_SESSION_TTL_MS
   })).toString("base64url");
   const signature = crypto
@@ -1258,6 +1647,7 @@ async function initDatabase() {
       questions_per_round INTEGER NOT NULL,
       score INTEGER NOT NULL DEFAULT 0,
       config JSONB NOT NULL,
+      share_id TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       completed_at TIMESTAMPTZ
@@ -1336,6 +1726,26 @@ async function initDatabase() {
     )
   `);
   await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_ai_usage_created_at ON ai_usage(created_at DESC)");
+
+  // Teacher-shared quizzes (assignments) students take via a link/QR/Telegram.
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS quiz_shares (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      curriculum TEXT NOT NULL,
+      language TEXT NOT NULL,
+      grade_level INTEGER NOT NULL,
+      difficulty_mode TEXT NOT NULL,
+      questions_per_round INTEGER NOT NULL DEFAULT 10,
+      worksheet_id TEXT,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_by TEXT,
+      created_by_id TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_quiz_shares_owner ON quiz_shares(created_by_id, created_at DESC)");
 
   // Audit log table
   await dbQueryRequired(`
@@ -1457,6 +1867,7 @@ async function runDatabaseMigrations() {
     "ALTER TABLE quiz_presets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
     "ALTER TABLE worksheets ADD COLUMN IF NOT EXISTS prompt_brief TEXT",
     "ALTER TABLE worksheets ADD COLUMN IF NOT EXISTS content_hash TEXT",
+    "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS share_id TEXT",
     "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS source_user_id TEXT",
     "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS student_name TEXT",
     "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS curriculum TEXT",
@@ -1469,7 +1880,9 @@ async function runDatabaseMigrations() {
     "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS score INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ",
     "ALTER TABLE solo_answers ADD COLUMN IF NOT EXISTS source TEXT",
-    "ALTER TABLE solo_answers ADD COLUMN IF NOT EXISTS model TEXT"
+    "ALTER TABLE solo_answers ADD COLUMN IF NOT EXISTS model TEXT",
+    // Bumped to revoke every outstanding signed session for an admin (force logout).
+    "ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0"
   ];
 
   for (const migration of migrations) {
@@ -1855,6 +2268,7 @@ app.get("/config", (_req, res) => {
     supportedCurriculums: SUPPORTED_CURRICULUMS,
     supportedLanguages: SUPPORTED_LANGUAGES,
     supportedSubjects: SUPPORTED_SUBJECTS,
+    subjectGradeRanges: SUBJECT_GRADE_RANGES,
     supportedDifficultyModes: SUPPORTED_DIFFICULTY_MODES,
     supportedQuestionSources: SUPPORTED_QUESTION_SOURCES,
     minGradeLevel: MIN_GRADE_LEVEL,
@@ -1864,7 +2278,15 @@ app.get("/config", (_req, res) => {
 
 function normalizeSoloSource(value) {
   const source = String(value || "").trim().toLowerCase();
-  return ["facebook", "messenger", "telegram", "web", "ad"].includes(source) ? source : "web";
+  return ["facebook", "messenger", "telegram", "web", "ad", "teacher"].includes(source) ? source : "web";
+}
+
+async function loadQuizShare(id) {
+  if (!db || !id) {
+    return null;
+  }
+  const result = await dbQuery("SELECT * FROM quiz_shares WHERE id = $1 AND is_active = TRUE", [String(id)]);
+  return result?.rows?.[0] || null;
 }
 
 function sanitizeSoloConfig(input = {}) {
@@ -1942,9 +2364,9 @@ async function persistSoloSessionCreated(session) {
     `INSERT INTO solo_sessions (
       id, student_id, student_name, source, source_user_id, status,
       curriculum, language, subject, grade_level, difficulty_mode,
-      question_source, questions_per_round, score, config, created_at, updated_at
+      question_source, questions_per_round, score, config, share_id, created_at, updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, NOW(), NOW())
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, NOW(), NOW())
     ON CONFLICT (id) DO UPDATE
       SET status = EXCLUDED.status,
           score = EXCLUDED.score,
@@ -1964,7 +2386,8 @@ async function persistSoloSessionCreated(session) {
       session.config.questionSource,
       session.config.questionsPerRound,
       session.score,
-      JSON.stringify(session.config)
+      JSON.stringify(session.config),
+      session.shareId || null
     ]
   );
 }
@@ -2045,6 +2468,7 @@ app.get("/solo/options", (_req, res) => {
     curriculums: SUPPORTED_CURRICULUMS,
     languages: SUPPORTED_LANGUAGES,
     subjects: SUPPORTED_SUBJECTS,
+    subjectGradeRanges: SUBJECT_GRADE_RANGES,
     difficultyModes: SUPPORTED_DIFFICULTY_MODES,
     questionSources: SUPPORTED_QUESTION_SOURCES,
     minGradeLevel: MIN_GRADE_LEVEL,
@@ -2060,7 +2484,21 @@ app.post("/solo/sessions", async (req, res) => {
     }
 
     const config = sanitizeSoloConfig(req.body || {});
-    const source = normalizeSoloSource(req.body?.source);
+
+    // A teacher-shared quiz is authoritative: lock the config to what the
+    // teacher set and tag the session so completions roll up to the share.
+    const shareId = String(req.body?.shareId || req.body?.share_id || "").trim();
+    const share = shareId ? await loadQuizShare(shareId) : null;
+    if (share) {
+      config.subject = share.subject;
+      config.curriculum = share.curriculum;
+      config.language = share.language;
+      config.gradeLevel = share.grade_level;
+      config.difficultyMode = share.difficulty_mode;
+      config.questionsPerRound = Math.min(20, Math.max(1, share.questions_per_round || 10));
+    }
+
+    const source = share ? "teacher" : normalizeSoloSource(req.body?.source);
     const sourceUserId = normalizeClientId(req.body?.sourceUserId || req.body?.source_user_id || "");
     const studentName = sanitizeStudentName(req.body?.studentName || req.body?.student_name || req.body?.name || "Student");
     const clientId = normalizeClientId(req.body?.clientId || req.body?.client_id || `${source}:${sourceUserId || createId()}`);
@@ -2087,7 +2525,8 @@ app.post("/solo/sessions", async (req, res) => {
       currentQuestion: null,
       currentAnswer: null,
       lastActivityAt: Date.now(),
-      usageSource: "solo"
+      usageSource: "solo",
+      shareId: share ? share.id : null
     };
 
     soloSessions.set(session.id, session);
@@ -2203,6 +2642,23 @@ async function isAuthorized(req) {
     return false;
   }
 
+  // The signature/expiry are valid, but the account may have been disabled or had
+  // its sessions revoked (force logout) since the token was issued. When a database
+  // is available, re-check the live account state so revocation takes effect at once.
+  if (db && session.sub) {
+    const live = await dbQuery(
+      "SELECT is_active, token_version FROM admin_users WHERE id = $1",
+      [session.sub]
+    );
+    const account = live?.rows?.[0];
+    if (!account || account.is_active === false) {
+      return false;
+    }
+    if (Number(account.token_version || 0) !== Number(session.tv || 0)) {
+      return false;
+    }
+  }
+
   req.adminUser = session;
   return true;
 }
@@ -2255,7 +2711,7 @@ app.post("/admin/login", async (req, res) => {
     }
 
     const result = await dbQueryRequired(
-      `SELECT id, username, password_hash, role
+      `SELECT id, username, password_hash, role, token_version
        FROM admin_users
        WHERE username = $1 AND is_active = TRUE`,
       [username]
@@ -2280,6 +2736,24 @@ app.post("/admin/login", async (req, res) => {
   } catch (error) {
     console.error("Admin login failed:", error);
     res.status(500).json({ error: "Admin login failed" });
+  }
+});
+
+// Sign the caller out of every device by revoking all of their signed sessions.
+// The env ADMIN_TOKEN ("token-admin") has no account row, so there is nothing to revoke.
+app.post("/admin/logout", requireStaff, async (req, res) => {
+  try {
+    if (db && req.adminUser?.sub) {
+      await dbQueryRequired(
+        "UPDATE admin_users SET token_version = token_version + 1, updated_at = NOW() WHERE id = $1",
+        [req.adminUser.sub]
+      );
+      await logAuditAction("admin.logout", "admin_users", req.adminUser.sub, { username: req.adminUser.username }, req);
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Logout failed:", error);
+    res.status(500).json({ error: "Could not log out" });
   }
 });
 
@@ -2410,6 +2884,29 @@ app.put("/admin/users/:id", requireAdmin, async (req, res) => {
   } catch (error) {
     console.error("Update admin user failed:", error);
     res.status(500).json({ error: "Could not update user" });
+  }
+});
+
+// Force-logout: revoke every outstanding signed session for a user by bumping their
+// token_version. Their next request fails the token_version check in isAuthorized.
+app.post("/admin/users/:id/logout", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const id = String(req.params.id || "").trim();
+    const result = await dbQueryRequired(
+      "UPDATE admin_users SET token_version = token_version + 1, updated_at = NOW() WHERE id = $1 RETURNING username",
+      [id]
+    );
+    const target = result.rows[0];
+    if (!target) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+    await logAuditAction("admin.user.force_logout", "admin_users", id, { username: target.username }, req);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Force logout failed:", error);
+    res.status(500).json({ error: "Could not sign the user out" });
   }
 });
 
@@ -2669,6 +3166,220 @@ app.delete("/admin/worksheets/:id", requireStaff, async (req, res) => {
   } catch (error) {
     console.error("Delete worksheet failed:", error);
     res.status(500).json({ error: "Could not delete worksheet" });
+  }
+});
+
+// ---- Shared quizzes (assignments teachers send to students) ----
+
+function buildShareLink(share) {
+  const params = new URLSearchParams({
+    mode: "solo",
+    shareId: share.id,
+    lock: "1",
+    source: "teacher",
+    curriculum: share.curriculum,
+    language: share.language,
+    subject: share.subject,
+    grade: String(share.grade_level),
+    count: String(share.questions_per_round || 10)
+  });
+  return `${CONTROLLER_URL}?${params.toString()}`;
+}
+
+function publicShare(row, extra = {}) {
+  return {
+    id: row.id,
+    title: row.title,
+    subject: row.subject,
+    curriculum: row.curriculum,
+    language: row.language,
+    gradeLevel: row.grade_level,
+    difficultyMode: row.difficulty_mode,
+    questionsPerRound: row.questions_per_round,
+    worksheetId: row.worksheet_id || null,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+    link: buildShareLink(row),
+    ...extra
+  };
+}
+
+app.post("/admin/shares", requireStaff, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    let base = req.body || {};
+    let worksheetId = null;
+
+    // Share a saved worksheet's settings (fresh questions, same config).
+    if (req.body?.worksheetId) {
+      const ws = await dbQueryRequired("SELECT * FROM worksheets WHERE id = $1", [String(req.body.worksheetId)]);
+      const row = ws.rows[0];
+      if (!row) {
+        res.status(404).json({ error: "Worksheet not found" });
+        return;
+      }
+      if (getUserRole(req) !== "admin" && row.created_by_id && row.created_by_id !== req.adminUser?.sub) {
+        res.status(403).json({ error: "You can only share your own worksheets." });
+        return;
+      }
+      worksheetId = row.id;
+      base = {
+        title: req.body.title || row.title,
+        subject: row.subject,
+        curriculum: row.curriculum,
+        language: row.language,
+        gradeLevel: row.grade_level,
+        difficultyMode: row.difficulty_mode,
+        questionsPerRound: row.question_count
+      };
+    }
+
+    const config = buildWorksheetConfig(base);
+    const title = normalizeAdminText(base.title, 120, "Shared Quiz");
+    const questionsPerRound = Math.min(20, Math.max(1, Math.round(Number(base.questionsPerRound ?? base.questions_per_round ?? 10)) || 10));
+    const id = createId();
+    await dbQueryRequired(
+      `INSERT INTO quiz_shares
+       (id, title, subject, curriculum, language, grade_level, difficulty_mode, questions_per_round, worksheet_id, created_by, created_by_id, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, NOW())`,
+      [id, title, config.subject, config.curriculum, config.language, config.gradeLevel, config.difficultyMode, questionsPerRound, worksheetId, req.adminUser?.username || "admin", req.adminUser?.sub || null]
+    );
+    await logAuditAction("share.create", "quiz_shares", id, { title }, req);
+    const row = (await dbQueryRequired("SELECT * FROM quiz_shares WHERE id = $1", [id])).rows[0];
+    res.status(201).json({ ok: true, share: publicShare(row, { telegramConfigured: Boolean(TELEGRAM_BOT_TOKEN) }) });
+  } catch (error) {
+    console.error("Create share failed:", error);
+    res.status(500).json({ error: "Could not create share" });
+  }
+});
+
+app.get("/admin/shares", requireStaff, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const isAdmin = getUserRole(req) === "admin";
+    const result = isAdmin
+      ? await dbQueryRequired(
+          `SELECT s.*, COUNT(ss.id)::int AS attempts,
+                  COUNT(ss.id) FILTER (WHERE ss.status = 'FINISHED')::int AS completed
+           FROM quiz_shares s LEFT JOIN solo_sessions ss ON ss.share_id = s.id
+           GROUP BY s.id ORDER BY s.created_at DESC LIMIT 200`)
+      : await dbQueryRequired(
+          `SELECT s.*, COUNT(ss.id)::int AS attempts,
+                  COUNT(ss.id) FILTER (WHERE ss.status = 'FINISHED')::int AS completed
+           FROM quiz_shares s LEFT JOIN solo_sessions ss ON ss.share_id = s.id
+           WHERE s.created_by_id = $1
+           GROUP BY s.id ORDER BY s.created_at DESC LIMIT 200`,
+          [req.adminUser?.sub || ""]);
+    res.json({
+      telegramConfigured: Boolean(TELEGRAM_BOT_TOKEN),
+      shares: result.rows.map((row) => publicShare(row, { attempts: row.attempts, completed: row.completed }))
+    });
+  } catch (error) {
+    console.error("List shares failed:", error);
+    res.status(500).json({ error: "Could not load shares" });
+  }
+});
+
+app.get("/admin/shares/:id", requireStaff, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const result = await dbQueryRequired("SELECT * FROM quiz_shares WHERE id = $1", [String(req.params.id)]);
+    const row = result.rows[0];
+    if (!row) {
+      res.status(404).json({ error: "Share not found" });
+      return;
+    }
+    if (getUserRole(req) !== "admin" && row.created_by_id && row.created_by_id !== req.adminUser?.sub) {
+      res.status(403).json({ error: "You can only view your own shares." });
+      return;
+    }
+    const completions = await dbQueryRequired(
+      `SELECT student_name, score, status, questions_per_round, created_at, completed_at
+       FROM solo_sessions WHERE share_id = $1 ORDER BY COALESCE(completed_at, created_at) DESC LIMIT 500`,
+      [row.id]
+    );
+    res.json({
+      share: publicShare(row, { telegramConfigured: Boolean(TELEGRAM_BOT_TOKEN) }),
+      completions: completions.rows.map((c) => ({
+        studentName: c.student_name,
+        score: c.score,
+        total: c.questions_per_round,
+        status: c.status,
+        startedAt: c.created_at,
+        completedAt: c.completed_at
+      }))
+    });
+  } catch (error) {
+    console.error("Get share failed:", error);
+    res.status(500).json({ error: "Could not load share" });
+  }
+});
+
+app.delete("/admin/shares/:id", requireStaff, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const result = await dbQueryRequired("SELECT id, created_by_id, title FROM quiz_shares WHERE id = $1", [String(req.params.id)]);
+    const row = result.rows[0];
+    if (!row) {
+      res.status(404).json({ error: "Share not found" });
+      return;
+    }
+    if (getUserRole(req) !== "admin" && row.created_by_id && row.created_by_id !== req.adminUser?.sub) {
+      res.status(403).json({ error: "You can only delete your own shares." });
+      return;
+    }
+    await dbQueryRequired("UPDATE quiz_shares SET is_active = FALSE WHERE id = $1", [row.id]);
+    await logAuditAction("share.delete", "quiz_shares", row.id, { title: row.title }, req);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Delete share failed:", error);
+    res.status(500).json({ error: "Could not delete share" });
+  }
+});
+
+app.post("/admin/shares/:id/telegram", requireStaff, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  if (!TELEGRAM_BOT_TOKEN) {
+    res.status(503).json({ error: "Telegram is not configured. Set TELEGRAM_BOT_TOKEN on the gateway." });
+    return;
+  }
+  try {
+    const result = await dbQueryRequired("SELECT * FROM quiz_shares WHERE id = $1 AND is_active = TRUE", [String(req.params.id)]);
+    const row = result.rows[0];
+    if (!row) {
+      res.status(404).json({ error: "Share not found" });
+      return;
+    }
+    if (getUserRole(req) !== "admin" && row.created_by_id && row.created_by_id !== req.adminUser?.sub) {
+      res.status(403).json({ error: "You can only send your own shares." });
+      return;
+    }
+    const chatId = String(req.body?.chatId || "").trim();
+    if (!chatId) {
+      res.status(400).json({ error: "A Telegram chat ID is required." });
+      return;
+    }
+    const link = buildShareLink(row);
+    const text = `📚 ${row.title}\nYour teacher shared a quiz with you. Tap below to start.`;
+    const tgResponse = await fetchWithTimeout(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        reply_markup: { inline_keyboard: [[{ text: "Start Quiz", url: link }]] }
+      })
+    }, OPENAI_TIMEOUT_MS);
+    const tgData = await tgResponse.json().catch(() => ({}));
+    if (!tgResponse.ok || !tgData.ok) {
+      res.status(502).json({ error: tgData.description || "Telegram could not deliver the message. Check the chat ID (the student must have started the bot)." });
+      return;
+    }
+    await logAuditAction("share.telegram", "quiz_shares", row.id, { chatId }, req);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Send share via Telegram failed:", error);
+    res.status(500).json({ error: "Could not send via Telegram" });
   }
 });
 
@@ -3223,9 +3934,21 @@ app.get("/admin/reports/students", requireAdmin, async (req, res) => {
             COALESCE(SUM(sp.total_sessions), 0)::int AS total_sessions,
             COALESCE(SUM(sp.total_questions), 0)::int AS total_questions,
             COALESCE(SUM(sp.correct_answers), 0)::int AS correct_answers,
-            MAX(sp.last_session_at) AS last_session_at
+            MAX(sp.last_session_at) AS last_session_at,
+            bool_or(blk.student_id IS NOT NULL) AS is_blocked,
+            MAX(blk.reason) AS block_reason,
+            MAX(blk.expires_at) AS block_expires_at
      FROM students st
      LEFT JOIN student_progress sp ON sp.student_id = st.id
+     LEFT JOIN LATERAL (
+       SELECT sb.student_id, sb.reason, sb.expires_at
+       FROM student_blocks sb
+       WHERE sb.student_id = st.id
+         AND sb.is_active = TRUE
+         AND (sb.expires_at IS NULL OR sb.expires_at > NOW())
+       ORDER BY sb.blocked_at DESC
+       LIMIT 1
+     ) blk ON TRUE
      WHERE st.client_id NOT LIKE 'tv:%'
      GROUP BY st.id
      ORDER BY last_session_at DESC NULLS LAST, st.updated_at DESC
@@ -3861,6 +4584,44 @@ app.get("/admin/active-sessions", requireAdmin, (_req, res) => {
   res.json({ sessions: activeSessions });
 });
 
+// Flatten every live WebSocket-connected person across all rooms into one presence
+// list: the TV/host per room plus each connected player. This is the real-time
+// "who is on the platform right now" view that the room-level summary above lacks.
+app.get("/admin/online-users", requireAdmin, (_req, res) => {
+  const users = [];
+  for (const [roomCode, room] of rooms.entries()) {
+    if (room.tv && room.tv.readyState === WebSocket.OPEN) {
+      users.push({
+        roomCode,
+        role: "host",
+        name: "TV / Host",
+        playerId: room.hostPlayerId || null,
+        studentId: null,
+        score: null,
+        roomStatus: room.status,
+        connectedSince: room.createdAt || null
+      });
+    }
+    for (const player of room.players.values()) {
+      if (player.isHost) {
+        continue;
+      }
+      users.push({
+        roomCode,
+        role: "player",
+        name: player.name,
+        playerId: player.playerId,
+        studentId: player.studentId || null,
+        score: player.score || 0,
+        roomStatus: room.status,
+        connected: Boolean(player.ws && player.ws.readyState === WebSocket.OPEN),
+        connectedSince: player.joinedAt || null
+      });
+    }
+  }
+  res.json({ users, count: users.length });
+});
+
 app.post("/admin/active-sessions/:roomCode/close", requireAdmin, async (req, res) => {
   const roomCode = String(req.params.roomCode || "").trim().toUpperCase();
   const room = rooms.get(roomCode);
@@ -4050,7 +4811,7 @@ async function fetchOpenAIQuestion(room) {
 Curriculum: ${getCurriculumLabel(config.curriculum)}
 Language mode: ${getLanguageLabel(config.language)}
 Subject: ${getSubjectLabel(config.subject)}
-Difficulty mode: ${config.difficultyMode}
+${getSubjectInstruction(config.subject) ? `Subject focus: ${getSubjectInstruction(config.subject)}\n` : ""}Difficulty mode: ${config.difficultyMode}
 Question number: ${room.questionIndex + 1} of ${config.questionsPerRound}
 Avoid repeating any of these recent prompts: ${room.history.join(" | ") || "none"}.
 ${config.teacherPrompt ? `
@@ -4700,6 +5461,7 @@ wss.on("connection", (ws, req) => {
           timerId: null,
           history: [],
           answerCount: 0,
+          createdAt: new Date().toISOString(),
           lastActivityAt: Date.now(),
           usageSource: "live_quiz"
         });
@@ -4849,6 +5611,7 @@ wss.on("connection", (ws, req) => {
           clientId: clientId || null,
           studentId,
           ws,
+          joinedAt: new Date().toISOString(),
           score: 0,
           answerHistory: [],
           currentAnswer: null,

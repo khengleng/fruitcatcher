@@ -537,10 +537,12 @@
         <button class="tab" data-tab="questions" data-role="admin">Question Bank</button>
         <button class="tab" data-tab="groups" data-role="admin">Groups</button>
         <button class="tab" data-tab="activeSessions" data-role="admin">Active Sessions</button>
+        <button class="tab" data-tab="onlineUsers" data-role="admin">Online Users</button>
         <button class="tab" data-tab="analytics" data-role="admin">Analytics</button>
         <button class="tab" data-tab="audit" data-role="admin">Audit Log</button>
         <button class="tab" data-tab="aiUsage" data-role="admin">📊 AI Usage</button>
         <button class="tab" data-tab="worksheets" data-role="staff">📄 Worksheets</button>
+        <button class="tab" data-tab="shares" data-role="staff">🔗 Shared Quizzes</button>
         <button class="tab" data-tab="users" data-role="admin">Users</button>
       </nav>
 
@@ -585,6 +587,10 @@
             Subject
             <select id="subject">
               <option value="math">Math</option>
+              <option value="algebra_1">Algebra 1</option>
+              <option value="algebra_2">Algebra 2</option>
+              <option value="geometry">Geometry</option>
+              <option value="precalculus">Precalculus</option>
               <option value="general_science">General Science</option>
               <option value="biology">Biology</option>
               <option value="chemistry">Chemistry</option>
@@ -658,6 +664,10 @@
             <select id="sessionSubjectFilter">
               <option value="">All Subjects</option>
               <option value="math">Math</option>
+              <option value="algebra_1">Algebra 1</option>
+              <option value="algebra_2">Algebra 2</option>
+              <option value="geometry">Geometry</option>
+              <option value="precalculus">Precalculus</option>
               <option value="general_science">General Science</option>
               <option value="biology">Biology</option>
               <option value="chemistry">Chemistry</option>
@@ -738,6 +748,7 @@
                 <th>Questions</th>
                 <th>Accuracy</th>
                 <th>Last Seen</th>
+                <th>Status</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -784,6 +795,10 @@
             <select id="questionSubjectFilter">
               <option value="">All Subjects</option>
               <option value="math">Math</option>
+              <option value="algebra_1">Algebra 1</option>
+              <option value="algebra_2">Algebra 2</option>
+              <option value="geometry">Geometry</option>
+              <option value="precalculus">Precalculus</option>
               <option value="general_science">General Science</option>
               <option value="biology">Biology</option>
               <option value="chemistry">Chemistry</option>
@@ -823,6 +838,10 @@
             <label>Subject
               <select id="qaiSubject">
                 <option value="math">Math</option>
+                <option value="algebra_1">Algebra 1</option>
+                <option value="algebra_2">Algebra 2</option>
+                <option value="geometry">Geometry</option>
+                <option value="precalculus">Precalculus</option>
                 <option value="general_science">General Science</option>
                 <option value="biology">Biology</option>
                 <option value="chemistry">Chemistry</option>
@@ -891,6 +910,10 @@
           <div class="settings-grid">
             <label>Subject<select id="qSubject">
               <option value="math">Math</option>
+              <option value="algebra_1">Algebra 1</option>
+              <option value="algebra_2">Algebra 2</option>
+              <option value="geometry">Geometry</option>
+              <option value="precalculus">Precalculus</option>
               <option value="general_science">General Science</option>
               <option value="biology">Biology</option>
               <option value="chemistry">Chemistry</option>
@@ -1038,6 +1061,32 @@
         <div id="activeSessionDetail" class="detail"></div>
       </section>
 
+      <section id="onlineUsersPanel" class="panel" hidden>
+        <h2>Online Users</h2>
+        <p class="muted">Everyone currently connected to a live room right now — hosts and players. Kick a player to disconnect them immediately.</p>
+
+        <div class="actions" style="margin-top:14px;">
+          <button id="refreshOnlineUsersButton" class="secondary small">🔄 Refresh</button>
+          <span id="onlineUsersCount" class="muted" style="align-self:center;"></span>
+        </div>
+
+        <div class="table-wrap" style="margin-top:14px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Room</th>
+                <th>Room Status</th>
+                <th>Connected Since</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="onlineUsersBody"></tbody>
+          </table>
+        </div>
+      </section>
+
       <section id="auditPanel" class="panel" hidden>
         <h2>Admin Action Audit Log</h2>
         <p class="muted">Track all administrative actions for security and compliance.</p>
@@ -1121,6 +1170,10 @@
           <label>Subject
             <select id="wsSubject">
               <option value="math">Math</option>
+              <option value="algebra_1">Algebra 1</option>
+              <option value="algebra_2">Algebra 2</option>
+              <option value="geometry">Geometry</option>
+              <option value="precalculus">Precalculus</option>
               <option value="general_science">General Science</option>
               <option value="biology">Biology</option>
               <option value="chemistry">Chemistry</option>
@@ -1191,6 +1244,74 @@
         </div>
       </section>
 
+      <section id="sharesPanel" class="panel" hidden>
+        <h2>🔗 Shared Quizzes</h2>
+        <p class="muted">Share a quiz with students by link, QR code, or directly via the Telegram bot. Each student takes it on their phone (settings locked to what you choose), and their scores appear here.</p>
+
+        <div class="ws-grid">
+          <label>Title
+            <input id="shTitle" type="text" maxlength="120" placeholder="e.g. Grade 6 Math — Friday Quiz">
+          </label>
+          <label>Subject
+            <select id="shSubject">
+              <option value="math">Math</option>
+              <option value="general_science">General Science</option>
+              <option value="biology">Biology</option>
+              <option value="chemistry">Chemistry</option>
+              <option value="physics">Physics</option>
+              <option value="english">English</option>
+            </select>
+          </label>
+          <label>Curriculum
+            <select id="shCurriculum">
+              <option value="international">International</option>
+              <option value="cambodia_moeys">Cambodia MoEYS</option>
+            </select>
+          </label>
+          <label>Language
+            <select id="shLanguage">
+              <option value="english">English</option>
+              <option value="khmer">Khmer</option>
+              <option value="bilingual">Bilingual</option>
+            </select>
+          </label>
+          <label>Grade
+            <select id="shGrade"></select>
+          </label>
+          <label>Difficulty
+            <select id="shDifficulty">
+              <option value="easy">Easy</option>
+              <option value="standard" selected>Standard</option>
+              <option value="challenge">Challenge</option>
+            </select>
+          </label>
+          <label>Questions
+            <input id="shCount" type="number" min="1" max="20" value="10">
+          </label>
+        </div>
+        <div class="actions" style="margin-top:14px;">
+          <button id="shCreateButton">Create Share</button>
+          <span id="shStatus" class="muted" style="align-self:center;"></span>
+        </div>
+
+        <div class="table-wrap" style="margin-top:16px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Subject / Grade</th>
+                <th>Completed</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="sharesBody"></tbody>
+          </table>
+        </div>
+
+        <div id="shareDetail" class="detail" hidden style="margin-top:18px;"></div>
+      </section>
+
       <section id="usersPanel" class="panel" hidden>
         <h2>Users &amp; Roles</h2>
         <p class="muted">Create teacher/facilitator accounts. Teachers can only build and print worksheets — they cannot see settings, students, or reports.</p>
@@ -1234,6 +1355,7 @@
   </main>
 
   <script src="./config.js"></script>
+  <script src="./qrcode.js"></script>
   <script>
     const appConfig = window.FRUIT_CATCHER_ADMIN_CONFIG || {};
     const gatewayUrl = appConfig.gatewayHttpUrl || "http://localhost:3000";
@@ -1356,7 +1478,14 @@
 	      await loadPresets();
 	    }
 
-	    function logoutAdmin() {
+	    async function logoutAdmin() {
+	      // Best-effort: revoke this session on the server so the token can't be reused
+	      // even if it is captured. Always clear locally regardless of the outcome.
+	      try {
+	        await api("/admin/logout", { method: "POST" });
+	      } catch (_error) {
+	        // Already signed out, offline, or using the legacy env token — ignore.
+	      }
 	      adminSession = null;
 	      sessionStorage.removeItem("fruitcatcher_admin_session");
 	      sessionStorage.removeItem("fruitcatcher_admin_legacy_token");
@@ -1412,7 +1541,7 @@
       fields.curriculum.value = config.curriculum || "international";
       fields.language.value = config.language || "english";
       fields.subject.value = config.subject || "math";
-      fields.gradeLevel.value = String(config.gradeLevel || 6);
+      populateGradeSelect(fields.gradeLevel, fields.subject.value, config.gradeLevel || 6);
       fields.difficultyMode.value = config.difficultyMode || "standard";
       fields.questionSource.value = config.questionSource || "openai_fallback";
       fields.questionsPerRound.value = config.questionsPerRound ?? "";
@@ -1667,6 +1796,20 @@
         appendCell(row, student.total_questions);
         appendCell(row, accuracy(student.correct_answers, student.total_questions));
         appendCell(row, formatDate(student.last_session_at || student.updated_at));
+        const statusCell = document.createElement("td");
+        if (student.is_blocked) {
+          const badge = document.createElement("span");
+          badge.className = "badge danger";
+          badge.style.cssText = "background:#a33d3d;color:#fff;padding:2px 8px;border-radius:10px;font-size:12px;";
+          const until = student.block_expires_at ? ` until ${formatDate(student.block_expires_at)}` : "";
+          badge.textContent = "Blocked";
+          badge.title = `${student.block_reason || "Blocked by an admin"}${until}`;
+          statusCell.appendChild(badge);
+        } else {
+          statusCell.textContent = "Active";
+          statusCell.style.color = "var(--muted)";
+        }
+        row.appendChild(statusCell);
         appendButtonCell(row, "Open", () => loadStudentDetail(student.id));
         studentsBody.appendChild(row);
       }
@@ -2283,11 +2426,82 @@
 
     async function closeActiveSession(roomCode) {
       if (!confirm(`Close room ${roomCode}? All players will be disconnected.`)) return;
-      
+
       try {
         await api(`/admin/active-sessions/${roomCode}/close`, { method: "POST" });
         setStatus(authStatus, `Room ${roomCode} closed successfully.`, "#1f7a4d");
         await loadActiveSessions();
+      } catch (error) {
+        setStatus(authStatus, error.message, "#a33d3d");
+      }
+    }
+
+    // Online Users Functions
+    async function loadOnlineUsers() {
+      try {
+        setStatus(authStatus, "Loading online users...", "#85321e");
+        const data = await api("/admin/online-users");
+        const users = data.users || [];
+        renderOnlineUsers(users);
+        document.getElementById("onlineUsersCount").textContent = `${users.length} connected`;
+        setStatus(authStatus, `${users.length} users online.`, "#1f7a4d");
+      } catch (error) {
+        setStatus(authStatus, error.message, "#a33d3d");
+      }
+    }
+
+    function renderOnlineUsers(users) {
+      const tbody = document.getElementById("onlineUsersBody");
+      tbody.innerHTML = "";
+
+      for (const user of users) {
+        const row = document.createElement("tr");
+        appendCell(row, user.name);
+        appendCell(row, user.role === "host" ? "Host / TV" : "Player");
+        appendCell(row, user.roomCode);
+        appendCell(row, user.roomStatus);
+        appendCell(row, user.connectedSince ? formatDate(user.connectedSince) : "-");
+
+        const actionCell = document.createElement("td");
+        if (user.role === "host") {
+          const closeBtn = document.createElement("button");
+          closeBtn.className = "danger small";
+          closeBtn.textContent = "Close Room";
+          closeBtn.onclick = async () => {
+            await closeActiveSession(user.roomCode);
+            loadOnlineUsers();
+          };
+          actionCell.appendChild(closeBtn);
+        } else {
+          const kickBtn = document.createElement("button");
+          kickBtn.className = "danger small";
+          kickBtn.textContent = "Kick";
+          kickBtn.onclick = () => kickOnlineUser(user.roomCode, user.playerId, user.name);
+          actionCell.appendChild(kickBtn);
+        }
+        row.appendChild(actionCell);
+        tbody.appendChild(row);
+      }
+
+      if (users.length === 0) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 6;
+        cell.style.textAlign = "center";
+        cell.style.padding = "24px";
+        cell.style.color = "var(--muted)";
+        cell.textContent = "No one is connected right now.";
+        row.appendChild(cell);
+        tbody.appendChild(row);
+      }
+    }
+
+    async function kickOnlineUser(roomCode, playerId, name) {
+      if (!confirm(`Disconnect ${name} from room ${roomCode}?`)) return;
+      try {
+        await api(`/admin/active-sessions/${roomCode}/kick/${playerId}`, { method: "POST" });
+        setStatus(authStatus, `${name} was disconnected.`, "#1f7a4d");
+        await loadOnlineUsers();
       } catch (error) {
         setStatus(authStatus, error.message, "#a33d3d");
       }
@@ -2343,10 +2557,12 @@
       document.getElementById("questionsPanel").hidden = tabName !== "questions";
       document.getElementById("groupsPanel").hidden = tabName !== "groups";
       document.getElementById("activeSessionsPanel").hidden = tabName !== "activeSessions";
+      document.getElementById("onlineUsersPanel").hidden = tabName !== "onlineUsers";
       document.getElementById("analyticsPanel").hidden = tabName !== "analytics";
       document.getElementById("auditPanel").hidden = tabName !== "audit";
       document.getElementById("aiUsagePanel").hidden = tabName !== "aiUsage";
       document.getElementById("worksheetsPanel").hidden = tabName !== "worksheets";
+      document.getElementById("sharesPanel").hidden = tabName !== "shares";
       document.getElementById("usersPanel").hidden = tabName !== "users";
 
       if (tabName === "sessions" || tabName === "students") {
@@ -2359,6 +2575,8 @@
         loadGroups();
       } else if (tabName === "activeSessions") {
         loadActiveSessions();
+      } else if (tabName === "onlineUsers") {
+        loadOnlineUsers();
       } else if (tabName === "audit") {
         loadAuditLogs();
       } else if (tabName === "worksheets") {
@@ -2367,6 +2585,8 @@
         loadUsers();
       } else if (tabName === "aiUsage") {
         loadAiUsage();
+      } else if (tabName === "shares") {
+        loadShares();
       }
     }
 
@@ -2413,16 +2633,7 @@
     const wsEl = (id) => document.getElementById(id);
 
     function initWorksheetGrades() {
-      const grade = wsEl("wsGrade");
-      if (grade && !grade.options.length) {
-        for (let g = 2; g <= 12; g++) {
-          const opt = document.createElement("option");
-          opt.value = String(g);
-          opt.textContent = `Grade ${g}`;
-          if (g === 6) opt.selected = true;
-          grade.appendChild(opt);
-        }
-      }
+      populateGradeSelect(wsEl("wsGrade"), wsEl("wsSubject")?.value || "math", 6);
     }
 
     function worksheetConfig() {
@@ -2573,12 +2784,17 @@
           printBtn.className = "secondary small";
           printBtn.textContent = "🖨️ Print";
           printBtn.addEventListener("click", () => openWorksheet(ws.id, true));
+          const shareBtn = document.createElement("button");
+          shareBtn.className = "secondary small";
+          shareBtn.textContent = "🔗 Share";
+          shareBtn.addEventListener("click", () => shareWorksheet(ws.id));
           const delBtn = document.createElement("button");
           delBtn.className = "danger small";
           delBtn.textContent = "Delete";
           delBtn.addEventListener("click", () => deleteWorksheet(ws.id));
           actions.appendChild(openBtn);
           actions.appendChild(printBtn);
+          actions.appendChild(shareBtn);
           actions.appendChild(delBtn);
           row.appendChild(actions);
           tbody.appendChild(row);
@@ -2710,6 +2926,13 @@
             const pw = prompt(`New password for ${user.username} (min 8 chars):`);
             if (pw) updateUser(user.id, { password: pw });
           });
+          const signOut = document.createElement("button");
+          signOut.className = "secondary small";
+          signOut.textContent = "Sign out";
+          signOut.title = "Immediately revoke this user's active sessions on all devices";
+          signOut.addEventListener("click", () => {
+            if (confirm(`Force ${user.username} to sign out of all devices now?`)) forceLogoutUser(user.id, user.username);
+          });
           const del = document.createElement("button");
           del.className = "danger small";
           del.textContent = "Delete";
@@ -2718,6 +2941,7 @@
           });
           actions.appendChild(toggle);
           actions.appendChild(reset);
+          actions.appendChild(signOut);
           actions.appendChild(del);
           row.appendChild(actions);
           tbody.appendChild(row);
@@ -2764,21 +2988,58 @@
       }
     }
 
+    async function forceLogoutUser(id, username) {
+      try {
+        await api(`/admin/users/${id}/logout`, { method: "POST" });
+        setStatus(wsEl("usersStatus"), `${username} signed out of all devices.`, "#1f7a4d");
+        loadUsers();
+      } catch (error) {
+        setStatus(wsEl("usersStatus"), error.message, "#a33d3d");
+      }
+    }
+
     // ===== Question Bank: AI generation (reuses the verified worksheet generator) =====
     let qaiQuestions = [];
     let qaiBusy = false;
 
+    // Math-track courses are taught at specific grades; mirror of the gateway's
+    // SUBJECT_GRADE_RANGES so each subject only offers the grades it belongs to.
+    const SUBJECT_GRADE_RANGES = {
+      algebra_1: [8, 9],
+      algebra_2: [10, 11],
+      geometry: [9, 10],
+      precalculus: [11, 12]
+    };
+
+    function gradesForSubject(subject) {
+      const range = SUBJECT_GRADE_RANGES[subject];
+      const grades = [];
+      const min = range ? range[0] : 2;
+      const max = range ? range[1] : 12;
+      for (let g = min; g <= max; g++) grades.push(g);
+      return grades;
+    }
+
+    // Rebuild a grade <select> to only the grades valid for the chosen subject,
+    // keeping the current selection when it is still allowed.
+    function populateGradeSelect(selectEl, subject, desired) {
+      if (!selectEl) return;
+      const grades = gradesForSubject(subject);
+      const current = desired != null ? Number(desired) : Number(selectEl.value);
+      selectEl.innerHTML = "";
+      grades.forEach((g) => {
+        const opt = document.createElement("option");
+        opt.value = String(g);
+        opt.textContent = `Grade ${g}`;
+        selectEl.appendChild(opt);
+      });
+      if (grades.includes(current)) selectEl.value = String(current);
+      else if (grades.includes(6)) selectEl.value = "6";
+      else selectEl.value = String(grades[0]);
+    }
+
     function initQaiGrades() {
-      const grade = wsEl("qaiGrade");
-      if (grade && !grade.options.length) {
-        for (let g = 2; g <= 12; g++) {
-          const opt = document.createElement("option");
-          opt.value = String(g);
-          opt.textContent = `Grade ${g}`;
-          if (g === 6) opt.selected = true;
-          grade.appendChild(opt);
-        }
-      }
+      populateGradeSelect(wsEl("qaiGrade"), wsEl("qaiSubject")?.value || "math", 6);
     }
 
     function qaiConfig() {
@@ -3005,6 +3266,188 @@
 
     initWorksheetGrades();
     initQaiGrades();
+    // Re-scope the grade options whenever the subject changes so math-track courses
+    // only ever offer the grades they are taught in.
+    fields.subject.addEventListener("change", () => populateGradeSelect(fields.gradeLevel, fields.subject.value));
+    wsEl("qaiSubject").addEventListener("change", () => populateGradeSelect(wsEl("qaiGrade"), wsEl("qaiSubject").value));
+    wsEl("wsSubject").addEventListener("change", () => populateGradeSelect(wsEl("wsGrade"), wsEl("wsSubject").value));
+    // ===== Shared quizzes =====
+    let sharesTelegramConfigured = false;
+
+    function initShareGrades() {
+      populateGradeSelect(wsEl("shGrade"), wsEl("shSubject")?.value || "math", 6);
+    }
+
+    async function createShare() {
+      try {
+        setStatus(wsEl("shStatus"), "Creating…", "#85321e");
+        const body = {
+          title: wsEl("shTitle").value.trim(),
+          subject: wsEl("shSubject").value,
+          curriculum: wsEl("shCurriculum").value,
+          language: wsEl("shLanguage").value,
+          gradeLevel: Number(wsEl("shGrade").value) || 6,
+          difficultyMode: wsEl("shDifficulty").value,
+          questionsPerRound: Number(wsEl("shCount").value) || 10
+        };
+        const data = await api("/admin/shares", { method: "POST", body: JSON.stringify(body) });
+        setStatus(wsEl("shStatus"), "Share created.", "#1f7a4d");
+        await loadShares();
+        openShareDetail(data.share.id);
+      } catch (error) {
+        setStatus(wsEl("shStatus"), error.message, "#a33d3d");
+      }
+    }
+
+    async function shareWorksheet(worksheetId) {
+      try {
+        const data = await api("/admin/shares", { method: "POST", body: JSON.stringify({ worksheetId }) });
+        showTab("shares");
+        await loadShares();
+        openShareDetail(data.share.id);
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+
+    async function loadShares() {
+      try {
+        const data = await api("/admin/shares");
+        sharesTelegramConfigured = data.telegramConfigured;
+        const tbody = wsEl("sharesBody");
+        tbody.innerHTML = "";
+        (data.shares || []).forEach((s) => {
+          const row = document.createElement("tr");
+          appendCell(row, s.title);
+          appendCell(row, `${subjectLabel(s.subject)} · G${s.gradeLevel}`);
+          appendCell(row, `${s.completed || 0} / ${s.attempts || 0}`);
+          appendCell(row, formatDate(s.createdAt));
+          const actions = document.createElement("td");
+          const openBtn = document.createElement("button");
+          openBtn.className = "secondary small";
+          openBtn.textContent = "Open / Share";
+          openBtn.addEventListener("click", () => openShareDetail(s.id));
+          const del = document.createElement("button");
+          del.className = "danger small";
+          del.textContent = "Delete";
+          del.addEventListener("click", () => { if (confirm("Delete this share?")) deleteShare(s.id); });
+          actions.appendChild(openBtn);
+          actions.appendChild(del);
+          row.appendChild(actions);
+          tbody.appendChild(row);
+        });
+      } catch (error) {
+        setStatus(wsEl("shStatus"), error.message, "#a33d3d");
+      }
+    }
+
+    async function deleteShare(id) {
+      try {
+        await api(`/admin/shares/${id}`, { method: "DELETE" });
+        wsEl("shareDetail").hidden = true;
+        loadShares();
+      } catch (error) {
+        setStatus(wsEl("shStatus"), error.message, "#a33d3d");
+      }
+    }
+
+    function qrDataUrl(text) {
+      try {
+        const qr = qrcode(0, "M");
+        qr.addData(text);
+        qr.make();
+        return qr.createDataURL(6, 6);
+      } catch (error) {
+        return "";
+      }
+    }
+
+    async function openShareDetail(id) {
+      const host = wsEl("shareDetail");
+      host.hidden = false;
+      host.innerHTML = "Loading…";
+      try {
+        const data = await api(`/admin/shares/${id}`);
+        const s = data.share;
+        const qr = qrDataUrl(s.link);
+        const completed = (data.completions || []).filter((c) => c.status === "FINISHED").length;
+        const rows = (data.completions || []).map((c) => `
+          <tr>
+            <td>${escapeForHtml(c.studentName || "Student")}</td>
+            <td>${c.status === "FINISHED" ? `${c.score} / ${c.total}` : "—"}</td>
+            <td>${c.status === "FINISHED" ? "Completed" : "In progress"}</td>
+            <td>${c.completedAt ? formatDate(c.completedAt) : formatDate(c.startedAt)}</td>
+          </tr>`).join("");
+        host.innerHTML = `
+          <h3>${escapeForHtml(s.title)}</h3>
+          <p class="muted">${subjectLabel(s.subject)} · Grade ${s.gradeLevel} · ${s.questionsPerRound} questions</p>
+          <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start; margin-top:8px;">
+            <div style="flex:1; min-width:260px;">
+              <label>Share link
+                <input id="shareLinkInput" type="text" readonly value="${escapeForHtml(s.link)}" style="width:100%;">
+              </label>
+              <div class="actions" style="margin-top:8px;">
+                <button id="copyShareLink" class="secondary small">📋 Copy link</button>
+              </div>
+              <div style="margin-top:14px;">
+                <label>Send via Telegram (student's chat ID)
+                  <input id="shareChatId" type="text" placeholder="${sharesTelegramConfigured ? "e.g. 123456789" : "Telegram not configured on gateway"}" ${sharesTelegramConfigured ? "" : "disabled"} style="width:100%;">
+                </label>
+                <div class="actions" style="margin-top:8px;">
+                  <button id="sendShareTelegram" class="secondary small" ${sharesTelegramConfigured ? "" : "disabled"}>✈️ Send</button>
+                  <span id="shareSendStatus" class="muted" style="align-self:center;"></span>
+                </div>
+                <p class="muted" style="font-size:12px;">The student must have started the Telegram bot first so it can message them.</p>
+              </div>
+            </div>
+            <div style="text-align:center;">
+              ${qr ? `<img src="${qr}" alt="QR code" style="width:180px;height:180px;border:1px solid #e0e4e0;border-radius:10px;">` : ""}
+              <div class="muted" style="font-size:12px;">Scan to open</div>
+            </div>
+          </div>
+          <h4 style="margin-top:20px;">Submissions (${completed} completed)</h4>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Student</th><th>Score</th><th>Status</th><th>When</th></tr></thead>
+              <tbody>${rows || `<tr><td colspan="4" style="color:#6a756d;">No submissions yet.</td></tr>`}</tbody>
+            </table>
+          </div>
+          <div class="actions" style="margin-top:12px;">
+            <button id="refreshShareDetail" class="secondary small">↻ Refresh</button>
+            <button id="closeShareDetail" class="secondary small">Close</button>
+          </div>`;
+
+        wsEl("copyShareLink").addEventListener("click", () => {
+          const input = wsEl("shareLinkInput");
+          input.select();
+          if (navigator.clipboard) navigator.clipboard.writeText(input.value).catch(() => {});
+          else document.execCommand("copy");
+          setStatus(wsEl("shStatus"), "Link copied.", "#1f7a4d");
+        });
+        wsEl("refreshShareDetail").addEventListener("click", () => openShareDetail(id));
+        wsEl("closeShareDetail").addEventListener("click", () => { host.hidden = true; });
+        const sendBtn = wsEl("sendShareTelegram");
+        if (sendBtn) {
+          sendBtn.addEventListener("click", async () => {
+            const chatId = wsEl("shareChatId").value.trim();
+            if (!chatId) { setStatus(wsEl("shareSendStatus"), "Enter a chat ID.", "#a33d3d"); return; }
+            try {
+              setStatus(wsEl("shareSendStatus"), "Sending…", "#85321e");
+              await api(`/admin/shares/${id}/telegram`, { method: "POST", body: JSON.stringify({ chatId }) });
+              setStatus(wsEl("shareSendStatus"), "Sent ✓", "#1f7a4d");
+            } catch (error) {
+              setStatus(wsEl("shareSendStatus"), error.message, "#a33d3d");
+            }
+          });
+        }
+      } catch (error) {
+        host.innerHTML = `<span style="color:#a33d3d;">${escapeForHtml(error.message)}</span>`;
+      }
+    }
+
+    initShareGrades();
+    wsEl("shSubject").addEventListener("change", () => populateGradeSelect(wsEl("shGrade"), wsEl("shSubject").value));
+    wsEl("shCreateButton").addEventListener("click", createShare);
     wsEl("usageLoadButton").addEventListener("click", loadAiUsage);
     wsEl("usageExportButton").addEventListener("click", exportUsageCSV);
     wsEl("wsGenerateButton").addEventListener("click", generateWorksheet);
@@ -3204,6 +3647,7 @@
 
     // Active Sessions event listeners
     document.getElementById("refreshActiveSessionsButton").addEventListener("click", loadActiveSessions);
+    document.getElementById("refreshOnlineUsersButton").addEventListener("click", loadOnlineUsers);
 
     // Audit Log event listeners
     document.getElementById("loadAuditLogsButton").addEventListener("click", loadAuditLogs);
