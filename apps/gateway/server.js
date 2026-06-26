@@ -2441,6 +2441,63 @@ function youtubeSearchUrl(query) {
   return `https://www.youtube.com/results?search_query=${encodeURIComponent(String(query || "").trim().slice(0, 120))}`;
 }
 
+const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY || "";
+// Cache resolved videos by query to protect the small daily quota
+// (a search costs 100 of ~10,000 units/day). Videos rarely change.
+const videoCache = new Map();
+
+function videoQueryFor(question, config) {
+  let query = String(question?.videoQuery || "").trim();
+  if (!query) {
+    const subject = getSubjectLabel((config && config.subject) || question?.subject || "");
+    const topic = String(question?.question || "")
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 8)
+      .join(" ");
+    query = `${subject} ${topic} explained`.trim();
+  }
+  return query;
+}
+
+async function youtubeSearchVideoId(query) {
+  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=1`
+    + `&safeSearch=strict&videoEmbeddable=true&q=${encodeURIComponent(query)}&key=${YOUTUBE_API_KEY}`;
+  const response = await fetchWithTimeout(url, { method: "GET" }, OPENAI_TIMEOUT_MS);
+  if (!response.ok) {
+    throw new Error(`YouTube search failed: ${response.status}`);
+  }
+  const data = await response.json();
+  return data?.items?.[0]?.id?.videoId || null;
+}
+
+// Returns { url, embedUrl }. embedUrl is set only when a real embeddable video
+// was found via the API; otherwise it falls back to a YouTube search link.
+async function resolveVideo(question, config) {
+  const query = videoQueryFor(question, config);
+  const fallback = { url: youtubeSearchUrl(query), embedUrl: null };
+  if (!YOUTUBE_API_KEY || !query) {
+    return fallback;
+  }
+  const key = normalizePrompt(query);
+  if (videoCache.has(key)) {
+    return videoCache.get(key);
+  }
+  try {
+    const videoId = await youtubeSearchVideoId(query);
+    const resolved = videoId
+      ? { url: `https://www.youtube.com/watch?v=${videoId}`, embedUrl: `https://www.youtube.com/embed/${videoId}` }
+      : fallback;
+    if (videoCache.size > 5000) videoCache.clear();
+    videoCache.set(key, resolved);
+    return resolved;
+  } catch (error) {
+    console.error("YouTube resolve failed:", error.message);
+    return fallback;
+  }
+}
+
 // A reliable "watch an explanation" link: prefer the AI's suggested search
 // phrase, otherwise derive one from the subject and question. Never a specific
 // (possibly broken/hallucinated) video id.
@@ -2482,7 +2539,8 @@ function buildSoloState(session) {
     correctChoice: session.status === "REVIEWING" ? session.currentQuestion?.correctChoice || null : null,
     shortExplanation: session.status === "REVIEWING" ? session.currentQuestion?.shortExplanation || "" : "",
     elaboration: session.status === "REVIEWING" ? session.currentQuestion?.elaboration || "" : "",
-    videoUrl: session.status === "REVIEWING" ? buildVideoUrl(session.currentQuestion, session.config) : null,
+    videoUrl: session.status === "REVIEWING" ? (session.currentQuestion?.resolvedVideo?.url || buildVideoUrl(session.currentQuestion, session.config)) : null,
+    videoEmbedUrl: session.status === "REVIEWING" ? (session.currentQuestion?.resolvedVideo?.embedUrl || null) : null,
     answerCount: session.status === "ANSWERING" && session.currentAnswer ? 1 : 0,
     leaderboard: [
       {
@@ -2756,6 +2814,8 @@ app.post("/solo/sessions/:id/answer", async (req, res) => {
     session.score += 1;
   }
   session.currentAnswer = choice;
+  const video = await resolveVideo(session.currentQuestion, session.config);
+  session.currentQuestion.resolvedVideo = video;
   const result = {
     questionIndex: session.questionIndex,
     prompt: session.currentQuestion.question,
@@ -2765,7 +2825,8 @@ app.post("/solo/sessions/:id/answer", async (req, res) => {
     isCorrect,
     shortExplanation: session.currentQuestion.shortExplanation || "",
     elaboration: session.currentQuestion.elaboration || "",
-    videoUrl: buildVideoUrl(session.currentQuestion, session.config),
+    videoUrl: video.url,
+    videoEmbedUrl: video.embedUrl,
     scoreAfter: session.score,
     source: session.currentQuestion.source || null,
     model: session.currentQuestion.model || null
