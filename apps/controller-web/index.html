@@ -345,6 +345,19 @@
       font-size: 15px;
     }
 
+    .yt-wrap { margin-top: 10px; }
+    .yt-link {
+      display: inline-block;
+      padding: 9px 14px;
+      border-radius: 12px;
+      background: rgba(255, 0, 0, 0.14);
+      border: 1px solid rgba(255, 80, 80, 0.45);
+      color: #ff8f8f;
+      font-weight: 800;
+      font-size: 14px;
+      text-decoration: none;
+    }
+
     .leaderboard {
       margin-top: 16px;
       display: grid;
@@ -1120,10 +1133,14 @@
         const card = document.createElement("div");
         card.className = `result-card ${result.isCorrect ? "correct" : "wrong"}`;
         const answer = result.choice || "No answer";
+        const videoLink = result.videoUrl
+          ? `<div class="yt-wrap"><a class="yt-link" href="${result.videoUrl}" target="_blank" rel="noopener">▶ Watch explanation on YouTube</a></div>`
+          : "";
         card.innerHTML =
           `<b>Q${Number(result.questionIndex || 0) + 1}: ${result.isCorrect ? "Correct" : "Review"}</b><br>` +
           `Your answer: ${answer} | Correct: ${result.correctChoice}<br>` +
-          `<span>${formatMathHTML(result.shortExplanation || result.elaboration || "")}</span>`;
+          `<span>${formatMathHTML(result.shortExplanation || result.elaboration || "")}</span>` +
+          videoLink;
         resultsEl.appendChild(card);
       }
     }
@@ -1340,11 +1357,17 @@
         answersEl.innerHTML = "";
       } else if (latestState.question) {
         questionTextEl.innerHTML = formatMathHTML(latestState.question.prompt);
-        explanationEl.innerHTML = latestState.status === "REVIEWING"
-          ? formatMathHTML(`${latestState.shortExplanation} ${latestState.elaboration}`)
-          : latestState.player?.answered
+        if (latestState.status === "REVIEWING") {
+          let exp = formatMathHTML(`${latestState.shortExplanation} ${latestState.elaboration}`);
+          if (latestState.videoUrl) {
+            exp += `<div class="yt-wrap"><a class="yt-link" href="${latestState.videoUrl}" target="_blank" rel="noopener">▶ Watch an explanation on YouTube</a></div>`;
+          }
+          explanationEl.innerHTML = exp;
+        } else {
+          explanationEl.textContent = latestState.player?.answered
             ? "Answer sent. Waiting for other students or the timer."
             : `Players answered: ${latestState.answerCount || 0}/${latestState.connectedPlayerCount || latestState.playerCount || 0}`;
+        }
         renderAnswers();
       } else if (latestState.status === "FINISHED") {
         questionTextEl.textContent = isSoloMode

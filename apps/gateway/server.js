@@ -2437,6 +2437,31 @@ function publicQuestion(question) {
   };
 }
 
+function youtubeSearchUrl(query) {
+  return `https://www.youtube.com/results?search_query=${encodeURIComponent(String(query || "").trim().slice(0, 120))}`;
+}
+
+// A reliable "watch an explanation" link: prefer the AI's suggested search
+// phrase, otherwise derive one from the subject and question. Never a specific
+// (possibly broken/hallucinated) video id.
+function buildVideoUrl(question, config) {
+  if (!question) {
+    return null;
+  }
+  let query = String(question.videoQuery || "").trim();
+  if (!query) {
+    const subject = getSubjectLabel((config && config.subject) || question.subject || "");
+    const topic = String(question.question || "")
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 8)
+      .join(" ");
+    query = `${subject} ${topic} explained`.trim();
+  }
+  return youtubeSearchUrl(query);
+}
+
 function getSoloSession(sessionId) {
   return soloSessions.get(String(sessionId || ""));
 }
@@ -2457,6 +2482,7 @@ function buildSoloState(session) {
     correctChoice: session.status === "REVIEWING" ? session.currentQuestion?.correctChoice || null : null,
     shortExplanation: session.status === "REVIEWING" ? session.currentQuestion?.shortExplanation || "" : "",
     elaboration: session.status === "REVIEWING" ? session.currentQuestion?.elaboration || "" : "",
+    videoUrl: session.status === "REVIEWING" ? buildVideoUrl(session.currentQuestion, session.config) : null,
     answerCount: session.status === "ANSWERING" && session.currentAnswer ? 1 : 0,
     leaderboard: [
       {
@@ -2739,6 +2765,7 @@ app.post("/solo/sessions/:id/answer", async (req, res) => {
     isCorrect,
     shortExplanation: session.currentQuestion.shortExplanation || "",
     elaboration: session.currentQuestion.elaboration || "",
+    videoUrl: buildVideoUrl(session.currentQuestion, session.config),
     scoreAfter: session.score,
     source: session.currentQuestion.source || null,
     model: session.currentQuestion.model || null
@@ -4124,6 +4151,7 @@ function buildRoomState(roomCode, viewerWs = null) {
     correctChoice: room.revealAnswer ? room.currentQuestion?.correctChoice || null : null,
     shortExplanation: room.revealAnswer ? room.currentQuestion?.shortExplanation || "" : "",
     elaboration: room.revealAnswer ? room.currentQuestion?.elaboration || "" : "",
+    videoUrl: room.revealAnswer ? buildVideoUrl(room.currentQuestion, getSessionConfig(room)) : null,
     deadlineAt: room.deadlineAt,
     answerCount: room.answerCount || 0,
     leaderboard: getLeaderboard(room),
@@ -5383,6 +5411,7 @@ Requirements:
 - Match the reading level and background knowledge of Grade ${config.gradeLevel}
 - A short explanation under 30 words
 - A more detailed elaboration under 90 words
+- In "videoQuery", a 4-8 word YouTube search phrase a student could use to find a clear explanation video for this concept (in English, e.g. "long division grade 4 method" or "photosynthesis explained for kids")
 - Keep the question answerable by Grade ${config.gradeLevel} learners
 - ${getCurriculumInstruction(config.curriculum)}
 - ${getLanguageInstruction(config.language)}
@@ -5406,9 +5435,10 @@ Requirements:
           schema: {
             type: "object",
             additionalProperties: false,
-            required: ["workedSolution", "question", "choices", "correctChoice", "shortExplanation", "elaboration", "subject"],
+            required: ["workedSolution", "question", "choices", "correctChoice", "shortExplanation", "elaboration", "videoQuery", "subject"],
             properties: {
               workedSolution: { type: "string" },
+              videoQuery: { type: "string" },
               question: { type: "string" },
               choices: {
                 type: "array",
