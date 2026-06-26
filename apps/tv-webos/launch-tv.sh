@@ -68,7 +68,9 @@ TV_IP=""
 for host in $CANDIDATES; do
   echo "   • Found ${host}:${DEV_PORT} — verifying it's the TV (device \"$DEVICE\")…"
   ares-setup-device --modify "$DEVICE" --info "host=${host}" >/dev/null 2>&1 || true
-  if ares-device-info --device "$DEVICE" >/dev/null 2>&1; then
+  # Verify by actually connecting (lists installed apps). ares-device-info is
+  # deprecated and errors out, so don't use it.
+  if ares-install --device "$DEVICE" --list >/dev/null 2>&1; then
     TV_IP="$host"
     break
   fi
