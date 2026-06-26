@@ -5676,14 +5676,18 @@ ABOUT THE PLATFORM
 - It runs AI-generated, answer-verified multiple-choice quizzes for Grades 2-12, in English, Khmer, or bilingual, for International or Cambodia MoEYS curricula. Subjects: math, general science, biology, chemistry, physics, and English.
 - Ways to play:
   1) Live TV game: a host screen (LG TV) shows a multiplayer quiz; players join from their phones by scanning the TV's QR code or entering the room code on the phone controller, then answer in real time with a live leaderboard.
-  2) Solo quiz: a learner takes an AI quiz alone on their phone, with instant feedback and an explanation after every question.
+  2) Solo quiz: a learner takes an AI quiz alone on their phone, with instant feedback after every question - a detailed explanation plus a "Watch explanation on YouTube" video/link to learn more.
   3) Classroom assignments: a student signs in to the Student Portal, joins their teacher's class with a class code, and takes the quizzes the teacher assigned.
-- Student Portal: students create an account (username + password), join a class with the code from their teacher, and see their assigned quizzes with scores.
+- Student Portal (for students): the web page at ${CONTROLLER_URL}/student.html. Students create an account (name, username, password), join a class with the code from their teacher, and see their assigned quizzes with scores. No app install is needed - it works in any phone or computer browser.
+- Every quiz result shows the correct answer, a short and detailed explanation, and a YouTube explanation video (or a YouTube search link) so learners can study the topic further.
+- Need help inside the platform? There is a "Help & Support" chat button (this assistant) on the student and quiz pages.
 - For teachers/facilitators (in the Admin portal): generate printable A4 worksheets (homework), build a Question Bank (manually or AI-generated), create classrooms with a join code, assign quizzes, share quizzes by link/QR/Telegram, and monitor each student's scores. Admins also manage settings, users/roles, and reports (sessions, students, AI usage and cost, audit log).
 - Quizzes are designed so the correct answer is evenly placed across A-D and distractors are plausible, so guessing averages about 25%.
 
 COMMON HOW-TO ANSWERS
-- Take an assigned quiz: open the Student Portal, log in (or create an account), enter your class code, then tap a quiz to start.
+- Register / sign up as a student: go to the Student Portal at ${CONTROLLER_URL}/student.html, tap "Create account", and enter your name, a username, and a password. You can add your class code there too, or join a class later.
+- Take an assigned quiz: open the Student Portal (${CONTROLLER_URL}/student.html), log in (or create an account), enter your class code, then tap a quiz to start.
+- Join a class: in the Student Portal, type the class code your teacher gave you and tap Join.
 - Join a live TV game: scan the QR on the TV or open the controller link, enter the room code and your name.
 - Forgot password / account problems: ask your teacher or administrator (there is no self-service password reset yet).
 - Teacher - make a worksheet: Admin portal -> Worksheets -> choose subject/grade/etc. -> Generate -> Print.
