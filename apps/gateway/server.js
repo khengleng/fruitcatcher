@@ -1429,6 +1429,54 @@ function verifyAdminSession(token) {
   }
 }
 
+const STUDENT_SESSION_TTL_MS = Number(process.env.STUDENT_SESSION_TTL_MS || 30 * 24 * 60 * 60 * 1000);
+function studentSecret() {
+  return `${ADMIN_TOKEN || APP_VERSION}:student`;
+}
+
+function signStudentSession(user) {
+  const payload = Buffer.from(JSON.stringify({
+    sub: user.id,
+    username: user.username,
+    name: user.display_name,
+    role: "student",
+    exp: Date.now() + STUDENT_SESSION_TTL_MS
+  })).toString("base64url");
+  const signature = crypto.createHmac("sha256", studentSecret()).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+function verifyStudentSession(token) {
+  const [payload, signature] = String(token || "").split(".");
+  if (!payload || !signature) {
+    return null;
+  }
+  const expected = crypto.createHmac("sha256", studentSecret()).update(payload).digest("base64url");
+  if (signature.length !== expected.length) {
+    return null;
+  }
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    return null;
+  }
+  try {
+    const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return session.exp > Date.now() && session.role === "student" ? session : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function requireStudent(req, res, next) {
+  const token = req.get("authorization")?.replace(/^Bearer\s+/i, "") || req.get("x-student-token") || "";
+  const session = verifyStudentSession(token);
+  if (!session) {
+    res.status(401).json({ error: "Please sign in." });
+    return;
+  }
+  req.studentUser = session;
+  next();
+}
+
 function makeHttpError(statusCode, message) {
   const error = new Error(message);
   error.statusCode = statusCode;
@@ -1472,7 +1520,7 @@ function rateLimitAdmin(req, res, next) {
 }
 
 function rateLimitSolo(req, res, next) {
-  if (!req.path.startsWith("/solo")) {
+  if (!req.path.startsWith("/solo") && !req.path.startsWith("/student")) {
     next();
     return;
   }
@@ -1648,6 +1696,8 @@ async function initDatabase() {
       score INTEGER NOT NULL DEFAULT 0,
       config JSONB NOT NULL,
       share_id TEXT,
+      student_user_id TEXT,
+      classroom_id TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       completed_at TIMESTAMPTZ
@@ -1746,6 +1796,53 @@ async function initDatabase() {
     )
   `);
   await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_quiz_shares_owner ON quiz_shares(created_by_id, created_at DESC)");
+
+  // Student accounts (quiz takers log in to see assigned work).
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS student_users (
+      id TEXT PRIMARY KEY,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_login_at TIMESTAMPTZ
+    )
+  `);
+
+  // Teacher-owned classrooms, their roster, and assigned quizzes.
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS classrooms (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      join_code TEXT UNIQUE NOT NULL,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_by TEXT,
+      created_by_id TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS classroom_members (
+      id TEXT PRIMARY KEY,
+      classroom_id TEXT NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE,
+      student_user_id TEXT NOT NULL REFERENCES student_users(id) ON DELETE CASCADE,
+      joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (classroom_id, student_user_id)
+    )
+  `);
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS classroom_assignments (
+      id TEXT PRIMARY KEY,
+      classroom_id TEXT NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE,
+      share_id TEXT NOT NULL REFERENCES quiz_shares(id) ON DELETE CASCADE,
+      assigned_by TEXT,
+      assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (classroom_id, share_id)
+    )
+  `);
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_classrooms_owner ON classrooms(created_by_id, created_at DESC)");
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_classroom_members_student ON classroom_members(student_user_id)");
 
   // Audit log table
   await dbQueryRequired(`
@@ -1868,6 +1965,8 @@ async function runDatabaseMigrations() {
     "ALTER TABLE worksheets ADD COLUMN IF NOT EXISTS prompt_brief TEXT",
     "ALTER TABLE worksheets ADD COLUMN IF NOT EXISTS content_hash TEXT",
     "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS share_id TEXT",
+    "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS student_user_id TEXT",
+    "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS classroom_id TEXT",
     "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS source_user_id TEXT",
     "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS student_name TEXT",
     "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS curriculum TEXT",
@@ -2364,9 +2463,10 @@ async function persistSoloSessionCreated(session) {
     `INSERT INTO solo_sessions (
       id, student_id, student_name, source, source_user_id, status,
       curriculum, language, subject, grade_level, difficulty_mode,
-      question_source, questions_per_round, score, config, share_id, created_at, updated_at
+      question_source, questions_per_round, score, config, share_id,
+      student_user_id, classroom_id, created_at, updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, NOW(), NOW())
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, $17, $18, NOW(), NOW())
     ON CONFLICT (id) DO UPDATE
       SET status = EXCLUDED.status,
           score = EXCLUDED.score,
@@ -2387,7 +2487,9 @@ async function persistSoloSessionCreated(session) {
       session.config.questionsPerRound,
       session.score,
       JSON.stringify(session.config),
-      session.shareId || null
+      session.shareId || null,
+      session.studentUserId || null,
+      session.classroomId || null
     ]
   );
 }
@@ -2500,8 +2602,15 @@ app.post("/solo/sessions", async (req, res) => {
 
     const source = share ? "teacher" : normalizeSoloSource(req.body?.source);
     const sourceUserId = normalizeClientId(req.body?.sourceUserId || req.body?.source_user_id || "");
-    const studentName = sanitizeStudentName(req.body?.studentName || req.body?.student_name || req.body?.name || "Student");
-    const clientId = normalizeClientId(req.body?.clientId || req.body?.client_id || `${source}:${sourceUserId || createId()}`);
+    // A logged-in student account takes precedence for identity + tracking.
+    const studentSession = verifyStudentSession(req.body?.studentToken || "");
+    const classroomId = studentSession ? String(req.body?.classroomId || "").trim() || null : null;
+    const studentName = studentSession
+      ? sanitizeStudentName(studentSession.name || studentSession.username)
+      : sanitizeStudentName(req.body?.studentName || req.body?.student_name || req.body?.name || "Student");
+    const clientId = studentSession
+      ? `student:${studentSession.sub}`
+      : normalizeClientId(req.body?.clientId || req.body?.client_id || `${source}:${sourceUserId || createId()}`);
     const studentId = await upsertStudent(`solo:${clientId}`, studentName);
     const block = await getActiveStudentBlock(studentId);
     if (block) {
@@ -2526,7 +2635,9 @@ app.post("/solo/sessions", async (req, res) => {
       currentAnswer: null,
       lastActivityAt: Date.now(),
       usageSource: "solo",
-      shareId: share ? share.id : null
+      shareId: share ? share.id : null,
+      studentUserId: studentSession ? studentSession.sub : null,
+      classroomId
     };
 
     soloSessions.set(session.id, session);
@@ -3380,6 +3491,323 @@ app.post("/admin/shares/:id/telegram", requireStaff, async (req, res) => {
   } catch (error) {
     console.error("Send share via Telegram failed:", error);
     res.status(500).json({ error: "Could not send via Telegram" });
+  }
+});
+
+// ---- Classrooms (staff) ----
+
+async function generateClassroomJoinCode() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    let code = "";
+    for (let i = 0; i < 6; i += 1) code += alphabet[crypto.randomInt(alphabet.length)];
+    const exists = await dbQuery("SELECT 1 FROM classrooms WHERE join_code = $1", [code]);
+    if (!exists?.rows?.length) return code;
+  }
+  return crypto.randomBytes(4).toString("hex").toUpperCase();
+}
+
+function assignmentLink(share, classroomId) {
+  return `${buildShareLink(share)}&classroomId=${encodeURIComponent(classroomId)}`;
+}
+
+app.post("/admin/classrooms", requireStaff, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const name = normalizeAdminText(req.body?.name, 80, "");
+    if (!name) {
+      res.status(400).json({ error: "Classroom name is required." });
+      return;
+    }
+    const id = createId();
+    const joinCode = await generateClassroomJoinCode();
+    await dbQueryRequired(
+      `INSERT INTO classrooms (id, name, join_code, created_by, created_by_id, created_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())`,
+      [id, name, joinCode, req.adminUser?.username || "admin", req.adminUser?.sub || null]
+    );
+    await logAuditAction("classroom.create", "classrooms", id, { name }, req);
+    res.status(201).json({ ok: true, classroom: { id, name, joinCode, memberCount: 0, assignmentCount: 0 } });
+  } catch (error) {
+    console.error("Create classroom failed:", error);
+    res.status(500).json({ error: "Could not create classroom" });
+  }
+});
+
+app.get("/admin/classrooms", requireStaff, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const isAdmin = getUserRole(req) === "admin";
+    const where = isAdmin ? "c.is_active = TRUE" : "c.is_active = TRUE AND c.created_by_id = $1";
+    const params = isAdmin ? [] : [req.adminUser?.sub || ""];
+    const result = await dbQueryRequired(
+      `SELECT c.*,
+              (SELECT COUNT(*)::int FROM classroom_members m WHERE m.classroom_id = c.id) AS member_count,
+              (SELECT COUNT(*)::int FROM classroom_assignments a WHERE a.classroom_id = c.id) AS assignment_count
+       FROM classrooms c WHERE ${where} ORDER BY c.created_at DESC LIMIT 200`,
+      params
+    );
+    res.json({
+      classrooms: result.rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        joinCode: row.join_code,
+        memberCount: row.member_count,
+        assignmentCount: row.assignment_count,
+        createdBy: row.created_by,
+        createdAt: row.created_at
+      }))
+    });
+  } catch (error) {
+    console.error("List classrooms failed:", error);
+    res.status(500).json({ error: "Could not load classrooms" });
+  }
+});
+
+async function loadClassroomForStaff(req, res, id) {
+  const result = await dbQueryRequired("SELECT * FROM classrooms WHERE id = $1 AND is_active = TRUE", [String(id)]);
+  const row = result.rows[0];
+  if (!row) {
+    res.status(404).json({ error: "Classroom not found" });
+    return null;
+  }
+  if (getUserRole(req) !== "admin" && row.created_by_id && row.created_by_id !== req.adminUser?.sub) {
+    res.status(403).json({ error: "You can only manage your own classrooms." });
+    return null;
+  }
+  return row;
+}
+
+app.get("/admin/classrooms/:id", requireStaff, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const classroom = await loadClassroomForStaff(req, res, req.params.id);
+    if (!classroom) return;
+
+    const members = await dbQueryRequired(
+      `SELECT m.student_user_id, m.joined_at, u.username, u.display_name
+       FROM classroom_members m JOIN student_users u ON u.id = m.student_user_id
+       WHERE m.classroom_id = $1 ORDER BY u.display_name`,
+      [classroom.id]
+    );
+    const assignments = await dbQueryRequired(
+      `SELECT a.share_id, a.assigned_at, s.title, s.subject, s.grade_level, s.questions_per_round
+       FROM classroom_assignments a JOIN quiz_shares s ON s.id = a.share_id
+       WHERE a.classroom_id = $1 ORDER BY a.assigned_at DESC`,
+      [classroom.id]
+    );
+    const submissions = await dbQueryRequired(
+      `SELECT student_user_id, student_name, share_id, score, questions_per_round, status, completed_at
+       FROM solo_sessions
+       WHERE classroom_id = $1 AND student_user_id IS NOT NULL
+       ORDER BY COALESCE(completed_at, created_at) DESC LIMIT 1000`,
+      [classroom.id]
+    );
+
+    res.json({
+      classroom: { id: classroom.id, name: classroom.name, joinCode: classroom.join_code, createdAt: classroom.created_at },
+      studentPortalUrl: `${CONTROLLER_URL}/student.html`,
+      members: members.rows.map((m) => ({ studentUserId: m.student_user_id, username: m.username, displayName: m.display_name, joinedAt: m.joined_at })),
+      assignments: assignments.rows.map((a) => ({ shareId: a.share_id, title: a.title, subject: a.subject, gradeLevel: a.grade_level, questionsPerRound: a.questions_per_round, assignedAt: a.assigned_at })),
+      submissions: submissions.rows.map((x) => ({ studentUserId: x.student_user_id, studentName: x.student_name, shareId: x.share_id, score: x.score, total: x.questions_per_round, status: x.status, completedAt: x.completed_at }))
+    });
+  } catch (error) {
+    console.error("Get classroom failed:", error);
+    res.status(500).json({ error: "Could not load classroom" });
+  }
+});
+
+app.delete("/admin/classrooms/:id", requireStaff, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const classroom = await loadClassroomForStaff(req, res, req.params.id);
+    if (!classroom) return;
+    await dbQueryRequired("UPDATE classrooms SET is_active = FALSE WHERE id = $1", [classroom.id]);
+    await logAuditAction("classroom.delete", "classrooms", classroom.id, { name: classroom.name }, req);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Delete classroom failed:", error);
+    res.status(500).json({ error: "Could not delete classroom" });
+  }
+});
+
+app.post("/admin/classrooms/:id/assignments", requireStaff, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const classroom = await loadClassroomForStaff(req, res, req.params.id);
+    if (!classroom) return;
+    const shareId = String(req.body?.shareId || "").trim();
+    const share = await dbQueryRequired("SELECT id FROM quiz_shares WHERE id = $1 AND is_active = TRUE", [shareId]);
+    if (!share.rows[0]) {
+      res.status(404).json({ error: "Shared quiz not found." });
+      return;
+    }
+    await dbQueryRequired(
+      `INSERT INTO classroom_assignments (id, classroom_id, share_id, assigned_by, assigned_at)
+       VALUES ($1, $2, $3, $4, NOW()) ON CONFLICT (classroom_id, share_id) DO NOTHING`,
+      [createId(), classroom.id, shareId, req.adminUser?.username || "admin"]
+    );
+    await logAuditAction("classroom.assign", "classrooms", classroom.id, { shareId }, req);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Assign to classroom failed:", error);
+    res.status(500).json({ error: "Could not assign quiz" });
+  }
+});
+
+app.delete("/admin/classrooms/:id/assignments/:shareId", requireStaff, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const classroom = await loadClassroomForStaff(req, res, req.params.id);
+    if (!classroom) return;
+    await dbQueryRequired("DELETE FROM classroom_assignments WHERE classroom_id = $1 AND share_id = $2", [classroom.id, String(req.params.shareId)]);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Unassign failed:", error);
+    res.status(500).json({ error: "Could not remove assignment" });
+  }
+});
+
+// ---- Student accounts (quiz takers) ----
+
+function studentProfile(row, token) {
+  return { token, student: { id: row.id, username: row.username, displayName: row.display_name } };
+}
+
+async function enrollStudentByCode(studentUserId, joinCode) {
+  const code = String(joinCode || "").trim().toUpperCase();
+  if (!code) return null;
+  const result = await dbQuery("SELECT id, name FROM classrooms WHERE join_code = $1 AND is_active = TRUE", [code]);
+  const classroom = result?.rows?.[0];
+  if (!classroom) return null;
+  await dbQuery(
+    `INSERT INTO classroom_members (id, classroom_id, student_user_id, joined_at)
+     VALUES ($1, $2, $3, NOW()) ON CONFLICT (classroom_id, student_user_id) DO NOTHING`,
+    [createId(), classroom.id, studentUserId]
+  );
+  return classroom;
+}
+
+app.post("/student/register", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const username = String(req.body?.username || "").trim().toLowerCase();
+    const password = String(req.body?.password || "");
+    const displayName = sanitizeStudentName(req.body?.displayName || req.body?.name || username);
+    if (!/^[a-z0-9._-]{3,40}$/.test(username)) {
+      res.status(400).json({ error: "Username must be 3-40 characters (letters, numbers, . _ -)." });
+      return;
+    }
+    if (password.length < 6) {
+      res.status(400).json({ error: "Password must be at least 6 characters." });
+      return;
+    }
+    const existing = await dbQueryRequired("SELECT id FROM student_users WHERE username = $1", [username]);
+    if (existing.rows[0]) {
+      res.status(409).json({ error: "That username is taken." });
+      return;
+    }
+    const id = createId();
+    await dbQueryRequired(
+      `INSERT INTO student_users (id, username, password_hash, display_name, is_active, created_at)
+       VALUES ($1, $2, $3, $4, TRUE, NOW())`,
+      [id, username, hashPassword(password), displayName]
+    );
+    let joined = null;
+    if (req.body?.joinCode) joined = await enrollStudentByCode(id, req.body.joinCode);
+    const user = { id, username, display_name: displayName };
+    res.status(201).json({ ok: true, ...studentProfile(user, signStudentSession(user)), joinedClassroom: joined ? joined.name : null });
+  } catch (error) {
+    console.error("Student register failed:", error);
+    res.status(500).json({ error: "Could not create account" });
+  }
+});
+
+app.post("/student/login", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const username = String(req.body?.username || "").trim().toLowerCase();
+    const password = String(req.body?.password || "");
+    const result = await dbQueryRequired("SELECT * FROM student_users WHERE username = $1 AND is_active = TRUE", [username]);
+    const user = result.rows[0];
+    if (!user || !verifyPassword(password, user.password_hash)) {
+      res.status(401).json({ error: "Invalid username or password." });
+      return;
+    }
+    await dbQuery("UPDATE student_users SET last_login_at = NOW() WHERE id = $1", [user.id]);
+    res.json({ ok: true, ...studentProfile(user, signStudentSession(user)) });
+  } catch (error) {
+    console.error("Student login failed:", error);
+    res.status(500).json({ error: "Login failed" });
+  }
+});
+
+app.post("/student/join", requireStudent, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const classroom = await enrollStudentByCode(req.studentUser.sub, req.body?.joinCode);
+    if (!classroom) {
+      res.status(404).json({ error: "No classroom found for that code." });
+      return;
+    }
+    res.json({ ok: true, classroom: { id: classroom.id, name: classroom.name } });
+  } catch (error) {
+    console.error("Student join failed:", error);
+    res.status(500).json({ error: "Could not join classroom" });
+  }
+});
+
+app.get("/student/assignments", requireStudent, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const studentId = req.studentUser.sub;
+    const classroomsResult = await dbQueryRequired(
+      `SELECT c.id, c.name FROM classroom_members m JOIN classrooms c ON c.id = m.classroom_id
+       WHERE m.student_user_id = $1 AND c.is_active = TRUE ORDER BY c.name`,
+      [studentId]
+    );
+    const assignmentsResult = await dbQueryRequired(
+      `SELECT a.classroom_id, c.name AS classroom_name, s.*
+       FROM classroom_members m
+       JOIN classrooms c ON c.id = m.classroom_id AND c.is_active = TRUE
+       JOIN classroom_assignments a ON a.classroom_id = c.id
+       JOIN quiz_shares s ON s.id = a.share_id AND s.is_active = TRUE
+       WHERE m.student_user_id = $1
+       ORDER BY a.assigned_at DESC`,
+      [studentId]
+    );
+    const doneResult = await dbQueryRequired(
+      `SELECT DISTINCT ON (share_id, classroom_id) share_id, classroom_id, score, questions_per_round, status, completed_at
+       FROM solo_sessions
+       WHERE student_user_id = $1 AND status = 'FINISHED'
+       ORDER BY share_id, classroom_id, completed_at DESC`,
+      [studentId]
+    );
+    const doneMap = new Map();
+    for (const d of doneResult.rows) doneMap.set(`${d.share_id}|${d.classroom_id}`, d);
+
+    res.json({
+      classrooms: classroomsResult.rows.map((c) => ({ id: c.id, name: c.name })),
+      assignments: assignmentsResult.rows.map((row) => {
+        const done = doneMap.get(`${row.id}|${row.classroom_id}`);
+        return {
+          shareId: row.id,
+          classroomId: row.classroom_id,
+          classroomName: row.classroom_name,
+          title: row.title,
+          subject: row.subject,
+          gradeLevel: row.grade_level,
+          questionsPerRound: row.questions_per_round,
+          link: assignmentLink(row, row.classroom_id),
+          completed: Boolean(done),
+          score: done ? done.score : null,
+          total: done ? done.questions_per_round : row.questions_per_round
+        };
+      })
+    });
+  } catch (error) {
+    console.error("Student assignments failed:", error);
+    res.status(500).json({ error: "Could not load assignments" });
   }
 });
 

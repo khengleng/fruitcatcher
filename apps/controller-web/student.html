@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Student Portal — LyHuor Learning</title>
+  <style>
+    :root {
+      --bg: #07101c; --panel: #112033; --panel2: #1b3151; --ink: #f6f8fb;
+      --muted: #9fb2c9; --accent: #ffd34f; --accent2: #69e6a6; --line: rgba(255,255,255,0.1);
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      margin: 0; min-height: 100vh; color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at 20% 0%, rgba(246,196,95,0.18), transparent 28%), linear-gradient(160deg, #07101c, #0f2238 48%, #07111c);
+    }
+    main { width: min(100%, 560px); margin: 0 auto; padding: 22px 16px 40px; }
+    h1 { font-size: 28px; margin: 0 0 4px; }
+    .muted { color: var(--muted); line-height: 1.5; }
+    .panel { background: linear-gradient(180deg, rgba(17,31,52,0.98), rgba(10,18,30,0.96)); border: 1px solid var(--line); border-radius: 20px; padding: 18px; margin-top: 16px; }
+    label { display: block; font-size: 13px; font-weight: 700; color: var(--muted); margin: 12px 0 6px; }
+    input { width: 100%; border: 0; outline: none; border-radius: 14px; padding: 14px; background: var(--panel2); color: var(--ink); font-size: 16px; }
+    button { border: 0; border-radius: 14px; padding: 14px 18px; font-size: 16px; font-weight: 800; color: #08111d; background: var(--accent); cursor: pointer; }
+    button.secondary { background: #304c72; color: #fff; }
+    button:disabled { opacity: 0.5; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 6px; }
+    .tab { flex: 1; background: var(--panel2); color: var(--ink); }
+    .tab.active { background: var(--accent); color: #08111d; }
+    .status { margin-top: 10px; font-size: 14px; min-height: 18px; }
+    .assignment { border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin-top: 12px; background: rgba(255,255,255,0.04); }
+    .assignment h3 { margin: 0 0 4px; font-size: 17px; }
+    .assignment .meta { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+    .pill { display: inline-block; font-size: 12px; font-weight: 800; padding: 3px 10px; border-radius: 999px; }
+    .pill.done { background: rgba(105,230,166,0.18); color: var(--accent2); }
+    .pill.todo { background: rgba(255,211,79,0.16); color: var(--accent); }
+    .hidden { display: none; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="topbar">
+      <div>
+        <h1>📚 Student Portal</h1>
+        <p class="muted" id="subtitle">Sign in to see the quizzes your teacher assigned.</p>
+      </div>
+      <button id="logoutBtn" class="secondary hidden" style="padding:10px 14px;">Log out</button>
+    </div>
+
+    <section id="authPanel" class="panel">
+      <div class="tabs">
+        <button class="tab active" id="tabLogin">Log in</button>
+        <button class="tab" id="tabRegister">Create account</button>
+      </div>
+
+      <div id="loginForm">
+        <label>Username<input id="loginUser" autocomplete="username" autocapitalize="none"></label>
+        <label>Password<input id="loginPass" type="password" autocomplete="current-password"></label>
+        <div class="row" style="margin-top:14px;"><button id="loginBtn">Log in</button></div>
+      </div>
+
+      <div id="registerForm" class="hidden">
+        <label>Your name<input id="regName" placeholder="e.g. Dara" autocomplete="name"></label>
+        <label>Username<input id="regUser" autocomplete="username" autocapitalize="none"></label>
+        <label>Password (min 6)<input id="regPass" type="password" autocomplete="new-password"></label>
+        <label>Class code (optional)<input id="regCode" placeholder="e.g. ABC123" autocapitalize="characters"></label>
+        <div class="row" style="margin-top:14px;"><button id="registerBtn">Create account</button></div>
+      </div>
+      <div class="status" id="authStatus"></div>
+    </section>
+
+    <section id="appPanel" class="panel hidden">
+      <div class="row" style="justify-content:space-between;">
+        <strong id="welcome"></strong>
+      </div>
+      <label>Join a class with a code</label>
+      <div class="row">
+        <input id="joinCode" placeholder="Class code" autocapitalize="characters" style="flex:1;">
+        <button id="joinBtn" class="secondary">Join</button>
+      </div>
+      <div class="status" id="appStatus"></div>
+
+      <h2 style="font-size:18px; margin:18px 0 0;">Your quizzes</h2>
+      <div id="assignments"></div>
+    </section>
+  </main>
+
+  <script src="./config.js"></script>
+  <script>
+    const config = window.FRUIT_CATCHER_CONFIG || {};
+    const gatewayUrl = config.gatewayHttpUrl || "http://localhost:3000";
+    const TOKEN_KEY = "fruitcatcher_student_token";
+    const NAME_KEY = "fruitcatcher_student_name";
+
+    const $ = (id) => document.getElementById(id);
+    function token() { try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; } }
+    function setStatus(el, msg, color) { el.textContent = msg || ""; el.style.color = color || "var(--muted)"; }
+
+    async function apiPost(path, body, auth) {
+      const headers = { "Content-Type": "application/json" };
+      if (auth) headers["Authorization"] = "Bearer " + token();
+      const res = await fetch(gatewayUrl + path, { method: "POST", headers, body: JSON.stringify(body || {}) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Request failed");
+      return data;
+    }
+    async function apiGet(path) {
+      const res = await fetch(gatewayUrl + path, { headers: { "Authorization": "Bearer " + token() } });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Request failed");
+      return data;
+    }
+
+    function showAuthed(name) {
+      $("authPanel").classList.add("hidden");
+      $("appPanel").classList.remove("hidden");
+      $("logoutBtn").classList.remove("hidden");
+      $("subtitle").textContent = "Tap a quiz to start. Your scores go to your teacher.";
+      $("welcome").textContent = "Hi, " + (name || "student") + " 👋";
+      loadAssignments();
+    }
+    function showSignedOut() {
+      $("appPanel").classList.add("hidden");
+      $("authPanel").classList.remove("hidden");
+      $("logoutBtn").classList.add("hidden");
+    }
+
+    $("tabLogin").addEventListener("click", () => {
+      $("tabLogin").classList.add("active"); $("tabRegister").classList.remove("active");
+      $("loginForm").classList.remove("hidden"); $("registerForm").classList.add("hidden");
+    });
+    $("tabRegister").addEventListener("click", () => {
+      $("tabRegister").classList.add("active"); $("tabLogin").classList.remove("active");
+      $("registerForm").classList.remove("hidden"); $("loginForm").classList.add("hidden");
+    });
+
+    $("loginBtn").addEventListener("click", async () => {
+      try {
+        setStatus($("authStatus"), "Signing in…", "var(--accent)");
+        const data = await apiPost("/student/login", { username: $("loginUser").value.trim(), password: $("loginPass").value });
+        localStorage.setItem(TOKEN_KEY, data.token);
+        localStorage.setItem(NAME_KEY, data.student.displayName);
+        setStatus($("authStatus"), "");
+        showAuthed(data.student.displayName);
+      } catch (e) { setStatus($("authStatus"), e.message, "#ff9b7d"); }
+    });
+
+    $("registerBtn").addEventListener("click", async () => {
+      try {
+        setStatus($("authStatus"), "Creating account…", "var(--accent)");
+        const data = await apiPost("/student/register", {
+          username: $("regUser").value.trim(), password: $("regPass").value,
+          displayName: $("regName").value.trim(), joinCode: $("regCode").value.trim()
+        });
+        localStorage.setItem(TOKEN_KEY, data.token);
+        localStorage.setItem(NAME_KEY, data.student.displayName);
+        setStatus($("authStatus"), "");
+        showAuthed(data.student.displayName);
+      } catch (e) { setStatus($("authStatus"), e.message, "#ff9b7d"); }
+    });
+
+    $("joinBtn").addEventListener("click", async () => {
+      const code = $("joinCode").value.trim();
+      if (!code) return;
+      try {
+        setStatus($("appStatus"), "Joining…", "var(--accent)");
+        const data = await apiPost("/student/join", { joinCode: code }, true);
+        $("joinCode").value = "";
+        setStatus($("appStatus"), "Joined " + data.classroom.name + " ✓", "var(--accent2)");
+        loadAssignments();
+      } catch (e) { setStatus($("appStatus"), e.message, "#ff9b7d"); }
+    });
+
+    $("logoutBtn").addEventListener("click", () => {
+      localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(NAME_KEY);
+      showSignedOut();
+    });
+
+    async function loadAssignments() {
+      const host = $("assignments");
+      host.innerHTML = "<p class='muted'>Loading…</p>";
+      try {
+        const data = await apiGet("/student/assignments");
+        if (!data.assignments.length) {
+          host.innerHTML = "<p class='muted'>No quizzes yet. Join a class with the code from your teacher.</p>";
+          return;
+        }
+        host.innerHTML = "";
+        data.assignments.forEach((a) => {
+          const card = document.createElement("div");
+          card.className = "assignment";
+          const status = a.completed
+            ? `<span class="pill done">Done · ${a.score}/${a.total}</span>`
+            : `<span class="pill todo">Not done</span>`;
+          card.innerHTML = `
+            <h3>${escapeHtml(a.title)}</h3>
+            <div class="meta">${escapeHtml(a.classroomName)} · ${escapeHtml(labelSubject(a.subject))} · Grade ${a.gradeLevel} · ${a.questionsPerRound} questions</div>
+            <div class="row" style="justify-content:space-between;">
+              ${status}
+              <button data-link="${encodeURIComponent(a.link)}">${a.completed ? "Retake" : "Start"}</button>
+            </div>`;
+          card.querySelector("button").addEventListener("click", (ev) => {
+            window.location.href = decodeURIComponent(ev.currentTarget.getAttribute("data-link"));
+          });
+          host.appendChild(card);
+        });
+      } catch (e) {
+        if (/sign in/i.test(e.message)) { localStorage.removeItem(TOKEN_KEY); showSignedOut(); return; }
+        host.innerHTML = `<p class='muted' style='color:#ff9b7d;'>${escapeHtml(e.message)}</p>`;
+      }
+    }
+
+    function escapeHtml(v) { return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+    function labelSubject(s) { return String(s || "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()); }
+
+    // Boot
+    if (token()) {
+      showAuthed(localStorage.getItem(NAME_KEY) || "student");
+    } else {
+      showSignedOut();
+    }
+  </script>
+</body>
+</html>

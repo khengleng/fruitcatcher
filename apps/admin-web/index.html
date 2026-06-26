@@ -543,6 +543,7 @@
         <button class="tab" data-tab="aiUsage" data-role="admin">📊 AI Usage</button>
         <button class="tab" data-tab="worksheets" data-role="staff">📄 Worksheets</button>
         <button class="tab" data-tab="shares" data-role="staff">🔗 Shared Quizzes</button>
+        <button class="tab" data-tab="classrooms" data-role="staff">🏫 Classrooms</button>
         <button class="tab" data-tab="users" data-role="admin">Users</button>
       </nav>
 
@@ -1310,6 +1311,30 @@
         </div>
 
         <div id="shareDetail" class="detail" hidden style="margin-top:18px;"></div>
+      </section>
+
+      <section id="classroomsPanel" class="panel" hidden>
+        <h2>🏫 Classrooms</h2>
+        <p class="muted">Create a class, share its join code, assign quizzes, and monitor each student's scores. Students sign in at the Student Portal and join with the code.</p>
+
+        <div class="row" style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+          <label style="flex:1; min-width:220px;">Classroom name
+            <input id="clName" type="text" maxlength="80" placeholder="e.g. Grade 6 Math — Morning">
+          </label>
+          <button id="clCreateButton">Create Classroom</button>
+          <span id="clStatus" class="muted" style="align-self:center;"></span>
+        </div>
+
+        <div class="table-wrap" style="margin-top:16px;">
+          <table>
+            <thead>
+              <tr><th>Classroom</th><th>Join code</th><th>Students</th><th>Quizzes</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="classroomsBody"></tbody>
+          </table>
+        </div>
+
+        <div id="classroomDetail" class="detail" hidden style="margin-top:18px;"></div>
       </section>
 
       <section id="usersPanel" class="panel" hidden>
@@ -2563,6 +2588,7 @@
       document.getElementById("aiUsagePanel").hidden = tabName !== "aiUsage";
       document.getElementById("worksheetsPanel").hidden = tabName !== "worksheets";
       document.getElementById("sharesPanel").hidden = tabName !== "shares";
+      document.getElementById("classroomsPanel").hidden = tabName !== "classrooms";
       document.getElementById("usersPanel").hidden = tabName !== "users";
 
       if (tabName === "sessions" || tabName === "students") {
@@ -2587,6 +2613,8 @@
         loadAiUsage();
       } else if (tabName === "shares") {
         loadShares();
+      } else if (tabName === "classrooms") {
+        loadClassrooms();
       }
     }
 
@@ -3445,9 +3473,121 @@
       }
     }
 
+    // ===== Classrooms =====
+    async function createClassroom() {
+      try {
+        const name = wsEl("clName").value.trim();
+        if (!name) { setStatus(wsEl("clStatus"), "Enter a classroom name.", "#a33d3d"); return; }
+        setStatus(wsEl("clStatus"), "Creating…", "#85321e");
+        const data = await api("/admin/classrooms", { method: "POST", body: JSON.stringify({ name }) });
+        wsEl("clName").value = "";
+        setStatus(wsEl("clStatus"), "Classroom created.", "#1f7a4d");
+        await loadClassrooms();
+        openClassroomDetail(data.classroom.id);
+      } catch (e) { setStatus(wsEl("clStatus"), e.message, "#a33d3d"); }
+    }
+
+    async function loadClassrooms() {
+      try {
+        const data = await api("/admin/classrooms");
+        const tbody = wsEl("classroomsBody");
+        tbody.innerHTML = "";
+        (data.classrooms || []).forEach((c) => {
+          const row = document.createElement("tr");
+          appendCell(row, c.name);
+          appendCell(row, c.joinCode);
+          appendCell(row, c.memberCount);
+          appendCell(row, c.assignmentCount);
+          const actions = document.createElement("td");
+          const open = document.createElement("button");
+          open.className = "secondary small";
+          open.textContent = "Open";
+          open.addEventListener("click", () => openClassroomDetail(c.id));
+          const del = document.createElement("button");
+          del.className = "danger small";
+          del.textContent = "Delete";
+          del.addEventListener("click", () => { if (confirm(`Delete classroom "${c.name}"?`)) deleteClassroom(c.id); });
+          actions.appendChild(open);
+          actions.appendChild(del);
+          row.appendChild(actions);
+          tbody.appendChild(row);
+        });
+      } catch (e) { setStatus(wsEl("clStatus"), e.message, "#a33d3d"); }
+    }
+
+    async function deleteClassroom(id) {
+      try {
+        await api(`/admin/classrooms/${id}`, { method: "DELETE" });
+        wsEl("classroomDetail").hidden = true;
+        loadClassrooms();
+      } catch (e) { setStatus(wsEl("clStatus"), e.message, "#a33d3d"); }
+    }
+
+    async function openClassroomDetail(id) {
+      const host = wsEl("classroomDetail");
+      host.hidden = false;
+      host.innerHTML = "Loading…";
+      try {
+        const [data, sharesData] = await Promise.all([api(`/admin/classrooms/${id}`), api("/admin/shares")]);
+        const c = data.classroom;
+        const best = new Map();
+        (data.submissions || []).forEach((s) => {
+          if (s.status !== "FINISHED") return;
+          const k = `${s.studentUserId}|${s.shareId}`;
+          const prev = best.get(k);
+          if (!prev || s.score > prev.score) best.set(k, { score: s.score, total: s.total });
+        });
+        const assignOptions = (sharesData.shares || []).map((s) => `<option value="${s.id}">${escapeForHtml(s.title)}</option>`).join("");
+        const assignmentCols = data.assignments.map((a) => `<th title="${escapeForHtml(a.title)}">${escapeForHtml(a.title.slice(0, 18))}</th>`).join("");
+        const memberRows = data.members.map((m) => {
+          const cells = data.assignments.map((a) => {
+            const b = best.get(`${m.studentUserId}|${a.shareId}`);
+            return `<td>${b ? `${b.score}/${b.total}` : "—"}</td>`;
+          }).join("");
+          return `<tr><td>${escapeForHtml(m.displayName)} <span class="muted" style="font-size:11px;">@${escapeForHtml(m.username)}</span></td>${cells}</tr>`;
+        }).join("");
+        const assignmentList = data.assignments.map((a) => `<li style="margin:4px 0;">${escapeForHtml(a.title)} <button class="secondary small" data-unassign="${a.shareId}">Remove</button></li>`).join("");
+        host.innerHTML = `
+          <h3>${escapeForHtml(c.name)}</h3>
+          <p class="muted">Join code: <strong style="font-size:18px;letter-spacing:2px;color:#1f7a4d;">${escapeForHtml(c.joinCode)}</strong></p>
+          <p class="muted">Students sign in at <a href="${escapeForHtml(data.studentPortalUrl)}" target="_blank">${escapeForHtml(data.studentPortalUrl)}</a> and join with the code above.</p>
+          <div class="row" style="margin-top:10px; display:flex; gap:8px; align-items:flex-end;">
+            <label style="flex:1;">Assign a shared quiz
+              <select id="clAssignSelect">${assignOptions || "<option value=''>No shares yet — create one under Shared Quizzes</option>"}</select>
+            </label>
+            <button id="clAssignButton" class="secondary small">Assign</button>
+          </div>
+          <ul style="margin-top:10px; padding-left:18px;">${assignmentList || "<li class='muted'>No quizzes assigned yet.</li>"}</ul>
+          <h4 style="margin-top:18px;">Students &amp; scores (${data.members.length})</h4>
+          <div class="table-wrap">
+            <table><thead><tr><th>Student</th>${assignmentCols}</tr></thead>
+            <tbody>${memberRows || `<tr><td colspan="${data.assignments.length + 1}" class="muted">No students have joined yet. Share the join code.</td></tr>`}</tbody></table>
+          </div>
+          <div class="actions" style="margin-top:12px;">
+            <button id="clRefresh" class="secondary small">↻ Refresh</button>
+            <button id="clClose" class="secondary small">Close</button>
+          </div>`;
+        wsEl("clAssignButton").addEventListener("click", async () => {
+          const shareId = wsEl("clAssignSelect").value;
+          if (!shareId) return;
+          try { await api(`/admin/classrooms/${id}/assignments`, { method: "POST", body: JSON.stringify({ shareId }) }); openClassroomDetail(id); loadClassrooms(); }
+          catch (e) { alert(e.message); }
+        });
+        host.querySelectorAll("[data-unassign]").forEach((btn) => btn.addEventListener("click", async () => {
+          try { await api(`/admin/classrooms/${id}/assignments/${btn.getAttribute("data-unassign")}`, { method: "DELETE" }); openClassroomDetail(id); loadClassrooms(); }
+          catch (e) { alert(e.message); }
+        }));
+        wsEl("clRefresh").addEventListener("click", () => openClassroomDetail(id));
+        wsEl("clClose").addEventListener("click", () => { host.hidden = true; });
+      } catch (e) {
+        host.innerHTML = `<span style="color:#a33d3d;">${escapeForHtml(e.message)}</span>`;
+      }
+    }
+
     initShareGrades();
     wsEl("shSubject").addEventListener("change", () => populateGradeSelect(wsEl("shGrade"), wsEl("shSubject").value));
     wsEl("shCreateButton").addEventListener("click", createShare);
+    wsEl("clCreateButton").addEventListener("click", createClassroom);
     wsEl("usageLoadButton").addEventListener("click", loadAiUsage);
     wsEl("usageExportButton").addEventListener("click", exportUsageCSV);
     wsEl("wsGenerateButton").addEventListener("click", generateWorksheet);

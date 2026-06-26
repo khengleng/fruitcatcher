@@ -971,6 +971,8 @@
             studentName: normalizedPlayerName || "Student",
             clientId: savedSession.clientId,
             shareId: params.get("shareId") || "",
+            studentToken: (function () { try { return localStorage.getItem("fruitcatcher_student_token") || ""; } catch (e) { return ""; } })(),
+            classroomId: params.get("classroomId") || "",
             source: params.get("source") || "web",
             sourceUserId: params.get("sourceUserId") || params.get("uid") || "",
             curriculum: soloCurriculumEl.value,
