@@ -4327,6 +4327,7 @@ function buildRoomState(roomCode, viewerWs = null) {
     shortExplanation: room.revealAnswer ? room.currentQuestion?.shortExplanation || "" : "",
     elaboration: room.revealAnswer ? room.currentQuestion?.elaboration || "" : "",
     videoUrl: room.revealAnswer ? (room.currentQuestion?.resolvedVideo?.url || buildVideoUrl(room.currentQuestion, getSessionConfig(room))) : null,
+    videoEmbedUrl: room.revealAnswer ? (room.currentQuestion?.resolvedVideo?.embedUrl || null) : null,
     deadlineAt: room.deadlineAt,
     answerCount: room.answerCount || 0,
     leaderboard: getLeaderboard(room),

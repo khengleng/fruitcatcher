@@ -190,6 +190,34 @@
       color: #ffd34f;
     }
 
+    .video-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .video-overlay[hidden] { display: none; }
+    .video-overlay-frame {
+      width: 88vw;
+      height: 84vh;
+    }
+    .video-overlay-frame iframe {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      border-radius: 14px;
+    }
+    .video-overlay-hint {
+      margin-top: 14px;
+      font-size: 24px;
+      color: #d8e1ed;
+    }
+    .video-overlay-hint b { color: #ffd34f; }
+
     .side-panel {
       padding: 28px;
       display: flex;
@@ -357,6 +385,11 @@
     </div>
   </div>
 
+  <div id="videoOverlay" class="video-overlay" hidden>
+    <div class="video-overlay-frame"><iframe id="videoFrame" allow="autoplay; encrypted-media" allowfullscreen frameborder="0"></iframe></div>
+    <div class="video-overlay-hint">Press <b>BACK</b> to return to the quiz</div>
+  </div>
+
   <script src="./qrcode.js"></script>
   <script src="./config.js"></script>
   <script>
@@ -391,6 +424,8 @@
     let configSource = "local";
     let selectedChoice = "A";
     let timerInterval = null;
+    let currentVideoEmbed = null;
+    let videoOpen = false;
 
     function getCurriculumLabel(value) {
       return value === "cambodia_moeys" ? "Cambodia MoEYS" : "International";
@@ -766,13 +801,18 @@
       } else if (state.question) {
         ui.questionPrompt.innerHTML = formatMathHTML(state.question.prompt);
         if (state.status === "REVIEWING") {
+          currentVideoEmbed = state.videoEmbedUrl || null;
           var revealHtml = formatMathHTML((state.shortExplanation || "") + " " + (state.elaboration || ""));
           if (state.videoUrl) {
             var vqr = createQrCodeDataUrl(state.videoUrl);
-            revealHtml += '<div class="video-hint"><img class="video-qr" src="' + vqr + '" alt="QR"><span>📺 Scan to watch the explanation on YouTube</span></div>';
+            var vlabel = state.videoEmbedUrl
+              ? '📺 Scan to watch on your phone — or press <b style="color:#69e6a6;">▶ PLAY</b> / <b style="color:#69e6a6;">YELLOW</b> to play on this TV'
+              : '📺 Scan to watch the explanation on YouTube';
+            revealHtml += '<div class="video-hint"><img class="video-qr" src="' + vqr + '" alt="QR"><span>' + vlabel + '</span></div>';
           }
           ui.explanation.innerHTML = revealHtml;
         } else {
+          currentVideoEmbed = null;
           ui.explanation.innerHTML = copy.chooseAnswer;
         }
         renderAnswers();
@@ -882,8 +922,46 @@
       renderState();
     }
 
+    function openVideo() {
+      if (!currentVideoEmbed) return;
+      const sep = currentVideoEmbed.indexOf("?") >= 0 ? "&" : "?";
+      document.getElementById("videoFrame").src = currentVideoEmbed + sep + "autoplay=1&rel=0&modestbranding=1&playsinline=1";
+      document.getElementById("videoOverlay").hidden = false;
+      videoOpen = true;
+    }
+
+    function closeVideo() {
+      document.getElementById("videoFrame").src = "about:blank";
+      document.getElementById("videoOverlay").hidden = true;
+      videoOpen = false;
+    }
+
+    function isPlayKey(event) {
+      return event.keyCode === 415 || event.keyCode === 405
+        || event.key === "MediaPlay" || event.key === "Play" || event.key === "MediaPlayPause"
+        || event.key === "ColorF2Yellow" || event.key === "y" || event.key === "Y";
+    }
+
+    function isBackKey(event) {
+      return event.keyCode === 461 || event.keyCode === 8 || event.keyCode === 27
+        || event.key === "Back" || event.key === "GoBack" || event.key === "BrowserBack"
+        || event.key === "XF86Back" || event.key === "Escape" || event.key === "Backspace";
+    }
+
     document.addEventListener("keydown", (event) => {
       event.preventDefault();
+
+      // While the in-app player is open, swallow keys; Back or Play closes it.
+      if (videoOpen) {
+        if (isBackKey(event) || isPlayKey(event)) closeVideo();
+        return;
+      }
+
+      // During review, open the explanation video on the TV (Play / Yellow).
+      if (latestState && latestState.status === "REVIEWING" && currentVideoEmbed && isPlayKey(event)) {
+        openVideo();
+        return;
+      }
 
       if (event.key === "Enter" || event.key === " ") {
         if (latestState && latestState.status === "ANSWERING") {
