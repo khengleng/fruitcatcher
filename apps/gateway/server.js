@@ -2518,15 +2518,48 @@ function videoQueryFor(question, config) {
   return query;
 }
 
-async function youtubeSearchVideoId(query) {
-  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=1`
-    + `&safeSearch=strict&videoEmbeddable=true&q=${encodeURIComponent(query)}&key=${YOUTUBE_API_KEY}`;
+const VIDEO_STOPWORDS = new Set(["the", "a", "an", "of", "to", "for", "and", "how", "what", "is", "in", "on", "with", "step", "by", "explained", "tutorial", "lesson", "video", "grade", "using", "your"]);
+
+// Rank candidate videos by how well the title/description match the query terms,
+// keeping a slight preference for YouTube's own relevance order on ties. This
+// lifts genuinely on-topic teaching videos above a loosely-related top hit.
+function pickBestVideo(items, query) {
+  if (!Array.isArray(items) || !items.length) {
+    return null;
+  }
+  const terms = String(query || "")
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w.length > 3 && !VIDEO_STOPWORDS.has(w));
+  let best = null;
+  let bestScore = -Infinity;
+  items.forEach((item, index) => {
+    const title = String(item?.snippet?.title || "").toLowerCase();
+    const desc = String(item?.snippet?.description || "").toLowerCase();
+    let score = -index * 0.5; // earlier (more relevant) results start slightly ahead
+    terms.forEach((t) => {
+      if (title.includes(t)) score += 2;
+      else if (desc.includes(t)) score += 1;
+    });
+    if (score > bestScore) {
+      bestScore = score;
+      best = item;
+    }
+  });
+  return best?.id?.videoId || items[0]?.id?.videoId || null;
+}
+
+async function youtubeSearchVideoId(query, language) {
+  const relevanceLanguage = language === "khmer" ? "km" : "en";
+  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=6`
+    + `&safeSearch=strict&videoEmbeddable=true&relevanceLanguage=${relevanceLanguage}`
+    + `&q=${encodeURIComponent(query)}&key=${YOUTUBE_API_KEY}`;
   const response = await fetchWithTimeout(url, { method: "GET" }, OPENAI_TIMEOUT_MS);
   if (!response.ok) {
     throw new Error(`YouTube search failed: ${response.status}`);
   }
   const data = await response.json();
-  return data?.items?.[0]?.id?.videoId || null;
+  return pickBestVideo(data?.items, query);
 }
 
 // Returns { url, embedUrl }. embedUrl is set only when a real embeddable video
@@ -2537,7 +2570,8 @@ async function resolveVideo(question, config) {
   if (!YOUTUBE_API_KEY || !videoEmbedEnabled || !query) {
     return fallback;
   }
-  const key = normalizePrompt(query);
+  const language = (config && config.language) || "english";
+  const key = `${normalizePrompt(query)}|${language === "khmer" ? "km" : "en"}`;
   if (videoCache.has(key)) {
     return videoCache.get(key);
   }
@@ -2547,7 +2581,7 @@ async function resolveVideo(question, config) {
     return cached;
   }
   try {
-    const videoId = await youtubeSearchVideoId(query);
+    const videoId = await youtubeSearchVideoId(query, language);
     if (!videoId) {
       return fallback;
     }
@@ -5552,7 +5586,7 @@ Requirements:
 - Match the reading level and background knowledge of Grade ${config.gradeLevel}
 - A short explanation under 30 words
 - A more detailed elaboration under 90 words
-- In "videoQuery", a 4-8 word YouTube search phrase a student could use to find a clear explanation video for this concept (in English, e.g. "long division grade 4 method" or "photosynthesis explained for kids")
+- In "videoQuery", a precise English YouTube search query (6-12 words) for a tutorial that teaches the exact method or concept needed to SOLVE this question at this grade level. Phrase it the way a learner searches for a lesson and include the grade/level when helpful. Focus on the skill used in the solution, not just the broad topic. Examples: "how to find the area of a rectangle grade 4", "balancing chemical equations step by step grade 10", "subtracting fractions with different denominators explained".
 - Keep the question answerable by Grade ${config.gradeLevel} learners
 - ${getCurriculumInstruction(config.curriculum)}
 - ${getLanguageInstruction(config.language)}
