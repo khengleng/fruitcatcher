@@ -168,6 +168,28 @@
       overflow-wrap: break-word;
     }
 
+    .video-hint {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+    }
+    .video-hint .video-qr {
+      width: 110px;
+      height: 110px;
+      border-radius: 12px;
+      background: #fff;
+      padding: 6px;
+      flex: 0 0 auto;
+    }
+    .video-hint span {
+      font-size: 22px;
+      font-weight: 800;
+      color: #ffd34f;
+    }
+
     .side-panel {
       padding: 28px;
       display: flex;
@@ -393,6 +415,8 @@
       if (value === "physics") return "Physics";
       if (value === "math") return "Math";
       if (value === "english") return "English";
+      // Math-track courses (algebra_1, geometry, precalculus, ...) format cleanly.
+      if (typeof value === "string" && value) return value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
       return value;
     }
 
@@ -741,9 +765,16 @@
         ui.answers.innerHTML = "";
       } else if (state.question) {
         ui.questionPrompt.innerHTML = formatMathHTML(state.question.prompt);
-        ui.explanation.innerHTML = state.status === "REVIEWING"
-          ? formatMathHTML(`${state.shortExplanation} ${state.elaboration}`)
-          : copy.chooseAnswer;
+        if (state.status === "REVIEWING") {
+          var revealHtml = formatMathHTML((state.shortExplanation || "") + " " + (state.elaboration || ""));
+          if (state.videoUrl) {
+            var vqr = createQrCodeDataUrl(state.videoUrl);
+            revealHtml += '<div class="video-hint"><img class="video-qr" src="' + vqr + '" alt="QR"><span>📺 Scan to watch the explanation on YouTube</span></div>';
+          }
+          ui.explanation.innerHTML = revealHtml;
+        } else {
+          ui.explanation.innerHTML = copy.chooseAnswer;
+        }
         renderAnswers();
       } else if (state.status === "FINISHED") {
         ui.questionPrompt.innerText = leader

@@ -4326,7 +4326,7 @@ function buildRoomState(roomCode, viewerWs = null) {
     correctChoice: room.revealAnswer ? room.currentQuestion?.correctChoice || null : null,
     shortExplanation: room.revealAnswer ? room.currentQuestion?.shortExplanation || "" : "",
     elaboration: room.revealAnswer ? room.currentQuestion?.elaboration || "" : "",
-    videoUrl: room.revealAnswer ? buildVideoUrl(room.currentQuestion, getSessionConfig(room)) : null,
+    videoUrl: room.revealAnswer ? (room.currentQuestion?.resolvedVideo?.url || buildVideoUrl(room.currentQuestion, getSessionConfig(room))) : null,
     deadlineAt: room.deadlineAt,
     answerCount: room.answerCount || 0,
     leaderboard: getLeaderboard(room),
@@ -6114,6 +6114,12 @@ async function loadNextQuestion(roomCode) {
   broadcastRoomState(roomCode);
 
   room.currentQuestion = await generateQuestion(room);
+  // Resolve the explanation video now so it's ready to show (as a QR) at reveal.
+  try {
+    room.currentQuestion.resolvedVideo = await resolveVideo(room.currentQuestion, getSessionConfig(room));
+  } catch (error) {
+    room.currentQuestion.resolvedVideo = null;
+  }
   room.currentQuestionId = await persistQuestion(room);
   room.questionStartedAt = Date.now();
   room.deadlineAt = Date.now() + gameConfig.questionTimerSec * 1000;
