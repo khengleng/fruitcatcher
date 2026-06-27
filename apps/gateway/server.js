@@ -1325,10 +1325,22 @@ function questionMatchesLanguage(question, language) {
 
 function getCurriculumInstruction(curriculum) {
   if (curriculum === "cambodia_moeys") {
-    return "Align the content to Cambodia Ministry of Education classroom expectations and vocabulary for the selected grade. Do not mention policy names unless needed.";
+    return "Follow the Cambodia Ministry of Education, Youth and Sport (MoEYS) national curriculum scope and sequence for the selected grade: use only topics, methods, and vocabulary taught at or before this grade in Cambodian schools, with locally familiar contexts and units. Do not introduce content from higher grades.";
   }
 
-  return "Align the content to a general international-school curriculum. Keep it globally understandable and do not claim official Cambridge affiliation.";
+  return "Follow a standard international-school curriculum scope and sequence for the selected grade: use only topics and methods taught at or before this grade internationally, keeping contexts globally understandable. Do not claim official Cambridge or IB affiliation, and do not introduce content from higher grades.";
+}
+
+// A plain-English description of who/what a question must align with, used in
+// both the generation prompt and the verifier's alignment check.
+function getAlignmentTarget(config) {
+  if (config.subject === "ielts") {
+    return "the IELTS English exam program (academic-English reading, grammar, and vocabulary at an appropriate band level)";
+  }
+  if (config.subject === "sat") {
+    return "the SAT exam program (digital-SAT Math and Reading & Writing skills)";
+  }
+  return `Grade ${config.gradeLevel} students in the ${getCurriculumLabel(config.curriculum)} curriculum studying ${getSubjectLabel(config.subject)}`;
 }
 
 function getFallbackQuestion(room) {
@@ -5634,6 +5646,7 @@ Requirements:
 - A more detailed elaboration under 90 words
 - In "videoQuery", a precise English YouTube search query (6-12 words) for a tutorial that teaches the exact method or concept needed to SOLVE this question at this grade level. Phrase it the way a learner searches for a lesson and include the grade/level when helpful. Focus on the skill used in the solution, not just the broad topic. Examples: "how to find the area of a rectangle grade 4", "balancing chemical equations step by step grade 10", "subtracting fractions with different denominators explained".
 - Keep the question answerable by Grade ${config.gradeLevel} learners
+- CURRICULUM ALIGNMENT (important): this question is for ${getAlignmentTarget(config)}. Use ONLY concepts, skills, and vocabulary that are appropriate for that level — never content from a higher grade, a different subject, or outside the stated program.
 - ${getCurriculumInstruction(config.curriculum)}
 - ${getLanguageInstruction(config.language)}
 - ${getDifficultyInstruction(config.difficultyMode)}
@@ -5817,20 +5830,24 @@ async function fetchSupportReply(messages, context) {
 // questions whose generated answer key is wrong or whose options contain no
 // correct answer.
 async function verifyOpenAIQuestion(question, context) {
+  const config = getSessionConfig(context);
   const choicesText = (question.choices || [])
     .map((choice) => `${choice.id}) ${choice.text}`)
     .join("\n");
-  const prompt = `You are checking a multiple-choice quiz question for correctness.
+  const prompt = `You are checking a multiple-choice quiz question for correctness AND curriculum alignment.
 Solve it yourself, carefully and step by step, then decide which single option is correct.
 
 Question: ${question.question}
 Options:
 ${choicesText}
 
-Rules:
-- Work out the answer independently. Do not assume any listed option is correct.
-- If exactly one option is correct, return its letter in "correctChoice".
-- If none of the options is correct, or more than one is correct, or the question is ambiguous or unsolvable, return "NONE".`;
+This question is intended for: ${getAlignmentTarget(config)}.
+
+Do two checks:
+1) Correctness: work out the answer independently (do not assume any listed option is correct).
+   - If exactly one option is correct, put its letter in "correctChoice".
+   - If none is correct, or more than one is correct, or it is ambiguous/unsolvable, put "NONE".
+2) Alignment: set "appropriate" to false ONLY if the question clearly does not fit the intended audience above — for example it uses concepts or vocabulary from a higher grade, is from a different subject, or (for IELTS/SAT) is not in the style/scope of that exam program. If it reasonably fits, set "appropriate" to true. Briefly justify in "alignmentNote".`;
 
   const response = await fetchWithTimeout("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -5849,10 +5866,12 @@ Rules:
           schema: {
             type: "object",
             additionalProperties: false,
-            required: ["workedSolution", "correctChoice"],
+            required: ["workedSolution", "correctChoice", "appropriate", "alignmentNote"],
             properties: {
               workedSolution: { type: "string" },
-              correctChoice: { type: "string", enum: ["A", "B", "C", "D", "NONE"] }
+              correctChoice: { type: "string", enum: ["A", "B", "C", "D", "NONE"] },
+              appropriate: { type: "boolean" },
+              alignmentNote: { type: "string" }
             }
           }
         }
@@ -6005,6 +6024,9 @@ async function generateQuestion(room) {
           }
           if (verifiedChoice !== generatedChoice) {
             throw new Error(`Answer-key disagreement (generator ${generatedChoice} vs verifier ${verifiedChoice}): ${question.question}`);
+          }
+          if (verdict?.appropriate === false) {
+            throw new Error(`Off-curriculum/level for the target (${verdict?.alignmentNote || "no note"}): ${question.question}`);
           }
         }
 
