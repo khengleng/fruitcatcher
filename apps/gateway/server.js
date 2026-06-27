@@ -86,7 +86,9 @@ const SUPPORTED_SUBJECTS = [
   "biology",
   "chemistry",
   "physics",
-  "english"
+  "english",
+  "ielts",
+  "sat"
 ];
 // Math-track high-school courses are attached to the grades where they are normally
 // taught. The UI uses this to offer only the relevant grades for each subject.
@@ -1227,6 +1229,14 @@ function getSubjectLabel(subject) {
     return "English";
   }
 
+  if (subject === "ielts") {
+    return "IELTS";
+  }
+
+  if (subject === "sat") {
+    return "SAT";
+  }
+
   return subject;
 }
 
@@ -1248,6 +1258,14 @@ function getSubjectInstruction(subject) {
 
   if (subject === "precalculus") {
     return "This is a Precalculus course. Draw from: function families and transformations, polynomial/rational/exponential/logarithmic functions, trigonometry (unit circle, identities, graphs), sequences and series, and an intuitive introduction to limits. Do not require derivatives or integrals.";
+  }
+
+  if (subject === "ielts") {
+    return "This is IELTS English exam preparation. Write academic-English multiple-choice questions in the style of IELTS Reading and Listening practice: reading comprehension and inference, vocabulary in context, grammar and word forms, sentence completion, and identifying main ideas. Use clear academic English. The question must be fully self-contained (include any short passage in the question text) and answerable from text alone — do not require audio, essays, or speaking.";
+  }
+
+  if (subject === "sat") {
+    return "This is SAT exam preparation. Write SAT-style multiple-choice questions. Alternate between SAT Math (algebra, problem-solving and data analysis, and advanced math — no calculator-only tricks) and SAT Reading & Writing (evidence-based reading comprehension, command of evidence, words in context, and standard English grammar/expression). Keep the difficulty and style true to the digital SAT, and make each question self-contained.";
   }
 
   return "";

@@ -644,6 +644,8 @@
             <option value="biology">Biology</option>
             <option value="chemistry">Chemistry</option>
             <option value="physics">Physics</option>
+            <option value="ielts">IELTS</option>
+            <option value="sat">SAT</option>
           </select>
         </div>
         <div class="solo-field">
@@ -868,6 +870,8 @@
       if (value === "physics") return "Physics";
       if (value === "math") return "Math";
       if (value === "english") return "English";
+      if (value === "ielts") return "IELTS";
+      if (value === "sat") return "SAT";
       // Math-track courses (algebra_1, geometry, precalculus, ...) format cleanly.
       if (typeof value === "string" && value) return value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
       return value;
