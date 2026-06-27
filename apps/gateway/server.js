@@ -1361,6 +1361,26 @@ function getGradeScope(config) {
   return "";
 }
 
+// Deterministic backstop for the clearest math grade-scope violations, so they
+// are caught regardless of how well the model follows the prompt/verifier.
+function mathGradeViolation(question, config) {
+  if (config.subject !== "math") {
+    return null;
+  }
+  const grade = config.gradeLevel;
+  const text = `${question?.question || ""} ${(question?.choices || []).map((c) => c?.text || "").join(" ")}`;
+  if (grade <= 5 && /\d\s*%|percent/i.test(text)) {
+    return "uses percentages (taught from grade 6)";
+  }
+  if (grade <= 3 && /\d\.\d/.test(text)) {
+    return "uses decimals (taught from grade 4)";
+  }
+  if (grade <= 3 && /\b\d{2,}\s*[×*]\s*\d{2,}\b/.test(text)) {
+    return "uses multi-digit multiplication (taught from grade 4)";
+  }
+  return null;
+}
+
 // A plain-English description of who/what a question must align with, used in
 // both the generation prompt and the verifier's alignment check.
 function getAlignmentTarget(config) {
@@ -6043,6 +6063,11 @@ async function generateQuestion(room) {
 
         if (!questionMatchesLanguage(question, config.language)) {
           throw new Error(`Question is not in the selected language (${config.language}): ${question.question}`);
+        }
+
+        const scopeIssue = mathGradeViolation(question, config);
+        if (scopeIssue) {
+          throw new Error(`Grade-scope violation for grade ${config.gradeLevel} (${scopeIssue}): ${question.question}`);
         }
 
         if (OPENAI_VERIFY_ENABLED) {
