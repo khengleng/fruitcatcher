@@ -1881,6 +1881,7 @@ async function initDatabase() {
       query_key TEXT PRIMARY KEY,
       url TEXT NOT NULL,
       embed_url TEXT,
+      candidate_ids JSONB,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
@@ -2005,6 +2006,7 @@ async function runDatabaseMigrations() {
     "ALTER TABLE quiz_presets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
     "ALTER TABLE worksheets ADD COLUMN IF NOT EXISTS prompt_brief TEXT",
     "ALTER TABLE worksheets ADD COLUMN IF NOT EXISTS content_hash TEXT",
+    "ALTER TABLE video_cache ADD COLUMN IF NOT EXISTS candidate_ids JSONB",
     "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS share_id TEXT",
     "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS student_user_id TEXT",
     "ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS classroom_id TEXT",
@@ -2487,20 +2489,36 @@ async function setAppSetting(key, value) {
   );
 }
 
-async function getCachedVideo(key) {
+async function getCachedCandidates(key) {
   if (!db) return null;
-  const result = await dbQuery("SELECT url, embed_url FROM video_cache WHERE query_key = $1", [key]);
+  const result = await dbQuery("SELECT candidate_ids, url FROM video_cache WHERE query_key = $1", [key]);
   const row = result?.rows?.[0];
-  return row ? { url: row.url, embedUrl: row.embed_url } : null;
+  if (!row) return null;
+  if (Array.isArray(row.candidate_ids) && row.candidate_ids.length) {
+    return row.candidate_ids;
+  }
+  // Legacy single-video rows: derive the id from the stored watch URL.
+  const match = String(row.url || "").match(/[?&]v=([^&]+)/);
+  return match ? [match[1]] : null;
 }
 
-async function putCachedVideo(key, video) {
-  if (!db) return;
+async function putCachedCandidates(key, ids) {
+  if (!db || !ids.length) return;
   await dbQuery(
-    `INSERT INTO video_cache (query_key, url, embed_url, created_at) VALUES ($1, $2, $3, NOW())
-     ON CONFLICT (query_key) DO NOTHING`,
-    [key, video.url, video.embedUrl || null]
+    `INSERT INTO video_cache (query_key, url, embed_url, candidate_ids, created_at)
+     VALUES ($1, $2, $3, $4::jsonb, NOW())
+     ON CONFLICT (query_key) DO UPDATE SET candidate_ids = EXCLUDED.candidate_ids, url = EXCLUDED.url, embed_url = EXCLUDED.embed_url`,
+    [key, `https://www.youtube.com/watch?v=${ids[0]}`, `https://www.youtube.com/embed/${ids[0]}`, JSON.stringify(ids)]
   );
+}
+
+function hashString(value) {
+  let hash = 0;
+  const str = String(value || "");
+  for (let i = 0; i < str.length; i += 1) {
+    hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+  }
+  return hash;
 }
 
 function videoQueryFor(question, config) {
@@ -2523,35 +2541,35 @@ const VIDEO_STOPWORDS = new Set(["the", "a", "an", "of", "to", "for", "and", "ho
 // Rank candidate videos by how well the title/description match the query terms,
 // keeping a slight preference for YouTube's own relevance order on ties. This
 // lifts genuinely on-topic teaching videos above a loosely-related top hit.
-function pickBestVideo(items, query) {
+// Rank candidates by how well the title/description match the query terms
+// (keeping YouTube's own order as a tiebreak), and return an ordered id list.
+function rankVideoIds(items, query) {
   if (!Array.isArray(items) || !items.length) {
-    return null;
+    return [];
   }
   const terms = String(query || "")
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)
     .filter((w) => w.length > 3 && !VIDEO_STOPWORDS.has(w));
-  let best = null;
-  let bestScore = -Infinity;
-  items.forEach((item, index) => {
-    const title = String(item?.snippet?.title || "").toLowerCase();
-    const desc = String(item?.snippet?.description || "").toLowerCase();
-    let score = -index * 0.5; // earlier (more relevant) results start slightly ahead
-    terms.forEach((t) => {
-      if (title.includes(t)) score += 2;
-      else if (desc.includes(t)) score += 1;
-    });
-    if (score > bestScore) {
-      bestScore = score;
-      best = item;
-    }
-  });
-  return best?.id?.videoId || items[0]?.id?.videoId || null;
+  return items
+    .map((item, index) => {
+      const title = String(item?.snippet?.title || "").toLowerCase();
+      const desc = String(item?.snippet?.description || "").toLowerCase();
+      let score = -index * 0.5;
+      terms.forEach((t) => {
+        if (title.includes(t)) score += 2;
+        else if (desc.includes(t)) score += 1;
+      });
+      return { id: item?.id?.videoId, score, order: index };
+    })
+    .filter((x) => x.id)
+    .sort((a, b) => (b.score - a.score) || (a.order - b.order))
+    .map((x) => x.id);
 }
 
-async function youtubeSearchVideoId(query, language) {
+async function youtubeSearchVideoIds(query, language) {
   const relevanceLanguage = language === "khmer" ? "km" : "en";
-  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=6`
+  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=8`
     + `&safeSearch=strict&videoEmbeddable=true&relevanceLanguage=${relevanceLanguage}`
     + `&q=${encodeURIComponent(query)}&key=${YOUTUBE_API_KEY}`;
   const response = await fetchWithTimeout(url, { method: "GET" }, OPENAI_TIMEOUT_MS);
@@ -2559,11 +2577,13 @@ async function youtubeSearchVideoId(query, language) {
     throw new Error(`YouTube search failed: ${response.status}`);
   }
   const data = await response.json();
-  return pickBestVideo(data?.items, query);
+  return rankVideoIds(data?.items, query);
 }
 
-// Returns { url, embedUrl }. embedUrl is set only when a real embeddable video
-// was found via the API; otherwise it falls back to a YouTube search link.
+// Returns { url, embedUrl }. We cache the top candidates per topic (one API
+// call), then pick a DIFFERENT video per question so same-topic questions don't
+// all show the same clip. The pick is deterministic (hash of the question), so
+// a given question always maps to the same video. Falls back to a search link.
 async function resolveVideo(question, config) {
   const query = videoQueryFor(question, config);
   const fallback = { url: youtubeSearchUrl(query), embedUrl: null };
@@ -2571,29 +2591,35 @@ async function resolveVideo(question, config) {
     return fallback;
   }
   const language = (config && config.language) || "english";
-  const key = `${normalizePrompt(query)}|${language === "khmer" ? "km" : "en"}`;
-  if (videoCache.has(key)) {
-    return videoCache.get(key);
+  // Strip numbers from the key so questions that differ only by their numbers
+  // (e.g. "3/4 of 24" vs "5/6 of 36") share one candidate pool to rotate over.
+  const conceptKey = normalizePrompt(query).replace(/[0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  const key = `${conceptKey}|${language === "khmer" ? "km" : "en"}`;
+
+  let candidates = videoCache.get(key);
+  if (!candidates) {
+    candidates = await getCachedCandidates(key);
+    if (candidates) videoCache.set(key, candidates);
   }
-  const cached = await getCachedVideo(key);
-  if (cached) {
-    videoCache.set(key, cached);
-    return cached;
-  }
-  try {
-    const videoId = await youtubeSearchVideoId(query, language);
-    if (!videoId) {
+  if (!candidates) {
+    try {
+      candidates = await youtubeSearchVideoIds(query, language);
+    } catch (error) {
+      console.error("YouTube resolve failed:", error.message);
       return fallback;
     }
-    const resolved = { url: `https://www.youtube.com/watch?v=${videoId}`, embedUrl: `https://www.youtube.com/embed/${videoId}` };
+    if (!candidates.length) {
+      return fallback;
+    }
     if (videoCache.size > 5000) videoCache.clear();
-    videoCache.set(key, resolved);
-    await putCachedVideo(key, resolved);
-    return resolved;
-  } catch (error) {
-    console.error("YouTube resolve failed:", error.message);
+    videoCache.set(key, candidates);
+    await putCachedCandidates(key, candidates);
+  }
+  if (!candidates.length) {
     return fallback;
   }
+  const id = candidates[hashString(question?.question) % candidates.length];
+  return { url: `https://www.youtube.com/watch?v=${id}`, embedUrl: `https://www.youtube.com/embed/${id}` };
 }
 
 // A reliable "watch an explanation" link: prefer the AI's suggested search
