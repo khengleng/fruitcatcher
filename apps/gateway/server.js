@@ -2477,6 +2477,7 @@ app.get("/health", (_req, res) => {
     openaiConfigured: Boolean(OPENAI_API_KEY),
     openaiModel: OPENAI_MODEL,
     answerVerification: OPENAI_VERIFY_ENABLED,
+    guardrails: "scope+align+mathbackstop",
     verifyModel: OPENAI_VERIFY_MODEL,
     databaseConfigured: Boolean(db),
     configPath: CONFIG_PATH,
