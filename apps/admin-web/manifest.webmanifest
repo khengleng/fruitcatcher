@@ -1,0 +1,14 @@
+{
+  "name": "LyHuor Learning Admin",
+  "short_name": "Admin",
+  "description": "Admin portal for the LyHuor Learning quiz platform.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0a1422",
+  "theme_color": "#0a1422",
+  "icons": [
+    { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "./icon.svg", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

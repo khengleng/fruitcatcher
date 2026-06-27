@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffd870"/>
+      <stop offset="1" stop-color="#69e6a6"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <g fill="#0a1422">
+    <!-- mortarboard top -->
+    <path d="M256 138 L444 212 L256 286 L68 212 Z"/>
+    <!-- cap base on the head -->
+    <path d="M168 244 L256 279 L344 244 L344 312 C344 352 168 352 168 312 Z"/>
+  </g>
+  <!-- tassel -->
+  <path d="M444 212 L444 312" stroke="#0a1422" stroke-width="12" fill="none" stroke-linecap="round"/>
+  <circle cx="444" cy="326" r="18" fill="#0a1422"/>
+  <circle cx="256" cy="212" r="20" fill="#ffd870"/>
+</svg>
