@@ -1331,6 +1331,36 @@ function getCurriculumInstruction(curriculum) {
   return "Follow a standard international-school curriculum scope and sequence for the selected grade: use only topics and methods taught at or before this grade internationally, keeping contexts globally understandable. Do not claim official Cambridge or IB affiliation, and do not introduce content from higher grades.";
 }
 
+// Concrete, deterministic grade-level scope so generation can't drift above
+// grade and the verifier has an objective bar to check against. Used by both.
+function getGradeScope(config) {
+  const grade = config.gradeLevel;
+  const subject = config.subject;
+  if (subject === "ielts" || subject === "sat") {
+    return "";
+  }
+  if (subject === "math") {
+    if (grade <= 2) return "Grade 2 math ONLY: addition/subtraction within 1000 (mostly within 100), multiplication as repeated addition with small numbers (2s, 5s, 10s), halves and quarters, money, telling time, and naming simple 2D shapes. Do NOT use multi-digit (2-by-2) multiplication, long division, decimals, or fractions beyond halves/quarters.";
+    if (grade === 3) return "Grade 3 math: multiplication/division facts up to 10x10, add/subtract within 1000, simple unit fractions, basic measurement and time. Do NOT use 2-by-2 multiplication, long division, decimals, percentages, or algebra.";
+    if (grade === 4) return "Grade 4 math: multi-digit multiplication (3-digit by 1-digit, simple 2-by-2), division with remainders, equivalent fractions, tenths/hundredths decimals, area and perimeter. Do NOT use ratios, percentages, negative numbers, or algebra.";
+    if (grade === 5) return "Grade 5 math: multi-digit multiplication/division, add/subtract/multiply fractions and decimals, introductory percentages, volume, first-quadrant coordinate plane. Do NOT use negative numbers, formal ratios/proportions, or algebraic equations.";
+    if (grade === 6) return "Grade 6 math: ratios and rates, percentages, fraction/decimal operations, integers and the number line, simple expressions and one-step equations, area/surface area/volume. Avoid formal linear functions, systems, or quadratics.";
+    if (grade === 7) return "Grade 7 math: proportional relationships, operations with rational numbers (including negatives), two-step equations/inequalities, percentage applications, basic probability and geometry. Avoid function notation, systems, or quadratics.";
+    if (grade === 8) return "Grade 8 math: linear equations and graphing, slope, intro systems of two linear equations, integer exponents and scientific notation, the Pythagorean theorem, and an introduction to functions. Avoid quadratics, factoring trinomials, or trigonometry.";
+    if (grade === 9) return "Grade 9 math: linear equations/inequalities and graphing, systems, exponent rules, polynomials and factoring, and an introduction to quadratics. Avoid trigonometry and calculus.";
+    return "High-school math appropriate to this grade (algebra/geometry topics taught at or before this grade). Avoid calculus unless this is explicitly a calculus course.";
+  }
+  if (subject === "english") {
+    if (grade <= 4) return "Lower-primary English: simple vocabulary, basic grammar (nouns, verbs, plurals, simple tenses), reading short sentences, and short comprehension on everyday topics.";
+    if (grade <= 8) return "Middle-grade English: vocabulary in context, grammar (tenses, parts of speech, punctuation), and comprehension of short passages.";
+    return "Upper-grade English: richer vocabulary, grammar/usage, and comprehension and inference on longer passages.";
+  }
+  const band = getGradeBand(grade);
+  if (band === "lower") return "Lower-primary science: observable everyday phenomena (plants, animals, materials, weather, magnets, the senses). Keep it concrete; avoid formulas or abstract theory.";
+  if (band === "middle") return "Middle-grade science: foundational concepts with simple reasoning; avoid advanced formulas or upper-secondary-only content.";
+  return "";
+}
+
 // A plain-English description of who/what a question must align with, used in
 // both the generation prompt and the verifier's alignment check.
 function getAlignmentTarget(config) {
@@ -5623,7 +5653,7 @@ async function fetchOpenAIQuestion(room) {
 Curriculum: ${getCurriculumLabel(config.curriculum)}
 Language mode: ${getLanguageLabel(config.language)}
 Subject: ${getSubjectLabel(config.subject)}
-${getSubjectInstruction(config.subject) ? `Subject focus: ${getSubjectInstruction(config.subject)}\n` : ""}Difficulty mode: ${config.difficultyMode}
+${getSubjectInstruction(config.subject) ? `Subject focus: ${getSubjectInstruction(config.subject)}\n` : ""}${getGradeScope(config) ? `Grade scope (stay strictly within this): ${getGradeScope(config)}\n` : ""}Difficulty mode: ${config.difficultyMode}
 Question number: ${room.questionIndex + 1} of ${config.questionsPerRound}
 Avoid repeating any of these recent prompts: ${room.history.join(" | ") || "none"}.
 ${config.teacherPrompt ? `
@@ -5842,12 +5872,12 @@ Options:
 ${choicesText}
 
 This question is intended for: ${getAlignmentTarget(config)}.
-
+${getGradeScope(config) ? `Required grade scope: ${getGradeScope(config)}\n` : ""}
 Do two checks:
 1) Correctness: work out the answer independently (do not assume any listed option is correct).
    - If exactly one option is correct, put its letter in "correctChoice".
    - If none is correct, or more than one is correct, or it is ambiguous/unsolvable, put "NONE".
-2) Alignment: set "appropriate" to false ONLY if the question clearly does not fit the intended audience above — for example it uses concepts or vocabulary from a higher grade, is from a different subject, or (for IELTS/SAT) is not in the style/scope of that exam program. If it reasonably fits, set "appropriate" to true. Briefly justify in "alignmentNote".`;
+2) Alignment: set "appropriate" to false if the question goes beyond the grade scope above, uses methods/vocabulary from a higher grade, is from a different subject, or (for IELTS/SAT) is not in the style/scope of that exam program. Only set "appropriate" to true if it clearly fits the stated scope. Briefly justify in "alignmentNote".`;
 
   const response = await fetchWithTimeout("https://api.openai.com/v1/responses", {
     method: "POST",
