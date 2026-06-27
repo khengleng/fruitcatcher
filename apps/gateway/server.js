@@ -2518,7 +2518,7 @@ function sanitizeSoloConfig(input = {}) {
     curriculum: input.curriculum ?? gameConfig.curriculum,
     language: input.language ?? gameConfig.language,
     subject: input.subject ?? gameConfig.subject,
-    gradeLevel: input.gradeLevel ?? input.grade_level ?? gameConfig.gradeLevel,
+    gradeLevel: input.gradeLevel ?? input.grade_level ?? input.grade ?? gameConfig.gradeLevel,
     difficultyMode: input.difficultyMode ?? input.difficulty_mode ?? gameConfig.difficultyMode,
     questionSource: input.questionSource ?? input.question_source ?? "question_bank_openai",
     questionsPerRound: input.questionsPerRound ?? input.questions_per_round ?? 10,
