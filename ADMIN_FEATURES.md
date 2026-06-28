@@ -16,7 +16,7 @@ This document describes all the advanced features implemented in the Learning wi
   - Session activity timeline (line chart)
 - ✅ **Bulk Delete Sessions**: Remove sessions older than 30 days
 - ✅ **Search & Filter UI**: Clean filter panels with apply/clear buttons
-- ✅ **Audit Log Tab**: Placeholder structure ready
+- ✅ **Audit Log Tab**: Real audit log with filtering
 
 ### 2. Backend API Endpoints (Newly Added)
 
@@ -92,9 +92,20 @@ Authorization: Bearer YOUR_ADMIN_TOKEN
 #### Active Session Control
 ```
 GET    /admin/active-sessions                     - List active rooms
+GET    /admin/online-users                        - List everyone connected live (hosts + players)
 POST   /admin/active-sessions/:roomCode/close     - Force close room
 POST   /admin/active-sessions/:roomCode/kick/:playerId - Kick player
 ```
+
+#### Admin Session Control (force logout / revocation)
+```
+POST   /admin/logout                 - Revoke the caller's own sessions on all devices
+POST   /admin/users/:id/logout       - Force a user to sign out everywhere (admins only)
+```
+
+Signed admin sessions carry a `token_version`. Disabling a user (`is_active = false`)
+or calling either logout endpoint takes effect on the user's very next request — the
+token is rejected immediately instead of staying valid until its 12h expiry.
 
 **Example Request (Close Room):**
 ```bash
@@ -184,41 +195,21 @@ Group management for organizing students
 - added_at (TIMESTAMPTZ)
 ```
 
-## 🔄 Next Steps for Full Implementation
+## ✅ Frontend UI — Implemented
 
-### Frontend UI Updates Needed
+Both the backend APIs and the admin UI (`apps/admin-web/index.html`) for these features are now built and deployed:
 
-The backend APIs are complete. To fully utilize these features, the admin UI (`apps/admin-web/index.html`) should be updated with:
+1. **Question Bank Tab** — list questions with subject/grade filters, manual create/edit, AI-generated bank (with answer verification + dedupe), and delete/deactivate.
 
-1. **Question Bank Tab**
-   - List all questions with filters
-   - Create/edit question form
-   - Delete/deactivate questions
-   - View question usage statistics
+2. **Students Tab** — view students, block/unblock, and assign students to groups.
 
-2. **Enhanced Students Tab**
-   - Edit student name inline
-   - Block/unblock student buttons
-   - View block history
-   - Assign students to groups
+3. **Groups Tab** — create groups, view members, and add/remove students.
 
-3. **Groups Tab**
-   - Create new groups
-   - View group members
-   - Add/remove students from groups
-   - Group-based analytics
+4. **Active Sessions Tab** — live list of active rooms with current state and room control.
 
-4. **Active Sessions Tab**
-   - Real-time list of active rooms
-   - Close room button
-   - Kick player functionality
-   - View current room state
+5. **Audit Tab** — real audit log data with filtering.
 
-5. **Enhanced Audit Tab**
-   - Replace placeholder with real audit log data
-   - Filter by action type, date range, admin user
-   - Export audit logs
-   - Detailed view of each action
+Newer admin surfaces beyond the original plan also ship: worksheets (A4 print), quiz shares (Telegram/link/QR), classrooms + assignments, student accounts, the support chatbot, AI usage + cost reporting, and the question-generation guardrails (answer verification, language enforcement, curriculum/grade alignment, renderable-notation).
 
 ## 🚀 Deployment Instructions
 
@@ -226,7 +217,7 @@ The backend APIs are complete. To fully utilize these features, the admin UI (`a
 When deploying to production, the new tables will be created automatically on first run. The gateway checks and creates missing tables on startup.
 
 ### 2. Environment Variables
-No new environment variables required. Existing `ADMIN_TOKEN` and `DATABASE_URL` are sufficient.
+No new environment variables required. `ADMIN_TOKEN` (signs admin/staff sessions), `ADMIN_USERNAME` + `ADMIN_PASSWORD` (bootstrap the first admin login), and `DATABASE_URL` are sufficient.
 
 ### 3. Railway Deployment
 ```bash
@@ -378,28 +369,22 @@ curl -X POST https://gateway.railway.app/admin/groups/$GROUP_ID/members \
 ## 📝 Future Enhancements
 
 ### Planned Features (Not Yet Implemented)
-1. **Multi-Admin Authentication System**
-   - Login/logout endpoints
-   - Password hashing with bcrypt
-   - JWT token generation
-   - Role-based access control
-
-2. **Email Notifications**
+1. **Email Notifications**
    - System error alerts
    - Weekly reports
    - Quota warnings
 
-3. **Advanced Analytics**
+2. **Advanced Analytics**
    - Real-time session activity chart with actual data
    - Student performance trends over time
    - Question difficulty analysis
 
-4. **Question Bank Integration**
+3. **Question Bank Integration**
    - Use custom questions in quizzes
    - Question review/approval workflow
    - Community question sharing
 
-5. **Student Achievements**
+4. **Student Achievements**
    - Badge system
    - Leaderboards
    - Progress certificates
