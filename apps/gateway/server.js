@@ -1323,6 +1323,21 @@ function questionMatchesLanguage(question, language) {
   return !khmer;
 }
 
+// Heavy LaTeX / notation the lightweight client renderer (formatMathHTML)
+// cannot display — it would show up as raw garbage on screen. We reject and
+// regenerate so only cleanly-renderable math/science notation reaches students.
+const UNRENDERABLE_NOTATION = /\\(begin|end|int|iint|oint|sum|prod|coprod|lim|partial|nabla|matrix|pmatrix|bmatrix|vmatrix|array|cases|align|text|mbox|mathbb|mathrm|mathcal|mathbf|mathit|overline|underline|overrightarrow|overbrace|underbrace|vec|hat|tilde|bar|dot|ddot|binom|substack|left|right|big|Big)(?![a-zA-Z])|\\sqrt\s*\[|\\\\|\^\{[^}]*\^|\\frac\{[^}]*\\frac/;
+
+function notationRenders(question) {
+  const blob = [
+    question?.question,
+    ...((question?.choices || []).map((c) => c?.text)),
+    question?.shortExplanation,
+    question?.elaboration
+  ].join(" ");
+  return !UNRENDERABLE_NOTATION.test(String(blob));
+}
+
 function getCurriculumInstruction(curriculum) {
   if (curriculum === "cambodia_moeys") {
     return "Follow the Cambodia Ministry of Education, Youth and Sport (MoEYS) national curriculum scope and sequence for the selected grade: use only topics, methods, and vocabulary taught at or before this grade in Cambodian schools, with locally familiar contexts and units. Do not introduce content from higher grades.";
@@ -5695,6 +5710,7 @@ Requirements:
 - Match the reading level and background knowledge of Grade ${config.gradeLevel}
 - A short explanation under 30 words
 - A more detailed elaboration under 90 words
+- NOTATION: write all math and science notation so it displays cleanly without a full LaTeX renderer. Use ^ for exponents (x^2, 10^3), a slash or \\frac{a}{b} for fractions, sqrt() for square roots, and plain symbols (×, ÷, ±, °, ≤, ≥, π) and chemical formulas like H2O, CO2, with charges written like Na^+ or SO4^2-. Do NOT use LaTeX environments, matrices, integrals/summations, indexed roots like \\sqrt[3]{}, \\text{}, \\vec{}, or multi-line LaTeX (\\\\).
 - In "videoQuery", a precise English YouTube search query (6-12 words) for a tutorial that teaches the exact method or concept needed to SOLVE this question at this grade level. Phrase it the way a learner searches for a lesson and include the grade/level when helpful. Focus on the skill used in the solution, not just the broad topic. Examples: "how to find the area of a rectangle grade 4", "balancing chemical equations step by step grade 10", "subtracting fractions with different denominators explained".
 - Keep the question answerable by Grade ${config.gradeLevel} learners
 - CURRICULUM ALIGNMENT (important): this question is for ${getAlignmentTarget(config)}. Use ONLY concepts, skills, and vocabulary that are appropriate for that level — never content from a higher grade, a different subject, or outside the stated program.
@@ -6069,6 +6085,10 @@ async function generateQuestion(room) {
         const scopeIssue = mathGradeViolation(question, config);
         if (scopeIssue) {
           throw new Error(`Grade-scope violation for grade ${config.gradeLevel} (${scopeIssue}): ${question.question}`);
+        }
+
+        if (!notationRenders(question)) {
+          throw new Error(`Math/science notation will not render cleanly: ${question.question}`);
         }
 
         if (OPENAI_VERIFY_ENABLED) {
