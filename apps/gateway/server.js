@@ -3029,38 +3029,43 @@ app.post("/solo/sessions/:id/answer", async (req, res) => {
     return;
   }
 
-  const isCorrect = choice === session.currentQuestion.correctChoice;
-  if (isCorrect) {
-    session.score += 1;
-  }
-  session.currentAnswer = choice;
-  const video = await resolveVideo(session.currentQuestion, session.config);
-  session.currentQuestion.resolvedVideo = video;
-  const result = {
-    questionIndex: session.questionIndex,
-    prompt: session.currentQuestion.question,
-    choices: session.currentQuestion.choices,
-    choice,
-    correctChoice: session.currentQuestion.correctChoice,
-    isCorrect,
-    shortExplanation: session.currentQuestion.shortExplanation || "",
-    elaboration: session.currentQuestion.elaboration || "",
-    videoUrl: video.url,
-    videoEmbedUrl: video.embedUrl,
-    scoreAfter: session.score,
-    source: session.currentQuestion.source || null,
-    model: session.currentQuestion.model || null
-  };
-  session.results.push(result);
-  session.results = session.results.slice(-50);
-  session.status = session.results.length >= session.config.questionsPerRound ? "FINISHED" : "REVIEWING";
-  if (session.status === "FINISHED") {
-    session.currentQuestion = null;
-    session.currentAnswer = null;
-  }
+  try {
+    const isCorrect = choice === session.currentQuestion.correctChoice;
+    if (isCorrect) {
+      session.score += 1;
+    }
+    session.currentAnswer = choice;
+    const video = await resolveVideo(session.currentQuestion, session.config);
+    session.currentQuestion.resolvedVideo = video;
+    const result = {
+      questionIndex: session.questionIndex,
+      prompt: session.currentQuestion.question,
+      choices: session.currentQuestion.choices,
+      choice,
+      correctChoice: session.currentQuestion.correctChoice,
+      isCorrect,
+      shortExplanation: session.currentQuestion.shortExplanation || "",
+      elaboration: session.currentQuestion.elaboration || "",
+      videoUrl: video.url,
+      videoEmbedUrl: video.embedUrl,
+      scoreAfter: session.score,
+      source: session.currentQuestion.source || null,
+      model: session.currentQuestion.model || null
+    };
+    session.results.push(result);
+    session.results = session.results.slice(-50);
+    session.status = session.results.length >= session.config.questionsPerRound ? "FINISHED" : "REVIEWING";
+    if (session.status === "FINISHED") {
+      session.currentQuestion = null;
+      session.currentAnswer = null;
+    }
 
-  await persistSoloAnswer(session, result);
-  res.json({ ok: true, result, state: buildSoloState(session) });
+    await persistSoloAnswer(session, result);
+    res.json({ ok: true, result, state: buildSoloState(session) });
+  } catch (error) {
+    console.error("Solo answer failed:", error);
+    res.status(500).json({ error: "Could not record your answer. Please try again." });
+  }
 });
 
 async function isAuthorized(req) {
@@ -5040,9 +5045,14 @@ app.get("/admin/questions", requireAdmin, async (req, res) => {
   
   query += ` ORDER BY created_at DESC LIMIT $${paramIndex}`;
   params.push(limit);
-  
-  const result = await dbQueryRequired(query, params);
-  res.json({ questions: result?.rows || [] });
+
+  try {
+    const result = await dbQueryRequired(query, params);
+    res.json({ questions: result?.rows || [] });
+  } catch (error) {
+    console.error("List questions failed:", error);
+    res.status(500).json({ error: "Could not load questions" });
+  }
 });
 
 app.post("/admin/questions", requireAdmin, async (req, res) => {
@@ -5278,15 +5288,20 @@ app.get("/admin/groups", requireAdmin, async (req, res) => {
     return;
   }
 
-  const result = await dbQueryRequired(`
-    SELECT g.*, COUNT(m.student_id)::int AS member_count
-    FROM student_groups g
-    LEFT JOIN student_group_members m ON m.group_id = g.id
-    GROUP BY g.id
-    ORDER BY g.created_at DESC
-  `);
-  
-  res.json({ groups: result?.rows || [] });
+  try {
+    const result = await dbQueryRequired(`
+      SELECT g.*, COUNT(m.student_id)::int AS member_count
+      FROM student_groups g
+      LEFT JOIN student_group_members m ON m.group_id = g.id
+      GROUP BY g.id
+      ORDER BY g.created_at DESC
+    `);
+
+    res.json({ groups: result?.rows || [] });
+  } catch (error) {
+    console.error("List groups failed:", error);
+    res.status(500).json({ error: "Could not load groups" });
+  }
 });
 
 app.get("/admin/groups/:id", requireAdmin, async (req, res) => {
