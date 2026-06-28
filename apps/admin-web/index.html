@@ -552,6 +552,7 @@
         <button class="tab" data-tab="shares" data-role="staff">🔗 Shared Quizzes</button>
         <button class="tab" data-tab="classrooms" data-role="staff">🏫 Classrooms</button>
         <button class="tab" data-tab="support" data-role="admin">🎧 Support</button>
+        <button class="tab" data-tab="subscriptions" data-role="admin">💳 Subscriptions</button>
         <button class="tab" data-tab="users" data-role="admin">Users</button>
       </nav>
 
@@ -1383,6 +1384,69 @@
           </table>
         </div>
         <div id="supportDetail" class="detail" hidden style="margin-top:18px;"></div>
+      </section>
+
+      <section id="subscriptionsPanel" class="panel" hidden>
+        <h2>💳 Subscriptions</h2>
+        <p class="muted">Sell solo-quiz access through the Telegram bot. Students pick a plan, pay by transfer, and send their receipt in the bot; approve the payment here to activate their access.</p>
+
+        <h3 style="margin-top:18px;">Settings</h3>
+        <div class="row" style="display:flex; gap:14px; flex-wrap:wrap; align-items:flex-start;">
+          <label style="display:flex; gap:8px; align-items:center; min-width:260px;">
+            <input id="subRequired" type="checkbox" style="width:auto;">
+            Require an active subscription for solo quizzes
+          </label>
+          <label style="flex:1; min-width:280px;">Payment instructions (shown in the bot)
+            <textarea id="subPaymentInfo" rows="3" maxlength="1000" placeholder="e.g. Transfer to Wing 012 345 678 (LyHuor Learning), then send a screenshot here."></textarea>
+          </label>
+          <button id="subSettingsSave">Save Settings</button>
+          <span id="subSettingsStatus" class="muted" style="align-self:center;"></span>
+        </div>
+
+        <h3 style="margin-top:22px;">Price Tiers</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Name</th><th>Price (USD)</th><th>Days</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="subTiersBody"></tbody>
+          </table>
+        </div>
+        <div class="row" style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
+          <label style="min-width:160px;">Name<input id="subTierName" type="text" maxlength="60" placeholder="e.g. 30 Days"></label>
+          <label style="width:120px;">Price (USD)<input id="subTierPrice" type="number" min="0" step="0.5" placeholder="5"></label>
+          <label style="width:110px;">Days<input id="subTierDays" type="number" min="1" step="1" placeholder="15"></label>
+          <button id="subTierAdd">Add Tier</button>
+          <span id="subTierStatus" class="muted" style="align-self:center;"></span>
+        </div>
+
+        <h3 style="margin-top:22px;">Pending Payments</h3>
+        <div class="actions" style="margin-bottom:8px;">
+          <button id="subPaymentsRefresh" class="secondary small">↻ Refresh</button>
+          <span id="subPaymentsStatus" class="muted" style="align-self:center;"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>User</th><th>Plan</th><th>Amount</th><th>Proof</th><th>Submitted</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="subPaymentsBody"></tbody>
+          </table>
+        </div>
+
+        <h3 style="margin-top:22px;">Subscribers</h3>
+        <div class="actions" style="margin-bottom:8px;">
+          <button id="subSubscribersRefresh" class="secondary small">↻ Refresh</button>
+          <span id="subSubscribersStatus" class="muted" style="align-self:center;"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>User</th><th>Status</th><th>Active until</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="subSubscribersBody"></tbody>
+          </table>
+        </div>
       </section>
 
       <section id="usersPanel" class="panel" hidden>
@@ -2638,6 +2702,7 @@
       document.getElementById("sharesPanel").hidden = tabName !== "shares";
       document.getElementById("classroomsPanel").hidden = tabName !== "classrooms";
       document.getElementById("supportPanel").hidden = tabName !== "support";
+      document.getElementById("subscriptionsPanel").hidden = tabName !== "subscriptions";
       document.getElementById("usersPanel").hidden = tabName !== "users";
 
       if (tabName === "sessions" || tabName === "students") {
@@ -2666,6 +2731,8 @@
         loadClassrooms();
       } else if (tabName === "support") {
         loadSupport();
+      } else if (tabName === "subscriptions") {
+        loadSubscriptions();
       }
     }
 
@@ -3828,6 +3895,190 @@
     wsEl("qaiGenerateButton").addEventListener("click", generateQai);
     wsEl("qaiSaveButton").addEventListener("click", saveQaiToBank);
     wsEl("qaiCancelButton").addEventListener("click", () => { wsEl("qaiModal").hidden = true; });
+
+    // ===== Subscriptions =====
+    function subFmtDate(iso) {
+      if (!iso) return "—";
+      try { return new Date(iso).toLocaleString(); } catch (e) { return String(iso); }
+    }
+    function subUserLabel(row) {
+      return row.telegramUsername ? ("@" + row.telegramUsername) : (row.displayName || ("id " + (row.telegramId || row.subscriberId || "?")));
+    }
+
+    async function loadSubscriptions() {
+      await Promise.all([loadSubSettings(), loadSubTiers(), loadSubPayments(), loadSubSubscribers()]);
+    }
+
+    async function loadSubSettings() {
+      try {
+        const data = await api("/admin/subscription/settings");
+        document.getElementById("subRequired").checked = Boolean(data.required);
+        document.getElementById("subPaymentInfo").value = data.paymentInfo || "";
+      } catch (e) {
+        setStatus(document.getElementById("subSettingsStatus"), e.message, "#a33d3d");
+      }
+    }
+
+    async function saveSubSettings() {
+      const status = document.getElementById("subSettingsStatus");
+      try {
+        setStatus(status, "Saving…", "#8a6d1f");
+        await api("/admin/subscription/settings", {
+          method: "PUT",
+          body: JSON.stringify({
+            required: document.getElementById("subRequired").checked,
+            paymentInfo: document.getElementById("subPaymentInfo").value
+          })
+        });
+        setStatus(status, "Saved ✓", "#1f7a4d");
+      } catch (e) { setStatus(status, e.message, "#a33d3d"); }
+    }
+
+    async function loadSubTiers() {
+      const body = document.getElementById("subTiersBody");
+      body.innerHTML = "";
+      try {
+        const data = await api("/admin/subscription/tiers");
+        (data.tiers || []).forEach((tier) => {
+          const tr = document.createElement("tr");
+          const nameTd = document.createElement("td");
+          const nameIn = document.createElement("input"); nameIn.type = "text"; nameIn.value = tier.name; nameIn.maxLength = 60; nameIn.style.width = "150px";
+          nameTd.appendChild(nameIn);
+          const priceTd = document.createElement("td");
+          const priceIn = document.createElement("input"); priceIn.type = "number"; priceIn.min = "0"; priceIn.step = "0.5"; priceIn.value = tier.priceUsd; priceIn.style.width = "90px";
+          priceTd.appendChild(priceIn);
+          const daysTd = document.createElement("td");
+          const daysIn = document.createElement("input"); daysIn.type = "number"; daysIn.min = "1"; daysIn.step = "1"; daysIn.value = tier.durationDays; daysIn.style.width = "80px";
+          daysTd.appendChild(daysIn);
+          const actTd = document.createElement("td");
+          const saveBtn = document.createElement("button"); saveBtn.textContent = "Save"; saveBtn.className = "small";
+          saveBtn.addEventListener("click", async () => {
+            try {
+              await api(`/admin/subscription/tiers/${encodeURIComponent(tier.id)}`, {
+                method: "PUT",
+                body: JSON.stringify({ name: nameIn.value, priceUsd: Number(priceIn.value), durationDays: Number(daysIn.value) })
+              });
+              setStatus(document.getElementById("subTierStatus"), "Saved ✓", "#1f7a4d");
+            } catch (e) { setStatus(document.getElementById("subTierStatus"), e.message, "#a33d3d"); }
+          });
+          const delBtn = document.createElement("button"); delBtn.textContent = "Delete"; delBtn.className = "small secondary"; delBtn.style.marginLeft = "6px";
+          delBtn.addEventListener("click", async () => {
+            if (!confirm(`Delete tier "${tier.name}"?`)) return;
+            try {
+              await api(`/admin/subscription/tiers/${encodeURIComponent(tier.id)}`, { method: "DELETE" });
+              loadSubTiers();
+            } catch (e) { setStatus(document.getElementById("subTierStatus"), e.message, "#a33d3d"); }
+          });
+          actTd.appendChild(saveBtn); actTd.appendChild(delBtn);
+          tr.append(nameTd, priceTd, daysTd, actTd);
+          body.appendChild(tr);
+        });
+      } catch (e) {
+        setStatus(document.getElementById("subTierStatus"), e.message, "#a33d3d");
+      }
+    }
+
+    async function addSubTier() {
+      const status = document.getElementById("subTierStatus");
+      try {
+        await api("/admin/subscription/tiers", {
+          method: "POST",
+          body: JSON.stringify({
+            name: document.getElementById("subTierName").value,
+            priceUsd: Number(document.getElementById("subTierPrice").value),
+            durationDays: Number(document.getElementById("subTierDays").value)
+          })
+        });
+        document.getElementById("subTierName").value = "";
+        document.getElementById("subTierPrice").value = "";
+        document.getElementById("subTierDays").value = "";
+        setStatus(status, "Added ✓", "#1f7a4d");
+        loadSubTiers();
+      } catch (e) { setStatus(status, e.message, "#a33d3d"); }
+    }
+
+    async function loadSubPayments() {
+      const body = document.getElementById("subPaymentsBody");
+      body.innerHTML = "";
+      try {
+        const data = await api("/admin/subscription/payments?status=pending");
+        if (!(data.payments || []).length) {
+          const tr = document.createElement("tr");
+          const td = document.createElement("td"); td.colSpan = 6; td.className = "muted"; td.textContent = "No pending payments.";
+          tr.appendChild(td); body.appendChild(tr);
+        }
+        (data.payments || []).forEach((p) => {
+          const tr = document.createElement("tr");
+          const cell = (text) => { const td = document.createElement("td"); td.textContent = text; return td; };
+          tr.appendChild(cell(subUserLabel(p)));
+          tr.appendChild(cell(p.tierName || "—"));
+          tr.appendChild(cell("$" + p.amountUsd + " · " + p.durationDays + "d"));
+          tr.appendChild(cell(p.proofFileId ? "📷 photo receipt" : (p.proofText || "—")));
+          tr.appendChild(cell(subFmtDate(p.createdAt)));
+          const actTd = document.createElement("td");
+          const okBtn = document.createElement("button"); okBtn.textContent = "Approve"; okBtn.className = "small";
+          okBtn.addEventListener("click", async () => {
+            if (!confirm(`Approve ${p.durationDays} days for ${subUserLabel(p)}?`)) return;
+            try { await api(`/admin/subscription/payments/${encodeURIComponent(p.id)}/approve`, { method: "POST" }); loadSubPayments(); loadSubSubscribers(); }
+            catch (e) { setStatus(document.getElementById("subPaymentsStatus"), e.message, "#a33d3d"); }
+          });
+          const noBtn = document.createElement("button"); noBtn.textContent = "Reject"; noBtn.className = "small secondary"; noBtn.style.marginLeft = "6px";
+          noBtn.addEventListener("click", async () => {
+            if (!confirm("Reject this payment?")) return;
+            try { await api(`/admin/subscription/payments/${encodeURIComponent(p.id)}/reject`, { method: "POST" }); loadSubPayments(); }
+            catch (e) { setStatus(document.getElementById("subPaymentsStatus"), e.message, "#a33d3d"); }
+          });
+          actTd.appendChild(okBtn); actTd.appendChild(noBtn);
+          tr.appendChild(actTd);
+          body.appendChild(tr);
+        });
+        setStatus(document.getElementById("subPaymentsStatus"), "", "#8a6d1f");
+      } catch (e) {
+        setStatus(document.getElementById("subPaymentsStatus"), e.message, "#a33d3d");
+      }
+    }
+
+    async function loadSubSubscribers() {
+      const body = document.getElementById("subSubscribersBody");
+      body.innerHTML = "";
+      try {
+        const data = await api("/admin/subscription/subscribers");
+        (data.subscribers || []).forEach((s) => {
+          const tr = document.createElement("tr");
+          const cell = (text) => { const td = document.createElement("td"); td.textContent = text; return td; };
+          tr.appendChild(cell(subUserLabel(s)));
+          const statusTd = document.createElement("td");
+          statusTd.textContent = s.active ? "Active" : "Inactive";
+          statusTd.style.color = s.active ? "#1f7a4d" : "#a33d3d";
+          tr.appendChild(statusTd);
+          tr.appendChild(cell(subFmtDate(s.activeUntil)));
+          const actTd = document.createElement("td");
+          const extBtn = document.createElement("button"); extBtn.textContent = "Extend"; extBtn.className = "small";
+          extBtn.addEventListener("click", async () => {
+            const days = Number(prompt("Add how many days?", "15"));
+            if (!days || days < 1) return;
+            try { await api(`/admin/subscription/subscribers/${encodeURIComponent(s.id)}/extend`, { method: "POST", body: JSON.stringify({ days }) }); loadSubSubscribers(); }
+            catch (e) { setStatus(document.getElementById("subSubscribersStatus"), e.message, "#a33d3d"); }
+          });
+          const revBtn = document.createElement("button"); revBtn.textContent = "Revoke"; revBtn.className = "small secondary"; revBtn.style.marginLeft = "6px";
+          revBtn.addEventListener("click", async () => {
+            if (!confirm(`Revoke access for ${subUserLabel(s)} now?`)) return;
+            try { await api(`/admin/subscription/subscribers/${encodeURIComponent(s.id)}/revoke`, { method: "POST" }); loadSubSubscribers(); }
+            catch (e) { setStatus(document.getElementById("subSubscribersStatus"), e.message, "#a33d3d"); }
+          });
+          actTd.appendChild(extBtn); actTd.appendChild(revBtn);
+          tr.appendChild(actTd);
+          body.appendChild(tr);
+        });
+      } catch (e) {
+        setStatus(document.getElementById("subSubscribersStatus"), e.message, "#a33d3d");
+      }
+    }
+
+    document.getElementById("subSettingsSave").addEventListener("click", saveSubSettings);
+    document.getElementById("subTierAdd").addEventListener("click", addSubTier);
+    document.getElementById("subPaymentsRefresh").addEventListener("click", loadSubPayments);
+    document.getElementById("subSubscribersRefresh").addEventListener("click", loadSubSubscribers);
 
     document.querySelectorAll("button.tab").forEach((button) => {
       button.addEventListener("click", () => showTab(button.dataset.tab));

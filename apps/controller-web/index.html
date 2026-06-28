@@ -774,6 +774,19 @@
     const isSoloMode = (params.get("mode") || "").toLowerCase() === "solo";
     const prefilledRoomCode = (params.get("roomCode") || "").toUpperCase();
 
+    // Subscriber token from the bot's quiz link. Persist it so a page reload
+    // (or coming back later) keeps solo-quiz access without re-opening the link.
+    const SUB_TOKEN_KEY = "fruitcatcher_sub_token";
+    (function () {
+      try {
+        const fromUrl = params.get("sub");
+        if (fromUrl) localStorage.setItem(SUB_TOKEN_KEY, fromUrl);
+      } catch (e) { /* ignore */ }
+    })();
+    function getSubscriberToken() {
+      try { return params.get("sub") || localStorage.getItem(SUB_TOKEN_KEY) || ""; } catch (e) { return ""; }
+    }
+
     if (isSoloMode) {
       document.body.classList.add("solo-mode");
     }
@@ -987,7 +1000,10 @@
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(data.error || `Request failed: ${response.status}`);
+        const err = new Error(data.error || `Request failed: ${response.status}`);
+        err.status = response.status;
+        err.payload = data;
+        throw err;
       }
       return data;
     }
@@ -1013,6 +1029,7 @@
             clientId: savedSession.clientId,
             shareId: params.get("shareId") || "",
             studentToken: (function () { try { return localStorage.getItem("fruitcatcher_student_token") || ""; } catch (e) { return ""; } })(),
+            subscriberToken: getSubscriberToken(),
             classroomId: params.get("classroomId") || "",
             source: params.get("source") || "web",
             sourceUserId: params.get("sourceUserId") || params.get("uid") || "",
@@ -1035,7 +1052,11 @@
         joinedRoomCode = "";
         joinedPlayerId = "";
         latestState = null;
-        setStatus(error.message || "Could not start quiz.", "#ff9b7d");
+        if (error.status === 402 || error.payload?.error === "subscription_required") {
+          setStatus(error.payload?.message || "An active subscription is required to take solo quizzes. Subscribe through our Telegram bot to get access.", "#ffd166");
+        } else {
+          setStatus(error.message || "Could not start quiz.", "#ff9b7d");
+        }
         renderState();
       } finally {
         joinInFlight = false;

@@ -1572,6 +1572,60 @@ function requireStudent(req, res, next) {
   next();
 }
 
+// ===== Subscriber tokens (carried in solo-quiz links handed out by the bot) =====
+// The token proves which subscriber a solo session belongs to; the actual
+// access check always re-reads active_until from the database at play time.
+const SUBSCRIBER_TOKEN_TTL_MS = Number(process.env.SUBSCRIBER_TOKEN_TTL_MS || 180 * 24 * 60 * 60 * 1000);
+function subscriberSecret() {
+  return `${ADMIN_TOKEN || APP_VERSION}:subscriber`;
+}
+
+function signSubscriberToken(subscriber) {
+  const payload = Buffer.from(JSON.stringify({
+    sub: subscriber.id,
+    role: "subscriber",
+    exp: Date.now() + SUBSCRIBER_TOKEN_TTL_MS
+  })).toString("base64url");
+  const signature = crypto.createHmac("sha256", subscriberSecret()).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+function verifySubscriberToken(token) {
+  const [payload, signature] = String(token || "").split(".");
+  if (!payload || !signature) {
+    return null;
+  }
+  const expected = crypto.createHmac("sha256", subscriberSecret()).update(payload).digest("base64url");
+  if (signature.length !== expected.length) {
+    return null;
+  }
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    return null;
+  }
+  try {
+    const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return session.exp > Date.now() && session.role === "subscriber" ? session : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+// Shared-secret guard for calls coming from the Telegram bot service.
+const BOT_API_SECRET = process.env.BOT_API_SECRET || "";
+function requireBot(req, res, next) {
+  if (!BOT_API_SECRET) {
+    res.status(503).json({ error: "Subscriptions are not configured." });
+    return;
+  }
+  const provided = req.get("x-bot-secret") || "";
+  if (provided.length !== BOT_API_SECRET.length ||
+      !crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(BOT_API_SECRET))) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  next();
+}
+
 function makeHttpError(statusCode, message) {
   const error = new Error(message);
   error.statusCode = statusCode;
@@ -2068,7 +2122,56 @@ async function initDatabase() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+
+  // ===== Subscriptions (solo quiz access, sold via the Telegram bot) =====
+  // Admin-managed price tiers; each grants N days of solo-quiz access.
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS subscription_tiers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      price_usd NUMERIC(8,2) NOT NULL,
+      duration_days INTEGER NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  // One row per Telegram subscriber; active_until is the access expiry.
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS subscribers (
+      id TEXT PRIMARY KEY,
+      telegram_id TEXT UNIQUE,
+      telegram_username TEXT,
+      display_name TEXT,
+      phone TEXT,
+      active_until TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  // Manual-payment submissions awaiting admin approval; approval extends access.
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS subscription_payments (
+      id TEXT PRIMARY KEY,
+      subscriber_id TEXT NOT NULL REFERENCES subscribers(id) ON DELETE CASCADE,
+      tier_id TEXT,
+      tier_name TEXT,
+      amount_usd NUMERIC(8,2) NOT NULL,
+      duration_days INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      proof_text TEXT,
+      proof_file_id TEXT,
+      reviewed_by TEXT,
+      reviewed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_sub_payments_status ON subscription_payments(status, created_at DESC)");
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_sub_payments_subscriber ON subscription_payments(subscriber_id, created_at DESC)");
+
   await runDatabaseMigrations();
+  await seedSubscriptionTiers();
   await ensureDefaultAdminUser();
   
   return true;
@@ -2564,12 +2667,21 @@ let videoEmbedEnabled = process.env.YOUTUBE_EMBED_ENABLED !== "false";
 // small daily quota (a search costs 100 of ~10,000 units/day).
 const videoCache = new Map();
 
+// Subscription gate: when on, self-serve solo quizzes require an active
+// subscriber. Default on (solo is subscription-only). Both persisted in
+// app_settings and managed from the admin portal.
+let soloSubscriptionRequired = process.env.SOLO_SUBSCRIPTION_REQUIRED !== "false";
+let subscriptionPaymentInfo = process.env.SUBSCRIPTION_PAYMENT_INFO ||
+  "To subscribe, transfer the amount to our account and send a screenshot or the transaction ID here. An admin will activate your access shortly.";
+
 async function loadAppSettings() {
   if (!db) return;
   try {
     const result = await dbQuery("SELECT key, value FROM app_settings");
     for (const row of result?.rows || []) {
       if (row.key === "video_embed_enabled") videoEmbedEnabled = row.value === "true";
+      if (row.key === "solo_subscription_required") soloSubscriptionRequired = row.value === "true";
+      if (row.key === "subscription_payment_info" && row.value) subscriptionPaymentInfo = row.value;
     }
   } catch (error) {
     console.error("Failed to load app settings:", error.message);
@@ -2583,6 +2695,114 @@ async function setAppSetting(key, value) {
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
     [key, String(value)]
   );
+}
+
+// ===== Subscription data helpers =====
+// Trim + collapse whitespace + cap length; returns null when empty (so COALESCE
+// keeps an existing value rather than overwriting it with a blank).
+function cleanField(value, maxLength = 200) {
+  const text = String(value == null ? "" : value).replace(/\s+/g, " ").trim().slice(0, maxLength);
+  return text || null;
+}
+
+const DEFAULT_SUBSCRIPTION_TIERS = [
+  { name: "1 Day", priceUsd: 1, durationDays: 1 },
+  { name: "5 Days", priceUsd: 2, durationDays: 5 },
+  { name: "15 Days", priceUsd: 5, durationDays: 15 },
+  { name: "45 Days", priceUsd: 10, durationDays: 45 },
+  { name: "120 Days", priceUsd: 20, durationDays: 120 }
+];
+
+async function seedSubscriptionTiers() {
+  if (!db) return;
+  try {
+    const existing = await dbQuery("SELECT COUNT(*)::int AS n FROM subscription_tiers");
+    if ((existing?.rows?.[0]?.n || 0) > 0) return;
+    let order = 0;
+    for (const tier of DEFAULT_SUBSCRIPTION_TIERS) {
+      await dbQuery(
+        `INSERT INTO subscription_tiers (id, name, price_usd, duration_days, sort_order, is_active, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, TRUE, NOW(), NOW())`,
+        [createId(), tier.name, tier.priceUsd, tier.durationDays, order++]
+      );
+    }
+    console.log("Seeded default subscription tiers.");
+  } catch (error) {
+    console.error("Failed to seed subscription tiers:", error.message);
+  }
+}
+
+function publicTier(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    priceUsd: Number(row.price_usd),
+    durationDays: Number(row.duration_days),
+    sortOrder: Number(row.sort_order || 0),
+    isActive: row.is_active !== false
+  };
+}
+
+function subscriberIsActive(row) {
+  return Boolean(row && row.active_until && new Date(row.active_until).getTime() > Date.now());
+}
+
+function publicSubscriber(row) {
+  return {
+    id: row.id,
+    telegramId: row.telegram_id,
+    telegramUsername: row.telegram_username,
+    displayName: row.display_name,
+    phone: row.phone,
+    activeUntil: row.active_until,
+    active: subscriberIsActive(row),
+    token: signSubscriberToken(row)
+  };
+}
+
+async function getSubscriberById(id) {
+  const result = await dbQuery("SELECT * FROM subscribers WHERE id = $1", [String(id)]);
+  return result?.rows?.[0] || null;
+}
+
+async function getSubscriberByTelegram(telegramId) {
+  const result = await dbQuery("SELECT * FROM subscribers WHERE telegram_id = $1", [String(telegramId)]);
+  return result?.rows?.[0] || null;
+}
+
+async function upsertSubscriber({ telegramId, telegramUsername, displayName, phone }) {
+  const existing = await getSubscriberByTelegram(telegramId);
+  if (existing) {
+    const result = await dbQueryRequired(
+      `UPDATE subscribers SET
+         telegram_username = COALESCE($2, telegram_username),
+         display_name = COALESCE($3, display_name),
+         phone = COALESCE($4, phone),
+         updated_at = NOW()
+       WHERE telegram_id = $1 RETURNING *`,
+      [String(telegramId), telegramUsername || null, displayName || null, phone || null]
+    );
+    return result.rows[0];
+  }
+  const result = await dbQueryRequired(
+    `INSERT INTO subscribers (id, telegram_id, telegram_username, display_name, phone, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, NOW(), NOW()) RETURNING *`,
+    [createId(), String(telegramId), telegramUsername || null, displayName || null, phone || null]
+  );
+  return result.rows[0];
+}
+
+// Extend a subscriber's access by N days, stacking from the later of "now" or
+// their current expiry, and return the new active_until.
+async function extendSubscriber(subscriberId, days) {
+  const result = await dbQueryRequired(
+    `UPDATE subscribers
+     SET active_until = GREATEST(COALESCE(active_until, NOW()), NOW()) + ($2 || ' days')::interval,
+         updated_at = NOW()
+     WHERE id = $1 RETURNING *`,
+    [String(subscriberId), String(Math.max(0, Math.round(days)))]
+  );
+  return result.rows[0] || null;
 }
 
 async function getCachedCandidates(key) {
@@ -2946,6 +3166,23 @@ app.post("/solo/sessions", async (req, res) => {
       return;
     }
 
+    // Subscription gate: self-serve solo quizzes require an active subscriber.
+    // Teacher-shared quizzes and classroom assignments stay free (institutional).
+    const isInstitutional = Boolean(share) || Boolean(classroomId);
+    let subscriberId = null;
+    if (soloSubscriptionRequired && !isInstitutional) {
+      const subClaim = verifySubscriberToken(req.body?.subscriberToken || req.body?.subscriber_token || "");
+      const subscriber = subClaim ? await getSubscriberById(subClaim.sub) : null;
+      if (!subscriber || !subscriberIsActive(subscriber)) {
+        res.status(402).json({
+          error: "subscription_required",
+          message: "An active subscription is required to take solo quizzes. Subscribe through our Telegram bot to get access."
+        });
+        return;
+      }
+      subscriberId = subscriber.id;
+    }
+
     const session = {
       id: createId(),
       studentId,
@@ -2965,7 +3202,8 @@ app.post("/solo/sessions", async (req, res) => {
       usageSource: "solo",
       shareId: share ? share.id : null,
       studentUserId: studentSession ? studentSession.sub : null,
-      classroomId
+      classroomId,
+      subscriberId
     };
 
     soloSessions.set(session.id, session);
@@ -3068,6 +3306,308 @@ app.post("/solo/sessions/:id/answer", async (req, res) => {
   }
 });
 
+// ============================================================================
+// Subscriptions — bot-facing endpoints (called by the Telegram bot service)
+// ============================================================================
+// Full admins only. Defined here (requireRole is a hoisted function) so the
+// admin subscription routes below can reference it.
+const requireAdmin = requireRole("admin");
+
+// Active price tiers the subscriber can choose from.
+app.get("/bot/subscription/tiers", requireBot, async (_req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const result = await dbQueryRequired(
+      "SELECT * FROM subscription_tiers WHERE is_active = TRUE ORDER BY sort_order ASC, price_usd ASC"
+    );
+    res.json({ tiers: result.rows.map(publicTier), paymentInfo: subscriptionPaymentInfo });
+  } catch (error) {
+    console.error("Bot list tiers failed:", error);
+    res.status(500).json({ error: "Could not load tiers" });
+  }
+});
+
+// Upsert a subscriber from their Telegram identity; returns status + token.
+app.post("/bot/subscription/subscriber", requireBot, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const telegramId = String(req.body?.telegramId || "").trim();
+    if (!telegramId) {
+      res.status(400).json({ error: "telegramId is required" });
+      return;
+    }
+    const subscriber = await upsertSubscriber({
+      telegramId,
+      telegramUsername: cleanField(req.body?.telegramUsername, 80),
+      displayName: cleanField(req.body?.displayName, 80),
+      phone: cleanField(req.body?.phone, 40)
+    });
+    res.json({ subscriber: publicSubscriber(subscriber) });
+  } catch (error) {
+    console.error("Bot upsert subscriber failed:", error);
+    res.status(500).json({ error: "Could not save subscriber" });
+  }
+});
+
+// Current subscription status for a Telegram user.
+app.get("/bot/subscription/status", requireBot, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const subscriber = await getSubscriberByTelegram(String(req.query.telegramId || "").trim());
+    if (!subscriber) {
+      res.json({ exists: false, active: false });
+      return;
+    }
+    const latest = await dbQuery(
+      "SELECT status, tier_name, created_at FROM subscription_payments WHERE subscriber_id = $1 ORDER BY created_at DESC LIMIT 1",
+      [subscriber.id]
+    );
+    res.json({ exists: true, subscriber: publicSubscriber(subscriber), latestPayment: latest?.rows?.[0] || null });
+  } catch (error) {
+    console.error("Bot status failed:", error);
+    res.status(500).json({ error: "Could not load status" });
+  }
+});
+
+// Submit a manual-payment proof for a chosen tier; creates a pending request.
+app.post("/bot/subscription/payments", requireBot, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const telegramId = String(req.body?.telegramId || "").trim();
+    const tierId = String(req.body?.tierId || "").trim();
+    if (!telegramId || !tierId) {
+      res.status(400).json({ error: "telegramId and tierId are required" });
+      return;
+    }
+    const tierResult = await dbQueryRequired(
+      "SELECT * FROM subscription_tiers WHERE id = $1 AND is_active = TRUE", [tierId]
+    );
+    const tier = tierResult.rows[0];
+    if (!tier) {
+      res.status(404).json({ error: "Tier not found" });
+      return;
+    }
+    const subscriber = await upsertSubscriber({
+      telegramId,
+      telegramUsername: cleanField(req.body?.telegramUsername, 80),
+      displayName: cleanField(req.body?.displayName, 80)
+    });
+    const paymentId = createId();
+    await dbQueryRequired(
+      `INSERT INTO subscription_payments
+         (id, subscriber_id, tier_id, tier_name, amount_usd, duration_days, status, proof_text, proof_file_id, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, NOW())`,
+      [paymentId, subscriber.id, tier.id, tier.name, tier.price_usd, tier.duration_days,
+       cleanField(req.body?.proofText, 1000), cleanField(req.body?.proofFileId, 300)]
+    );
+    res.status(201).json({ ok: true, paymentId, tier: publicTier(tier), subscriber: publicSubscriber(subscriber) });
+  } catch (error) {
+    console.error("Bot submit payment failed:", error);
+    res.status(500).json({ error: "Could not submit payment" });
+  }
+});
+
+// ============================================================================
+// Subscriptions — admin management
+// ============================================================================
+
+app.get("/admin/subscription/settings", requireAdmin, (_req, res) => {
+  res.json({ required: soloSubscriptionRequired, paymentInfo: subscriptionPaymentInfo });
+});
+
+app.put("/admin/subscription/settings", requireAdmin, async (req, res) => {
+  await runAdminAction(res, async () => {
+    if (typeof req.body?.required === "boolean") {
+      soloSubscriptionRequired = req.body.required;
+      await setAppSetting("solo_subscription_required", soloSubscriptionRequired ? "true" : "false");
+    }
+    if (typeof req.body?.paymentInfo === "string") {
+      subscriptionPaymentInfo = req.body.paymentInfo.slice(0, 1000);
+      await setAppSetting("subscription_payment_info", subscriptionPaymentInfo);
+    }
+    await logAuditAction("subscription.settings", "app_settings", "subscription", { required: soloSubscriptionRequired }, req);
+    res.json({ ok: true, required: soloSubscriptionRequired, paymentInfo: subscriptionPaymentInfo });
+  });
+});
+
+app.get("/admin/subscription/tiers", requireAdmin, async (_req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const result = await dbQueryRequired("SELECT * FROM subscription_tiers ORDER BY sort_order ASC, price_usd ASC");
+    res.json({ tiers: result.rows.map(publicTier) });
+  } catch (error) {
+    console.error("List tiers failed:", error);
+    res.status(500).json({ error: "Could not load tiers" });
+  }
+});
+
+app.post("/admin/subscription/tiers", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  await runAdminAction(res, async () => {
+    const name = normalizeAdminText(req.body?.name, 60, "");
+    const priceUsd = Number(req.body?.priceUsd);
+    const durationDays = Math.round(Number(req.body?.durationDays));
+    requireValid(name.length >= 1, "Tier name is required");
+    requireValid(priceUsd >= 0 && priceUsd < 100000, "Price must be a positive amount");
+    requireValid(durationDays >= 1 && durationDays <= 3650, "Duration must be 1–3650 days");
+    const id = createId();
+    await dbQueryRequired(
+      `INSERT INTO subscription_tiers (id, name, price_usd, duration_days, sort_order, is_active, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, TRUE, NOW(), NOW())`,
+      [id, name, priceUsd, durationDays, Math.round(Number(req.body?.sortOrder) || 0)]
+    );
+    await logAuditAction("subscription.tier.create", "subscription_tiers", id, { name, priceUsd, durationDays }, req);
+    res.status(201).json({ ok: true, tier: publicTier({ id, name, price_usd: priceUsd, duration_days: durationDays, sort_order: Number(req.body?.sortOrder) || 0, is_active: true }) });
+  });
+});
+
+app.put("/admin/subscription/tiers/:id", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  await runAdminAction(res, async () => {
+    const id = normalizeAdminId(req.params.id, "tier id");
+    const name = normalizeAdminText(req.body?.name, 60, "");
+    const priceUsd = Number(req.body?.priceUsd);
+    const durationDays = Math.round(Number(req.body?.durationDays));
+    requireValid(name.length >= 1, "Tier name is required");
+    requireValid(priceUsd >= 0 && priceUsd < 100000, "Price must be a positive amount");
+    requireValid(durationDays >= 1 && durationDays <= 3650, "Duration must be 1–3650 days");
+    const result = await dbQueryRequired(
+      `UPDATE subscription_tiers SET name = $2, price_usd = $3, duration_days = $4,
+         sort_order = $5, is_active = $6, updated_at = NOW() WHERE id = $1 RETURNING *`,
+      [id, name, priceUsd, durationDays, Math.round(Number(req.body?.sortOrder) || 0),
+       req.body?.isActive === false ? false : true]
+    );
+    if (!result.rows[0]) { res.status(404).json({ error: "Tier not found" }); return; }
+    await logAuditAction("subscription.tier.update", "subscription_tiers", id, { name, priceUsd, durationDays }, req);
+    res.json({ ok: true, tier: publicTier(result.rows[0]) });
+  });
+});
+
+app.delete("/admin/subscription/tiers/:id", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  await runAdminAction(res, async () => {
+    const id = normalizeAdminId(req.params.id, "tier id");
+    await dbQueryRequired("UPDATE subscription_tiers SET is_active = FALSE, updated_at = NOW() WHERE id = $1", [id]);
+    await logAuditAction("subscription.tier.delete", "subscription_tiers", id, {}, req);
+    res.json({ ok: true });
+  });
+});
+
+app.get("/admin/subscription/payments", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const status = ["pending", "approved", "rejected"].includes(String(req.query.status)) ? String(req.query.status) : "pending";
+    const result = await dbQueryRequired(
+      `SELECT p.*, s.telegram_id, s.telegram_username, s.display_name, s.active_until
+       FROM subscription_payments p JOIN subscribers s ON s.id = p.subscriber_id
+       WHERE p.status = $1 ORDER BY p.created_at DESC LIMIT 200`,
+      [status]
+    );
+    res.json({
+      payments: result.rows.map((row) => ({
+        id: row.id,
+        subscriberId: row.subscriber_id,
+        telegramId: row.telegram_id,
+        telegramUsername: row.telegram_username,
+        displayName: row.display_name,
+        tierName: row.tier_name,
+        amountUsd: Number(row.amount_usd),
+        durationDays: Number(row.duration_days),
+        status: row.status,
+        proofText: row.proof_text,
+        proofFileId: row.proof_file_id,
+        activeUntil: row.active_until,
+        createdAt: row.created_at
+      }))
+    });
+  } catch (error) {
+    console.error("List payments failed:", error);
+    res.status(500).json({ error: "Could not load payments" });
+  }
+});
+
+app.post("/admin/subscription/payments/:id/approve", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  await runAdminAction(res, async () => {
+    const id = normalizeAdminId(req.params.id, "payment id");
+    const result = await dbQueryRequired("SELECT * FROM subscription_payments WHERE id = $1", [id]);
+    const payment = result.rows[0];
+    if (!payment) { res.status(404).json({ error: "Payment not found" }); return; }
+    if (payment.status !== "pending") { res.status(409).json({ error: "Payment is already " + payment.status }); return; }
+    await dbQueryRequired(
+      "UPDATE subscription_payments SET status = 'approved', reviewed_by = $2, reviewed_at = NOW() WHERE id = $1",
+      [id, req.adminUser?.username || "admin"]
+    );
+    const subscriber = await extendSubscriber(payment.subscriber_id, Number(payment.duration_days));
+    await logAuditAction("subscription.payment.approve", "subscription_payments", id,
+      { durationDays: Number(payment.duration_days), activeUntil: subscriber?.active_until }, req);
+    res.json({ ok: true, subscriber: subscriber ? publicSubscriber(subscriber) : null });
+  });
+});
+
+app.post("/admin/subscription/payments/:id/reject", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  await runAdminAction(res, async () => {
+    const id = normalizeAdminId(req.params.id, "payment id");
+    const result = await dbQueryRequired(
+      "UPDATE subscription_payments SET status = 'rejected', reviewed_by = $2, reviewed_at = NOW() WHERE id = $1 AND status = 'pending' RETURNING id",
+      [id, req.adminUser?.username || "admin"]
+    );
+    if (!result.rows[0]) { res.status(409).json({ error: "Payment is not pending" }); return; }
+    await logAuditAction("subscription.payment.reject", "subscription_payments", id, {}, req);
+    res.json({ ok: true });
+  });
+});
+
+app.get("/admin/subscription/subscribers", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const filter = String(req.query.filter || "");
+    const where = filter === "active" ? "WHERE active_until > NOW()" : "";
+    const result = await dbQueryRequired(
+      `SELECT * FROM subscribers ${where} ORDER BY active_until DESC NULLS LAST, created_at DESC LIMIT 300`
+    );
+    res.json({
+      subscribers: result.rows.map((row) => ({
+        id: row.id,
+        telegramId: row.telegram_id,
+        telegramUsername: row.telegram_username,
+        displayName: row.display_name,
+        phone: row.phone,
+        activeUntil: row.active_until,
+        active: subscriberIsActive(row),
+        createdAt: row.created_at
+      }))
+    });
+  } catch (error) {
+    console.error("List subscribers failed:", error);
+    res.status(500).json({ error: "Could not load subscribers" });
+  }
+});
+
+app.post("/admin/subscription/subscribers/:id/extend", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  await runAdminAction(res, async () => {
+    const id = normalizeAdminId(req.params.id, "subscriber id");
+    const days = Math.round(Number(req.body?.days));
+    requireValid(days >= 1 && days <= 3650, "Days must be 1–3650");
+    const subscriber = await extendSubscriber(id, days);
+    if (!subscriber) { res.status(404).json({ error: "Subscriber not found" }); return; }
+    await logAuditAction("subscription.subscriber.extend", "subscribers", id, { days, activeUntil: subscriber.active_until }, req);
+    res.json({ ok: true, subscriber: publicSubscriber(subscriber) });
+  });
+});
+
+app.post("/admin/subscription/subscribers/:id/revoke", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  await runAdminAction(res, async () => {
+    const id = normalizeAdminId(req.params.id, "subscriber id");
+    await dbQueryRequired("UPDATE subscribers SET active_until = NOW(), updated_at = NOW() WHERE id = $1", [id]);
+    await logAuditAction("subscription.subscriber.revoke", "subscribers", id, {}, req);
+    res.json({ ok: true });
+  });
+});
+
 async function isAuthorized(req) {
   if (!ADMIN_TOKEN) {
     return false;
@@ -3136,8 +3676,6 @@ function requireRole(...allowedRoles) {
   };
 }
 
-// Full admins only.
-const requireAdmin = requireRole("admin");
 // Any signed-in staff member (admin, teacher, or facilitator).
 const requireStaff = requireRole(...STAFF_ROLES);
 
