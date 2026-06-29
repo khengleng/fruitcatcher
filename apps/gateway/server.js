@@ -3018,6 +3018,16 @@ function hashString(value) {
   return hash;
 }
 
+// Bias the search toward Khmer-language videos for Khmer/bilingual quizzes:
+// if the query has no Khmer script, append a Khmer "explained in Khmer" hint.
+function localizeVideoQuery(query, language) {
+  if (!query) return query;
+  const wantsKhmer = language === "khmer" || language === "bilingual";
+  if (!wantsKhmer) return query;
+  const hasKhmer = /[ក-៿]/.test(query);
+  return hasKhmer ? query : `${query} ពន្យល់ជាភាសាខ្មែរ`;
+}
+
 function videoQueryFor(question, config) {
   let query = String(question?.videoQuery || "").trim();
   if (!query) {
@@ -3030,7 +3040,7 @@ function videoQueryFor(question, config) {
       .join(" ");
     query = `${subject} ${topic} explained`.trim();
   }
-  return query;
+  return localizeVideoQuery(query, config && config.language);
 }
 
 const VIDEO_STOPWORDS = new Set(["the", "a", "an", "of", "to", "for", "and", "how", "what", "is", "in", "on", "with", "step", "by", "explained", "tutorial", "lesson", "video", "grade", "using", "your"]);
@@ -3137,7 +3147,7 @@ function buildVideoUrl(question, config) {
       .join(" ");
     query = `${subject} ${topic} explained`.trim();
   }
-  return youtubeSearchUrl(query);
+  return youtubeSearchUrl(localizeVideoQuery(query, config && config.language));
 }
 
 function getSoloSession(sessionId) {
@@ -6898,7 +6908,9 @@ Requirements:
 - A short explanation under 30 words
 - A more detailed elaboration under 90 words
 - NOTATION: write all math and science notation so it displays cleanly without a full LaTeX renderer. Use ^ for exponents (x^2, 10^3), a slash or \\frac{a}{b} for fractions, sqrt() for square roots, and plain symbols (×, ÷, ±, °, ≤, ≥, π) and chemical formulas like H2O, CO2, with charges written like Na^+ or SO4^2-. Do NOT use LaTeX environments, matrices, integrals/summations, indexed roots like \\sqrt[3]{}, \\text{}, \\vec{}, or multi-line LaTeX (\\\\).
-- In "videoQuery", a precise English YouTube search query (6-12 words) for a tutorial that teaches the exact method or concept needed to SOLVE this question at this grade level. Phrase it the way a learner searches for a lesson and include the grade/level when helpful. Focus on the skill used in the solution, not just the broad topic. Examples: "how to find the area of a rectangle grade 4", "balancing chemical equations step by step grade 10", "subtracting fractions with different denominators explained".
+- In "videoQuery", ${(config.language === "khmer" || config.language === "bilingual")
+  ? "a precise YouTube search query (6-12 words) WRITTEN IN KHMER (ភាសាខ្មែរ) for a Khmer-language video tutorial that teaches the exact method needed to SOLVE this question at this grade level. Phrase it the way a Khmer learner would search for a lesson. Example: របៀបគណនាផ្ទៃក្រឡាចតុកោណកែង ថ្នាក់ទី៤"
+  : "a precise English YouTube search query (6-12 words) for a tutorial that teaches the exact method or concept needed to SOLVE this question at this grade level. Phrase it the way a learner searches for a lesson and include the grade/level when helpful. Examples: how to find the area of a rectangle grade 4; balancing chemical equations step by step grade 10; subtracting fractions with different denominators explained"}
 - Keep the question answerable by Grade ${config.gradeLevel} learners
 - CURRICULUM ALIGNMENT (important): this question is for ${getAlignmentTarget(config)}. Use ONLY concepts, skills, and vocabulary that are appropriate for that level — never content from a higher grade, a different subject, or outside the stated program.
 - ${getCurriculumInstruction(config.curriculum)}
