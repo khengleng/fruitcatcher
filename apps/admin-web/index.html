@@ -1397,7 +1397,11 @@
             Require an active subscription for solo quizzes
           </label>
           <label style="flex:1; min-width:280px;">Payment instructions (shown in the bot)
-            <textarea id="subPaymentInfo" rows="3" maxlength="1000" placeholder="e.g. Transfer to Wing 012 345 678 (LyHuor Learning), then send a screenshot here."></textarea>
+            <textarea id="subPaymentInfo" rows="3" maxlength="1000" placeholder="e.g. Scan the KHQR above with Wing/ABA, then send a screenshot here."></textarea>
+          </label>
+          <label style="flex:1; min-width:280px;">Payment QR image URL (shown in the bot)
+            <input id="subPaymentQrUrl" type="text" maxlength="500" placeholder="https://mytv.cambobia.com/khqr.jpg">
+            <span class="muted" style="font-size:12px;">Public image URL of your KHQR/Wing code. Leave blank to send text only.</span>
           </label>
           <button id="subSettingsSave">Save Settings</button>
           <span id="subSettingsStatus" class="muted" style="align-self:center;"></span>
@@ -3914,6 +3918,7 @@
         const data = await api("/admin/subscription/settings");
         document.getElementById("subRequired").checked = Boolean(data.required);
         document.getElementById("subPaymentInfo").value = data.paymentInfo || "";
+        document.getElementById("subPaymentQrUrl").value = data.paymentQrUrl || "";
       } catch (e) {
         setStatus(document.getElementById("subSettingsStatus"), e.message, "#a33d3d");
       }
@@ -3927,7 +3932,8 @@
           method: "PUT",
           body: JSON.stringify({
             required: document.getElementById("subRequired").checked,
-            paymentInfo: document.getElementById("subPaymentInfo").value
+            paymentInfo: document.getElementById("subPaymentInfo").value,
+            paymentQrUrl: document.getElementById("subPaymentQrUrl").value
           })
         });
         setStatus(status, "Saved ✓", "#1f7a4d");

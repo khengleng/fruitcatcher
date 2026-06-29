@@ -77,6 +77,14 @@ function sendText(chatId, text, replyMarkup) {
   });
 }
 
+function sendPhoto(chatId, photoUrl, caption) {
+  return tg("sendPhoto", {
+    chat_id: chatId,
+    photo: photoUrl,
+    ...(caption ? { caption: caption.slice(0, 1024), parse_mode: "HTML" } : {})
+  });
+}
+
 function answerCallback(callbackId, text) {
   return tg("answerCallbackQuery", { callback_query_id: callbackId, ...(text ? { text } : {}) });
 }
@@ -145,12 +153,15 @@ async function chooseTier(chatId, tierId, from) {
     }
   });
   const info = data.paymentInfo || "Transfer the amount and send your receipt here.";
-  await sendText(
-    chatId,
-    `You selected <b>$${tier.priceUsd} — ${tier.durationDays} day${tier.durationDays === 1 ? "" : "s"}</b>.\n\n` +
-    `${info}\n\n` +
-    `📸 After paying, send a <b>photo of your receipt</b> or type the <b>transaction ID</b> here.`
-  );
+  const planLine = `You selected <b>$${tier.priceUsd} — ${tier.durationDays} day${tier.durationDays === 1 ? "" : "s"}</b>.`;
+  const followUp = `${info}\n\n📸 After paying, send a <b>photo of your receipt</b> or type the <b>transaction ID</b> here.`;
+  if (data.paymentQrUrl) {
+    // Show the KHQR payment image, then the instructions.
+    await sendPhoto(chatId, data.paymentQrUrl, `${planLine}\n\nScan this KHQR to pay <b>$${tier.priceUsd}</b>.`);
+    await sendText(chatId, followUp);
+  } else {
+    await sendText(chatId, `${planLine}\n\n${followUp}`);
+  }
 }
 
 async function submitProof(chatId, from, { proofText, proofFileId }) {

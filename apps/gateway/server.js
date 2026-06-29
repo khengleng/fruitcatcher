@@ -2672,7 +2672,9 @@ const videoCache = new Map();
 // app_settings and managed from the admin portal.
 let soloSubscriptionRequired = process.env.SOLO_SUBSCRIPTION_REQUIRED !== "false";
 let subscriptionPaymentInfo = process.env.SUBSCRIPTION_PAYMENT_INFO ||
-  "To subscribe, transfer the amount to our account and send a screenshot or the transaction ID here. An admin will activate your access shortly.";
+  "Scan the KHQR code above with any Cambodian banking app (Wing, ABA, etc.) to pay, then send a screenshot of your receipt here. An admin will activate your access shortly.";
+// Optional payment-QR image the bot shows to subscribers (KHQR / Wing, etc.).
+let subscriptionPaymentQrUrl = process.env.SUBSCRIPTION_PAYMENT_QR_URL || "https://mytv.cambobia.com/khqr.jpg";
 
 async function loadAppSettings() {
   if (!db) return;
@@ -2682,6 +2684,7 @@ async function loadAppSettings() {
       if (row.key === "video_embed_enabled") videoEmbedEnabled = row.value === "true";
       if (row.key === "solo_subscription_required") soloSubscriptionRequired = row.value === "true";
       if (row.key === "subscription_payment_info" && row.value) subscriptionPaymentInfo = row.value;
+      if (row.key === "subscription_payment_qr_url") subscriptionPaymentQrUrl = row.value || "";
     }
   } catch (error) {
     console.error("Failed to load app settings:", error.message);
@@ -3320,7 +3323,7 @@ app.get("/bot/subscription/tiers", requireBot, async (_req, res) => {
     const result = await dbQueryRequired(
       "SELECT * FROM subscription_tiers WHERE is_active = TRUE ORDER BY sort_order ASC, price_usd ASC"
     );
-    res.json({ tiers: result.rows.map(publicTier), paymentInfo: subscriptionPaymentInfo });
+    res.json({ tiers: result.rows.map(publicTier), paymentInfo: subscriptionPaymentInfo, paymentQrUrl: subscriptionPaymentQrUrl });
   } catch (error) {
     console.error("Bot list tiers failed:", error);
     res.status(500).json({ error: "Could not load tiers" });
@@ -3412,7 +3415,7 @@ app.post("/bot/subscription/payments", requireBot, async (req, res) => {
 // ============================================================================
 
 app.get("/admin/subscription/settings", requireAdmin, (_req, res) => {
-  res.json({ required: soloSubscriptionRequired, paymentInfo: subscriptionPaymentInfo });
+  res.json({ required: soloSubscriptionRequired, paymentInfo: subscriptionPaymentInfo, paymentQrUrl: subscriptionPaymentQrUrl });
 });
 
 app.put("/admin/subscription/settings", requireAdmin, async (req, res) => {
@@ -3425,8 +3428,12 @@ app.put("/admin/subscription/settings", requireAdmin, async (req, res) => {
       subscriptionPaymentInfo = req.body.paymentInfo.slice(0, 1000);
       await setAppSetting("subscription_payment_info", subscriptionPaymentInfo);
     }
+    if (typeof req.body?.paymentQrUrl === "string") {
+      subscriptionPaymentQrUrl = req.body.paymentQrUrl.trim().slice(0, 500);
+      await setAppSetting("subscription_payment_qr_url", subscriptionPaymentQrUrl);
+    }
     await logAuditAction("subscription.settings", "app_settings", "subscription", { required: soloSubscriptionRequired }, req);
-    res.json({ ok: true, required: soloSubscriptionRequired, paymentInfo: subscriptionPaymentInfo });
+    res.json({ ok: true, required: soloSubscriptionRequired, paymentInfo: subscriptionPaymentInfo, paymentQrUrl: subscriptionPaymentQrUrl });
   });
 });
 
