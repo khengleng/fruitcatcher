@@ -143,10 +143,30 @@ async function setupBotMenu() {
 // Remembers which tier a user is paying for, until they send their proof.
 const pendingTier = new Map();
 
-async function showWelcome(chatId) {
+async function showWelcome(chatId, from) {
+  let extra = "";
+  // First contact creates the subscriber, which may grant a one-time free trial.
+  if (subscriptionsEnabled) {
+    try {
+      const data = await gatewayApi("/bot/subscription/subscriber", {
+        method: "POST",
+        body: {
+          telegramId: String(chatId),
+          telegramUsername: from?.username || "",
+          displayName: cleanText([from?.first_name, from?.last_name].filter(Boolean).join(" "), 48)
+        }
+      });
+      if (data.trialGranted) {
+        const d = data.trialDays || 1;
+        extra = `\n\n🎁 <b>Welcome gift:</b> you've got <b>${d} free day${d === 1 ? "" : "s"}</b> to try everything — tap ▶️ <b>Take a quiz</b> to start now!`;
+      } else if (data.subscriber && data.subscriber.active) {
+        extra = "\n\n✅ Your access is active — tap ▶️ <b>Take a quiz</b>.";
+      }
+    } catch (e) { /* non-fatal */ }
+  }
   await sendText(
     chatId,
-    "👋 Welcome to <b>LyHuor Learning</b>!\n\nSolo quizzes are for subscribers. Use the buttons below 👇\n\n💳 <b>Subscribe</b> — choose a plan and pay\n📊 <b>My status</b> — check your access\n▶️ <b>Take a quiz</b> — start learning",
+    "👋 Welcome to <b>LyHuor Learning</b>!\n\nSolo quizzes are for subscribers. Use the buttons below 👇\n\n💳 <b>Subscribe</b> — choose a plan and pay\n📊 <b>My status</b> — check your access\n▶️ <b>Take a quiz</b> — start learning" + extra,
     replyKeyboard
   );
 }
@@ -339,7 +359,7 @@ async function handleTelegramUpdate(update) {
   if (cmd === "subscribe") return void (await showTiers(chatId));
   if (cmd === "status") return void (await showStatus(chatId));
   if (cmd === "quiz") return void (await startQuiz(chatId));
-  if (cmd === "start") return void (await showWelcome(chatId));
+  if (cmd === "start") return void (await showWelcome(chatId, from));
 
   // A real message — log it to the admin chat thread.
   await forwardInbound(chatId, from, message);

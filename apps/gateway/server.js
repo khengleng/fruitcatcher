@@ -2254,6 +2254,7 @@ async function initDatabase() {
       display_name TEXT,
       phone TEXT,
       active_until TIMESTAMPTZ,
+      free_trial_used BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
@@ -2310,6 +2311,7 @@ async function runDatabaseMigrations() {
   const migrations = [
     "ALTER TABLE subscriber_messages ADD COLUMN IF NOT EXISTS telegram_message_id BIGINT",
     "ALTER TABLE subscriber_messages ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
+    "ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS free_trial_used BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE students ADD COLUMN IF NOT EXISTS display_name TEXT",
     "ALTER TABLE students ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
     "ALTER TABLE students ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
@@ -2804,6 +2806,9 @@ const videoCache = new Map();
 // Subscription gate: when on, self-serve solo quizzes require an active
 // subscriber. Default on (solo is subscription-only). Both persisted in
 // app_settings and managed from the admin portal.
+// One-time free trial for first-time subscribers (granted on first join).
+let freeTrialEnabled = process.env.FREE_TRIAL_ENABLED !== "false";
+let freeTrialDays = Number(process.env.FREE_TRIAL_DAYS || 1);
 let soloSubscriptionRequired = process.env.SOLO_SUBSCRIPTION_REQUIRED !== "false";
 let subscriptionPaymentInfo = process.env.SUBSCRIPTION_PAYMENT_INFO ||
   "Scan the KHQR code above with any Cambodian banking app (Wing, ABA, etc.) to pay, then send a screenshot of your receipt here. An admin will activate your access shortly.";
@@ -2817,6 +2822,8 @@ async function loadAppSettings() {
     for (const row of result?.rows || []) {
       if (row.key === "video_embed_enabled") videoEmbedEnabled = row.value === "true";
       if (row.key === "solo_subscription_required") soloSubscriptionRequired = row.value === "true";
+      if (row.key === "free_trial_enabled") freeTrialEnabled = row.value === "true";
+      if (row.key === "free_trial_days") freeTrialDays = Number(row.value) || 0;
       if (row.key === "subscription_payment_info" && row.value) subscriptionPaymentInfo = row.value;
       if (row.key === "subscription_payment_qr_url") subscriptionPaymentQrUrl = row.value || "";
     }
@@ -2921,12 +2928,18 @@ async function upsertSubscriber({ telegramId, telegramUsername, displayName, pho
     );
     return result.rows[0];
   }
+  // First-time joiner → grant the one-time free trial if enabled.
+  const grantTrial = freeTrialEnabled && freeTrialDays > 0;
+  const trialUntil = grantTrial ? new Date(Date.now() + freeTrialDays * 86400000) : null;
   const result = await dbQueryRequired(
-    `INSERT INTO subscribers (id, telegram_id, telegram_username, display_name, phone, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, NOW(), NOW()) RETURNING *`,
-    [createId(), String(telegramId), telegramUsername || null, displayName || null, phone || null]
+    `INSERT INTO subscribers (id, telegram_id, telegram_username, display_name, phone, active_until, free_trial_used, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW()) RETURNING *`,
+    [createId(), String(telegramId), telegramUsername || null, displayName || null, phone || null, trialUntil, grantTrial]
   );
-  return result.rows[0];
+  const row = result.rows[0];
+  row.trialGranted = grantTrial;       // transient flag for the bot welcome message
+  row.trialDays = grantTrial ? freeTrialDays : 0;
+  return row;
 }
 
 // Extend a subscriber's access by N days, stacking from the later of "now" or
@@ -3500,7 +3513,11 @@ app.post("/bot/subscription/subscriber", requireBot, async (req, res) => {
       displayName: cleanField(req.body?.displayName, 80),
       phone: cleanField(req.body?.phone, 40)
     });
-    res.json({ subscriber: publicSubscriber(subscriber) });
+    res.json({
+      subscriber: publicSubscriber(subscriber),
+      trialGranted: Boolean(subscriber.trialGranted),
+      trialDays: subscriber.trialDays || 0
+    });
   } catch (error) {
     console.error("Bot upsert subscriber failed:", error);
     res.status(500).json({ error: "Could not save subscriber" });
@@ -3627,7 +3644,13 @@ app.get("/solo/subscription", async (req, res) => {
 // ============================================================================
 
 app.get("/admin/subscription/settings", requireAdmin, (_req, res) => {
-  res.json({ required: soloSubscriptionRequired, paymentInfo: subscriptionPaymentInfo, paymentQrUrl: subscriptionPaymentQrUrl });
+  res.json({
+    required: soloSubscriptionRequired,
+    paymentInfo: subscriptionPaymentInfo,
+    paymentQrUrl: subscriptionPaymentQrUrl,
+    freeTrialEnabled,
+    freeTrialDays
+  });
 });
 
 app.put("/admin/subscription/settings", requireAdmin, async (req, res) => {
@@ -3635,6 +3658,14 @@ app.put("/admin/subscription/settings", requireAdmin, async (req, res) => {
     if (typeof req.body?.required === "boolean") {
       soloSubscriptionRequired = req.body.required;
       await setAppSetting("solo_subscription_required", soloSubscriptionRequired ? "true" : "false");
+    }
+    if (typeof req.body?.freeTrialEnabled === "boolean") {
+      freeTrialEnabled = req.body.freeTrialEnabled;
+      await setAppSetting("free_trial_enabled", freeTrialEnabled ? "true" : "false");
+    }
+    if (req.body?.freeTrialDays != null && Number.isFinite(Number(req.body.freeTrialDays))) {
+      freeTrialDays = Math.max(0, Math.min(365, Math.round(Number(req.body.freeTrialDays))));
+      await setAppSetting("free_trial_days", String(freeTrialDays));
     }
     if (typeof req.body?.paymentInfo === "string") {
       subscriptionPaymentInfo = req.body.paymentInfo.slice(0, 1000);
@@ -3645,7 +3676,7 @@ app.put("/admin/subscription/settings", requireAdmin, async (req, res) => {
       await setAppSetting("subscription_payment_qr_url", subscriptionPaymentQrUrl);
     }
     await logAuditAction("subscription.settings", "app_settings", "subscription", { required: soloSubscriptionRequired }, req);
-    res.json({ ok: true, required: soloSubscriptionRequired, paymentInfo: subscriptionPaymentInfo, paymentQrUrl: subscriptionPaymentQrUrl });
+    res.json({ ok: true, required: soloSubscriptionRequired, paymentInfo: subscriptionPaymentInfo, paymentQrUrl: subscriptionPaymentQrUrl, freeTrialEnabled, freeTrialDays });
   });
 });
 

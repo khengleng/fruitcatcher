@@ -1629,6 +1629,13 @@
             <input id="subRequired" type="checkbox" style="width:auto;">
             Require an active subscription for solo quizzes
           </label>
+          <label style="display:flex; gap:8px; align-items:center; min-width:240px;">
+            <input id="subFreeTrialEnabled" type="checkbox" style="width:auto;">
+            Give first-time joiners a free trial
+          </label>
+          <label style="width:140px;">Free trial (days)
+            <input id="subFreeTrialDays" type="number" min="0" max="365" step="1" placeholder="1">
+          </label>
           <label style="flex:1; min-width:280px;">Payment instructions (shown in the bot)
             <textarea id="subPaymentInfo" rows="3" maxlength="1000" placeholder="e.g. Scan the KHQR above with Wing/ABA, then send a screenshot here."></textarea>
           </label>
@@ -4232,6 +4239,8 @@
       try {
         const data = await api("/admin/subscription/settings");
         document.getElementById("subRequired").checked = Boolean(data.required);
+        document.getElementById("subFreeTrialEnabled").checked = Boolean(data.freeTrialEnabled);
+        document.getElementById("subFreeTrialDays").value = data.freeTrialDays != null ? data.freeTrialDays : 1;
         document.getElementById("subPaymentInfo").value = data.paymentInfo || "";
         document.getElementById("subPaymentQrUrl").value = data.paymentQrUrl || "";
       } catch (e) {
@@ -4247,6 +4256,8 @@
           method: "PUT",
           body: JSON.stringify({
             required: document.getElementById("subRequired").checked,
+            freeTrialEnabled: document.getElementById("subFreeTrialEnabled").checked,
+            freeTrialDays: Number(document.getElementById("subFreeTrialDays").value),
             paymentInfo: document.getElementById("subPaymentInfo").value,
             paymentQrUrl: document.getElementById("subPaymentQrUrl").value
           })
