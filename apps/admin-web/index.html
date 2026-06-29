@@ -1481,10 +1481,14 @@
         <div id="msgModal" hidden style="position:fixed; inset:0; background:rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center; z-index:1000;">
           <div style="background:#fff; color:#111; width:min(520px,94vw); max-height:92vh; overflow:auto; border-radius:14px; padding:18px;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-              <strong id="msgModalTitle">Message subscriber</strong>
-              <button id="msgClose" class="small secondary">✕</button>
+              <strong id="msgModalTitle">Chat</strong>
+              <span>
+                <button id="msgThreadRefresh" class="small secondary" title="Refresh">↻</button>
+                <button id="msgClose" class="small secondary">✕</button>
+              </span>
             </div>
-            <div id="msgEmojiRow" style="display:flex; flex-wrap:wrap; gap:4px; margin:10px 0;"></div>
+            <div id="msgThread" style="border:1px solid #e6e6e6; border-radius:10px; padding:10px; height:300px; overflow-y:auto; background:#f6f7f9; margin:10px 0; display:flex; flex-direction:column; gap:8px;"></div>
+            <div id="msgEmojiRow" style="display:flex; flex-wrap:wrap; gap:4px; margin:8px 0;"></div>
             <textarea id="msgText" rows="4" maxlength="4000" placeholder="Type your message… (emoji welcome 🙂)" style="width:100%;"></textarea>
 
             <div style="margin-top:12px; border-top:1px solid #eee; padding-top:10px;">
@@ -4172,7 +4176,8 @@
             try { await api(`/admin/subscription/subscribers/${encodeURIComponent(s.id)}/revoke`, { method: "POST" }); loadSubSubscribers(); }
             catch (e) { setStatus(document.getElementById("subSubscribersStatus"), e.message, "#a33d3d"); }
           });
-          const msgBtn = document.createElement("button"); msgBtn.textContent = "Message"; msgBtn.className = "small"; msgBtn.style.marginLeft = "6px";
+          const msgBtn = document.createElement("button"); msgBtn.textContent = s.unread > 0 ? `💬 Chat (${s.unread})` : "💬 Chat"; msgBtn.className = "small"; msgBtn.style.marginLeft = "6px";
+          if (s.unread > 0) { msgBtn.style.background = "#ffd166"; msgBtn.style.color = "#111"; }
           msgBtn.addEventListener("click", () => openMessageModal(s.id, subUserLabel(s)));
           const delBtn = document.createElement("button"); delBtn.textContent = "Delete"; delBtn.className = "small secondary"; delBtn.style.marginLeft = "6px";
           delBtn.addEventListener("click", async () => {
@@ -4195,16 +4200,65 @@
 
     function openMessageModal(id, label) {
       subMsgTargetId = id;
-      document.getElementById("msgModalTitle").textContent = "Message " + (label || "subscriber");
+      document.getElementById("msgModalTitle").textContent = "💬 " + (label || "Chat");
       document.getElementById("msgText").value = "";
       document.getElementById("msgFile").value = "";
       document.getElementById("msgFileInfo").textContent = "";
       document.getElementById("msgLat").value = "";
       document.getElementById("msgLng").value = "";
       setStatus(document.getElementById("msgStatus"), "", "#8a6d1f");
+      document.getElementById("msgThread").innerHTML = "<span class='muted'>Loading…</span>";
       document.getElementById("msgModal").hidden = false;
+      loadThread();
     }
-    function closeMessageModal() { document.getElementById("msgModal").hidden = true; subMsgTargetId = null; }
+    function closeMessageModal() { document.getElementById("msgModal").hidden = true; subMsgTargetId = null; if (typeof loadSubSubscribers === "function") loadSubSubscribers(); }
+
+    async function viewTelegramFile(fileId) {
+      try {
+        const res = await fetch(`${gatewayUrl}/admin/subscription/file/${encodeURIComponent(fileId)}`, { headers: getHeaders() });
+        if (!res.ok) throw new Error("Could not load file");
+        const blob = await res.blob();
+        window.open(URL.createObjectURL(blob), "_blank");
+      } catch (e) { alert(e.message); }
+    }
+
+    function renderThreadMessage(m) {
+      const wrap = document.createElement("div");
+      const out = m.direction === "out";
+      wrap.style.cssText = `max-width:80%; align-self:${out ? "flex-end" : "flex-start"}; background:${out ? "#d7f0e0" : "#fff"}; border:1px solid #e2e2e2; border-radius:12px; padding:8px 10px;`;
+      const meta = document.createElement("div");
+      meta.style.cssText = "font-size:11px; color:#888; margin-bottom:2px;";
+      meta.textContent = (out ? ("You" + (m.sentBy ? " (" + m.sentBy + ")" : "")) : "Subscriber") + " · " + new Date(m.createdAt).toLocaleString();
+      wrap.appendChild(meta);
+      if (m.body) { const t = document.createElement("div"); t.textContent = m.body; wrap.appendChild(t); }
+      if (m.kind === "photo" || m.kind === "document") {
+        const line = document.createElement("div"); line.style.marginTop = "4px";
+        const label = document.createElement("span"); label.textContent = (m.kind === "photo" ? "📷 " : "📎 ") + (m.fileName || m.kind);
+        line.appendChild(label);
+        if (m.fileId) {
+          const v = document.createElement("button"); v.textContent = "View"; v.className = "small"; v.style.marginLeft = "6px";
+          v.addEventListener("click", () => viewTelegramFile(m.fileId)); line.appendChild(v);
+        }
+        wrap.appendChild(line);
+      }
+      if (m.kind === "location" && m.latitude != null) {
+        const a = document.createElement("a"); a.href = `https://maps.google.com/?q=${m.latitude},${m.longitude}`; a.target = "_blank";
+        a.textContent = `📍 ${Number(m.latitude).toFixed(5)}, ${Number(m.longitude).toFixed(5)} (open map)`; wrap.appendChild(a);
+      }
+      return wrap;
+    }
+
+    async function loadThread() {
+      if (!subMsgTargetId) return;
+      const host = document.getElementById("msgThread");
+      try {
+        const data = await api(`/admin/subscription/subscribers/${encodeURIComponent(subMsgTargetId)}/messages`);
+        host.innerHTML = "";
+        if (!(data.messages || []).length) { host.innerHTML = "<span class='muted'>No messages yet. Say hello 👋</span>"; return; }
+        data.messages.forEach((m) => host.appendChild(renderThreadMessage(m)));
+        host.scrollTop = host.scrollHeight;
+      } catch (e) { host.innerHTML = "<span class='muted' style='color:#a33d3d;'>" + e.message + "</span>"; }
+    }
 
     function insertAtCursor(textarea, str) {
       const start = textarea.selectionStart || 0, end = textarea.selectionEnd || 0;
@@ -4243,7 +4297,12 @@
         setStatus(status, "Sending…", "#8a6d1f");
         await api(`/admin/subscription/subscribers/${encodeURIComponent(subMsgTargetId)}/message`, { method: "POST", body: JSON.stringify(body) });
         setStatus(status, "Sent ✓", "#1f7a4d");
-        setTimeout(closeMessageModal, 700);
+        document.getElementById("msgText").value = "";
+        document.getElementById("msgFile").value = "";
+        document.getElementById("msgFileInfo").textContent = "";
+        document.getElementById("msgLat").value = "";
+        document.getElementById("msgLng").value = "";
+        await loadThread();
       } catch (e) { setStatus(status, e.message, "#a33d3d"); }
     }
     (function () {
@@ -4253,6 +4312,7 @@
     document.getElementById("msgClose").addEventListener("click", closeMessageModal);
     document.getElementById("msgCancel").addEventListener("click", closeMessageModal);
     document.getElementById("msgSend").addEventListener("click", sendComposed);
+    document.getElementById("msgThreadRefresh").addEventListener("click", loadThread);
     document.getElementById("msgFile").addEventListener("change", () => {
       const f = document.getElementById("msgFile").files[0];
       document.getElementById("msgFileInfo").textContent = f ? `${f.name} — ${(f.size / 1024).toFixed(0)} KB${f.size > 5 * 1024 * 1024 ? " (too large, max 5 MB)" : ""}` : "";

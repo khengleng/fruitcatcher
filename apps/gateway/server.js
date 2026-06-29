@@ -2220,6 +2220,25 @@ async function initDatabase() {
   `);
   await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_sub_payments_status ON subscription_payments(status, created_at DESC)");
   await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_sub_payments_subscriber ON subscription_payments(subscriber_id, created_at DESC)");
+  // Two-way chat thread between admins and subscribers.
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS subscriber_messages (
+      id TEXT PRIMARY KEY,
+      subscriber_id TEXT NOT NULL REFERENCES subscribers(id) ON DELETE CASCADE,
+      direction TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'text',
+      body TEXT,
+      file_id TEXT,
+      file_name TEXT,
+      latitude DOUBLE PRECISION,
+      longitude DOUBLE PRECISION,
+      sent_by TEXT,
+      read_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_sub_messages ON subscriber_messages(subscriber_id, created_at)");
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_sub_messages_unread ON subscriber_messages(direction, read_at)");
 
   await runDatabaseMigrations();
   await seedSubscriptionTiers();
@@ -2859,6 +2878,25 @@ async function extendSubscriber(subscriberId, days) {
   return result.rows[0] || null;
 }
 
+// Append a message to the subscriber chat thread. Outbound is marked read.
+async function logSubscriberMessage(subscriberId, fields) {
+  if (!db || !subscriberId) return;
+  try {
+    await dbQuery(
+      `INSERT INTO subscriber_messages
+         (id, subscriber_id, direction, kind, body, file_id, file_name, latitude, longitude, sent_by, read_at, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+      [createId(), subscriberId, fields.direction, fields.kind || "text", fields.body || null,
+       fields.fileId || null, fields.fileName || null,
+       fields.latitude == null ? null : Number(fields.latitude),
+       fields.longitude == null ? null : Number(fields.longitude),
+       fields.sentBy || null, fields.direction === "out" ? new Date() : null]
+    );
+  } catch (error) {
+    console.error("Log subscriber message failed:", error.message);
+  }
+}
+
 async function getCachedCandidates(key) {
   if (!db) return null;
   const result = await dbQuery("SELECT candidate_ids, url FROM video_cache WHERE query_key = $1", [key]);
@@ -3461,6 +3499,35 @@ app.post("/bot/subscription/payments", requireBot, async (req, res) => {
   }
 });
 
+// Record an incoming message from a subscriber (forwarded by the bot) so it
+// shows up in the admin chat thread.
+app.post("/bot/subscription/inbound", requireBot, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const telegramId = String(req.body?.telegramId || "").trim();
+    if (!telegramId) { res.status(400).json({ error: "telegramId is required" }); return; }
+    const subscriber = await upsertSubscriber({
+      telegramId,
+      telegramUsername: cleanField(req.body?.telegramUsername, 80),
+      displayName: cleanField(req.body?.displayName, 80)
+    });
+    const kind = ["text", "photo", "document", "location"].includes(String(req.body?.kind)) ? String(req.body.kind) : "text";
+    await logSubscriberMessage(subscriber.id, {
+      direction: "in",
+      kind,
+      body: req.body?.body ? String(req.body.body).slice(0, 4000) : null,
+      fileId: cleanField(req.body?.fileId, 300),
+      fileName: cleanField(req.body?.fileName, 160),
+      latitude: req.body?.latitude,
+      longitude: req.body?.longitude
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Inbound message failed:", error);
+    res.status(500).json({ error: "Could not record message" });
+  }
+});
+
 // Public, token-authenticated: lets the solo quiz app show the signed-in
 // subscriber their remaining credit (days left). No bot secret needed — the
 // signed subscriber token is proof of identity.
@@ -3716,9 +3783,12 @@ app.get("/admin/subscription/subscribers", requireAdmin, async (req, res) => {
   if (!requireDatabase(res)) return;
   try {
     const filter = String(req.query.filter || "");
-    const where = filter === "active" ? "WHERE active_until > NOW()" : "";
+    const where = filter === "active" ? "WHERE s.active_until > NOW()" : "";
     const result = await dbQueryRequired(
-      `SELECT * FROM subscribers ${where} ORDER BY active_until DESC NULLS LAST, created_at DESC LIMIT 300`
+      `SELECT s.*,
+              (SELECT COUNT(*) FROM subscriber_messages m
+               WHERE m.subscriber_id = s.id AND m.direction = 'in' AND m.read_at IS NULL)::int AS unread
+       FROM subscribers s ${where} ORDER BY s.active_until DESC NULLS LAST, s.created_at DESC LIMIT 300`
     );
     res.json({
       subscribers: result.rows.map((row) => ({
@@ -3729,6 +3799,7 @@ app.get("/admin/subscription/subscribers", requireAdmin, async (req, res) => {
         phone: row.phone,
         activeUntil: row.active_until,
         active: subscriberIsActive(row),
+        unread: row.unread || 0,
         createdAt: row.created_at
       }))
     });
@@ -3787,31 +3858,78 @@ app.post("/admin/subscription/subscribers/:id/message", requireAdmin, async (req
     const attachment = req.body?.attachment;
     const location = req.body?.location;
 
+    const sentBy = req.adminUser?.username || "admin";
     let sent = false;
     const kinds = [];
     if (attachment && attachment.dataBase64) {
       const kind = attachment.kind === "document" ? "document" : "photo";
+      const filename = String(attachment.filename || "").slice(0, 120);
       sent = await sendTelegramFile(chatId, kind, {
-        dataBase64: attachment.dataBase64,
-        filename: String(attachment.filename || "").slice(0, 120),
-        mime: String(attachment.mime || ""),
-        caption: caption || undefined
+        dataBase64: attachment.dataBase64, filename, mime: String(attachment.mime || ""), caption: caption || undefined
       });
       kinds.push(kind);
+      if (sent) await logSubscriberMessage(id, { direction: "out", kind, body: caption || null, fileName: filename, sentBy });
     } else if (location && location.latitude != null && location.longitude != null) {
       sent = await sendTelegramLocation(chatId, location.latitude, location.longitude);
       kinds.push("location");
-      if (sent && text) await sendTelegramMessage(chatId, text);
+      if (sent) {
+        await logSubscriberMessage(id, { direction: "out", kind: "location", latitude: location.latitude, longitude: location.longitude, sentBy });
+        if (text) { await sendTelegramMessage(chatId, text); await logSubscriberMessage(id, { direction: "out", kind: "text", body: text, sentBy }); }
+      }
     } else {
       requireValid(text.length >= 1, "Message text is required");
       sent = await sendTelegramMessage(chatId, `💬 Message from LyHuor Learning:\n\n${text}`);
       kinds.push("text");
+      if (sent) await logSubscriberMessage(id, { direction: "out", kind: "text", body: text, sentBy });
     }
 
     if (!sent) { res.status(502).json({ error: "Telegram did not accept the message (the user may have blocked the bot, or the file is too large)." }); return; }
     await logAuditAction("subscription.subscriber.message", "subscribers", id, { kinds }, req);
     res.json({ ok: true });
   });
+});
+
+// The full chat thread with a subscriber; marks inbound messages as read.
+app.get("/admin/subscription/subscribers/:id/messages", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const id = normalizeAdminId(req.params.id, "subscriber id");
+    const result = await dbQueryRequired(
+      "SELECT * FROM subscriber_messages WHERE subscriber_id = $1 ORDER BY created_at ASC LIMIT 500", [id]);
+    await dbQuery("UPDATE subscriber_messages SET read_at = NOW() WHERE subscriber_id = $1 AND direction = 'in' AND read_at IS NULL", [id]);
+    const subscriber = await getSubscriberById(id);
+    res.json({
+      subscriber: subscriber ? { id: subscriber.id, displayName: subscriber.display_name, telegramUsername: subscriber.telegram_username, telegramId: subscriber.telegram_id } : null,
+      messages: result.rows.map((m) => ({
+        id: m.id, direction: m.direction, kind: m.kind, body: m.body,
+        fileId: m.file_id, fileName: m.file_name, latitude: m.latitude, longitude: m.longitude,
+        sentBy: m.sent_by, createdAt: m.created_at
+      }))
+    });
+  } catch (error) {
+    console.error("Load thread failed:", error);
+    res.status(500).json({ error: "Could not load messages" });
+  }
+});
+
+// Proxy an incoming Telegram file (photo/document) for admin viewing.
+app.get("/admin/subscription/file/:fileId", requireAdmin, async (req, res) => {
+  if (!TELEGRAM_BOT_TOKEN) { res.status(503).json({ error: "Telegram bot token is not configured." }); return; }
+  try {
+    const fileId = String(req.params.fileId || "");
+    const infoRes = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${encodeURIComponent(fileId)}`);
+    const info = await infoRes.json().catch(() => ({}));
+    const filePath = info?.result?.file_path;
+    if (!filePath) { res.status(404).json({ error: "File not found" }); return; }
+    const fileRes = await fetch(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`);
+    if (!fileRes.ok) { res.status(502).json({ error: "Could not fetch file" }); return; }
+    res.setHeader("Content-Type", fileRes.headers.get("content-type") || "application/octet-stream");
+    res.setHeader("Cache-Control", "private, max-age=300");
+    res.send(Buffer.from(await fileRes.arrayBuffer()));
+  } catch (error) {
+    console.error("File proxy failed:", error);
+    res.status(500).json({ error: "Could not load file" });
+  }
 });
 
 async function isAuthorized(req) {

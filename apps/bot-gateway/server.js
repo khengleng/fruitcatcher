@@ -236,6 +236,37 @@ async function submitProof(chatId, from, { proofText, proofFileId }) {
   }
 }
 
+// Forward a subscriber's incoming message to the gateway so it appears in the
+// admin chat thread.
+async function forwardInbound(chatId, from, message) {
+  if (!subscriptionsEnabled) return;
+  let kind = "text";
+  let body = message.text || "";
+  let fileId = null, fileName = null, latitude, longitude;
+  if (Array.isArray(message.photo) && message.photo.length) {
+    kind = "photo"; fileId = message.photo[message.photo.length - 1].file_id; body = message.caption || "";
+  } else if (message.document) {
+    kind = "document"; fileId = message.document.file_id; fileName = message.document.file_name || ""; body = message.caption || "";
+  } else if (message.location) {
+    kind = "location"; latitude = message.location.latitude; longitude = message.location.longitude;
+  } else if (message.voice || message.audio || message.video || message.sticker) {
+    kind = "document"; const f = message.voice || message.audio || message.video; if (f) fileId = f.file_id; body = message.caption || "[media]";
+  }
+  try {
+    await gatewayApi("/bot/subscription/inbound", {
+      method: "POST",
+      body: {
+        telegramId: String(chatId),
+        telegramUsername: from?.username || "",
+        displayName: cleanText([from?.first_name, from?.last_name].filter(Boolean).join(" "), 48),
+        kind, body: String(body).slice(0, 4000), fileId, fileName, latitude, longitude
+      }
+    });
+  } catch (error) {
+    console.error("Forward inbound failed:", error.message);
+  }
+}
+
 async function showStatus(chatId) {
   if (!subscriptionsEnabled) {
     await sendText(chatId, "Subscriptions are not available right now.");
@@ -310,7 +341,10 @@ async function handleTelegramUpdate(update) {
   if (cmd === "quiz") return void (await startQuiz(chatId));
   if (cmd === "start") return void (await showWelcome(chatId));
 
-  // Otherwise, payment proof: a photo (with a pending tier) or free text.
+  // A real message — log it to the admin chat thread.
+  await forwardInbound(chatId, from, message);
+
+  // If mid-purchase, also treat a photo / text as the payment proof.
   if (subscriptionsEnabled && pendingTier.has(String(chatId))) {
     if (Array.isArray(message.photo) && message.photo.length) {
       const fileId = message.photo[message.photo.length - 1].file_id;
@@ -320,8 +354,8 @@ async function handleTelegramUpdate(update) {
     }
   }
 
-  // Anything else → welcome menu (which docks the persistent buttons).
-  await showWelcome(chatId);
+  // Otherwise acknowledge — their message is now in the admin inbox.
+  await sendText(chatId, "✅ Got your message — our team will reply soon. Use the buttons below anytime 👇", replyKeyboard);
 }
 
 async function sendMessengerMessage(recipientId, text, quizUrl) {
