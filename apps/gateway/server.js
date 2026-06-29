@@ -3050,7 +3050,7 @@ const VIDEO_STOPWORDS = new Set(["the", "a", "an", "of", "to", "for", "and", "ho
 // lifts genuinely on-topic teaching videos above a loosely-related top hit.
 // Rank candidates by how well the title/description match the query terms
 // (keeping YouTube's own order as a tiebreak), and return an ordered id list.
-function rankVideoIds(items, query) {
+function rankVideoItems(items, query) {
   if (!Array.isArray(items) || !items.length) {
     return [];
   }
@@ -3060,21 +3060,22 @@ function rankVideoIds(items, query) {
     .filter((w) => w.length > 3 && !VIDEO_STOPWORDS.has(w));
   return items
     .map((item, index) => {
-      const title = String(item?.snippet?.title || "").toLowerCase();
-      const desc = String(item?.snippet?.description || "").toLowerCase();
+      const title = String(item?.snippet?.title || "");
+      const desc = String(item?.snippet?.description || "");
+      const tl = title.toLowerCase();
+      const dl = desc.toLowerCase();
       let score = -index * 0.5;
       terms.forEach((t) => {
-        if (title.includes(t)) score += 2;
-        else if (desc.includes(t)) score += 1;
+        if (tl.includes(t)) score += 2;
+        else if (dl.includes(t)) score += 1;
       });
-      return { id: item?.id?.videoId, score, order: index };
+      return { id: item?.id?.videoId, title, description: desc, score, order: index };
     })
     .filter((x) => x.id)
-    .sort((a, b) => (b.score - a.score) || (a.order - b.order))
-    .map((x) => x.id);
+    .sort((a, b) => (b.score - a.score) || (a.order - b.order));
 }
 
-async function youtubeSearchVideoIds(query, language) {
+async function youtubeSearchCandidates(query, language) {
   const relevanceLanguage = language === "khmer" ? "km" : "en";
   const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=8`
     + `&safeSearch=strict&videoEmbeddable=true&relevanceLanguage=${relevanceLanguage}`
@@ -3084,7 +3085,47 @@ async function youtubeSearchVideoIds(query, language) {
     throw new Error(`YouTube search failed: ${response.status}`);
   }
   const data = await response.json();
-  return rankVideoIds(data?.items, query);
+  return rankVideoItems(data?.items, query);
+}
+
+// AI relevance guardrail: from the YouTube candidates, keep only the videos that
+// genuinely teach how to solve THIS question (right topic, level, language),
+// ranked best-first. Returns [] when none clearly fit (caller shows a search link).
+const VIDEO_RELEVANCE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["relevantIds"],
+  properties: { relevantIds: { type: "array", items: { type: "string" } } }
+};
+
+async function judgeVideoRelevance(question, items, config) {
+  const top = items.slice(0, 6);
+  if (!top.length) return [];
+  const list = top.map((it) => `[${it.id}] ${it.title}${it.description ? " — " + it.description.slice(0, 150) : ""}`).join("\n");
+  const correct = (question?.choices || []).find((c) => String(c.id) === String(question?.correctChoice));
+  const prompt = `A student just answered a quiz question and needs a video that teaches HOW TO SOLVE it.
+
+Question: ${question?.question || ""}
+${correct ? `Correct answer: ${correct.text}\n` : ""}Intended for: ${getAlignmentTarget(config)}
+Required language: ${getLanguageLabel((config && config.language) || "english")}
+
+Candidate YouTube videos:
+${list}
+
+In "relevantIds", return the ids of ONLY the videos that clearly teach the exact method or concept needed to solve this question, at the right grade level AND in the required language. Rank them best-first. Exclude anything off-topic, the wrong level, the wrong language, or only loosely related. Be strict — if none are a strong match, return an empty list.`;
+  const { text } = await llmJson({
+    input: prompt,
+    jsonSchema: { name: "video_relevance", schema: VIDEO_RELEVANCE_SCHEMA },
+    model: OPENAI_MODEL,
+    usageContext: { usageSource: "solo" },
+    operation: "video"
+  });
+  const valid = new Set(top.map((t) => t.id));
+  try {
+    return (parseJsonLoose(text).relevantIds || []).filter((id) => valid.has(id));
+  } catch (e) {
+    return [];
+  }
 }
 
 // Returns { url, embedUrl }. We cache the top candidates per topic (one API
@@ -3110,17 +3151,35 @@ async function resolveVideo(question, config) {
   }
   if (!candidates) {
     try {
-      candidates = await youtubeSearchVideoIds(query, language);
+      const items = await youtubeSearchCandidates(query, language);
+      if (!items.length) {
+        return fallback;
+      }
+      // Relevance guardrail: let the model keep only genuinely-on-topic videos.
+      // Skipped on the slow fallback provider; then we require a strong keyword
+      // match instead, and otherwise show a search link rather than a weak embed.
+      let ids = [];
+      if (!fallbackActive()) {
+        try {
+          ids = await judgeVideoRelevance(question, items, config);
+        } catch (error) {
+          console.error("Video relevance judge failed:", error.message);
+        }
+      }
+      if (!ids.length) {
+        ids = items.filter((it) => it.score >= 2).map((it) => it.id);
+      }
+      if (!ids.length) {
+        return fallback;
+      }
+      candidates = ids.slice(0, 6);
+      if (videoCache.size > 5000) videoCache.clear();
+      videoCache.set(key, candidates);
+      await putCachedCandidates(key, candidates);
     } catch (error) {
       console.error("YouTube resolve failed:", error.message);
       return fallback;
     }
-    if (!candidates.length) {
-      return fallback;
-    }
-    if (videoCache.size > 5000) videoCache.clear();
-    videoCache.set(key, candidates);
-    await putCachedCandidates(key, candidates);
   }
   if (!candidates.length) {
     return fallback;
