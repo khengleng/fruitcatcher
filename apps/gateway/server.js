@@ -3594,6 +3594,67 @@ app.post("/admin/subscription/payments/:id/reject", requireAdmin, async (req, re
   });
 });
 
+// Income / revenue report from approved subscription payments. Revenue is
+// recognized at approval time (reviewed_at).
+app.get("/admin/subscription/revenue", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const groupBy = ["day", "week", "month"].includes(String(req.query.groupBy)) ? String(req.query.groupBy) : "day";
+    const now = Date.now();
+    const parseDate = (value, fallbackMs) => {
+      const d = value ? new Date(String(value)) : new Date(fallbackMs);
+      return Number.isNaN(d.getTime()) ? new Date(fallbackMs) : d;
+    };
+    const fromIso = parseDate(req.query.from, now - 90 * 86400000).toISOString();
+    const toIso = parseDate(req.query.to, now).toISOString();
+
+    const byPeriod = await dbQuery(
+      `SELECT date_trunc($1, reviewed_at) AS bucket, COUNT(*)::int AS payments,
+              COALESCE(SUM(amount_usd), 0)::numeric AS total_usd
+       FROM subscription_payments
+       WHERE status = 'approved' AND reviewed_at >= $2 AND reviewed_at <= $3
+       GROUP BY bucket ORDER BY bucket DESC`,
+      [groupBy, fromIso, toIso]
+    );
+    const byTier = await dbQuery(
+      `SELECT COALESCE(tier_name, '(unknown)') AS tier_name, COUNT(*)::int AS payments,
+              COALESCE(SUM(amount_usd), 0)::numeric AS total_usd
+       FROM subscription_payments
+       WHERE status = 'approved' AND reviewed_at >= $1 AND reviewed_at <= $2
+       GROUP BY tier_name ORDER BY total_usd DESC`,
+      [fromIso, toIso]
+    );
+    const rangeTotal = await dbQuery(
+      `SELECT COUNT(*)::int AS payments, COALESCE(SUM(amount_usd), 0)::numeric AS total_usd
+       FROM subscription_payments WHERE status = 'approved' AND reviewed_at >= $1 AND reviewed_at <= $2`,
+      [fromIso, toIso]
+    );
+    const allTime = await dbQuery(
+      `SELECT COUNT(*)::int AS payments, COALESCE(SUM(amount_usd), 0)::numeric AS total_usd
+       FROM subscription_payments WHERE status = 'approved'`
+    );
+    const active = await dbQuery("SELECT COUNT(*)::int AS n FROM subscribers WHERE active_until > NOW()");
+    const pending = await dbQuery(
+      "SELECT COUNT(*)::int AS n, COALESCE(SUM(amount_usd), 0)::numeric AS total_usd FROM subscription_payments WHERE status = 'pending'"
+    );
+
+    res.json({
+      groupBy,
+      from: fromIso,
+      to: toIso,
+      byPeriod: (byPeriod?.rows || []).map((r) => ({ bucket: r.bucket, payments: r.payments, totalUsd: Number(r.total_usd) })),
+      byTier: (byTier?.rows || []).map((r) => ({ tierName: r.tier_name, payments: r.payments, totalUsd: Number(r.total_usd) })),
+      rangeTotal: { payments: rangeTotal?.rows?.[0]?.payments || 0, totalUsd: Number(rangeTotal?.rows?.[0]?.total_usd || 0) },
+      allTime: { payments: allTime?.rows?.[0]?.payments || 0, totalUsd: Number(allTime?.rows?.[0]?.total_usd || 0) },
+      activeSubscribers: active?.rows?.[0]?.n || 0,
+      pending: { count: pending?.rows?.[0]?.n || 0, totalUsd: Number(pending?.rows?.[0]?.total_usd || 0) }
+    });
+  } catch (error) {
+    console.error("Revenue report failed:", error);
+    res.status(500).json({ error: "Could not load revenue report" });
+  }
+});
+
 app.get("/admin/subscription/subscribers", requireAdmin, async (req, res) => {
   if (!requireDatabase(res)) return;
   try {

@@ -1390,7 +1390,32 @@
         <h2>💳 Subscriptions</h2>
         <p class="muted">Sell solo-quiz access through the Telegram bot. Students pick a plan, pay by transfer, and send their receipt in the bot; approve the payment here to activate their access.</p>
 
-        <h3 style="margin-top:18px;">Settings</h3>
+        <h3 style="margin-top:18px;">💰 Revenue</h3>
+        <div class="row" style="display:flex; gap:18px; flex-wrap:wrap; margin:6px 0 12px;">
+          <div><div class="muted" style="font-size:12px;">All-time revenue</div><div id="revAllTime" style="font-size:24px; font-weight:800;">$0.00</div></div>
+          <div><div class="muted" style="font-size:12px;">Selected range</div><div id="revRange" style="font-size:24px; font-weight:800;">$0.00</div></div>
+          <div><div class="muted" style="font-size:12px;">Active subscribers</div><div id="revActive" style="font-size:24px; font-weight:800;">0</div></div>
+          <div><div class="muted" style="font-size:12px;">Pending (awaiting approval)</div><div id="revPending" style="font-size:24px; font-weight:800;">$0.00</div></div>
+        </div>
+        <div class="row" style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
+          <label style="width:120px;">Group by
+            <select id="revGroupBy"><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option></select>
+          </label>
+          <label style="width:150px;">From<input id="revFrom" type="date"></label>
+          <label style="width:150px;">To<input id="revTo" type="date"></label>
+          <button id="revRefresh" class="small">Apply</button>
+          <span id="revStatus" class="muted" style="align-self:center;"></span>
+        </div>
+        <div style="display:flex; gap:18px; flex-wrap:wrap; margin-top:12px;">
+          <div class="table-wrap" style="flex:1; min-width:280px;">
+            <table><thead><tr><th>Period</th><th>Payments</th><th>Revenue</th></tr></thead><tbody id="revPeriodBody"></tbody></table>
+          </div>
+          <div class="table-wrap" style="flex:1; min-width:240px;">
+            <table><thead><tr><th>Plan</th><th>Sold</th><th>Revenue</th></tr></thead><tbody id="revTierBody"></tbody></table>
+          </div>
+        </div>
+
+        <h3 style="margin-top:22px;">Settings</h3>
         <div class="row" style="display:flex; gap:14px; flex-wrap:wrap; align-items:flex-start;">
           <label style="display:flex; gap:8px; align-items:center; min-width:260px;">
             <input id="subRequired" type="checkbox" style="width:auto;">
@@ -3910,7 +3935,47 @@
     }
 
     async function loadSubscriptions() {
-      await Promise.all([loadSubSettings(), loadSubTiers(), loadSubPayments(), loadSubSubscribers()]);
+      await Promise.all([loadSubRevenue(), loadSubSettings(), loadSubTiers(), loadSubPayments(), loadSubSubscribers()]);
+    }
+
+    function subRevPeriodLabel(bucket, groupBy) {
+      const d = new Date(bucket);
+      if (groupBy === "month") return d.toLocaleDateString(undefined, { year: "numeric", month: "short" });
+      return d.toLocaleDateString();
+    }
+
+    async function loadSubRevenue() {
+      const status = document.getElementById("revStatus");
+      try {
+        const groupBy = document.getElementById("revGroupBy").value;
+        const from = document.getElementById("revFrom").value;
+        const to = document.getElementById("revTo").value;
+        const qs = new URLSearchParams({ groupBy });
+        if (from) qs.set("from", from);
+        if (to) qs.set("to", to + "T23:59:59");
+        const data = await api("/admin/subscription/revenue?" + qs.toString());
+        const money = (n) => "$" + Number(n || 0).toFixed(2);
+        document.getElementById("revAllTime").textContent = money(data.allTime?.totalUsd) + " (" + (data.allTime?.payments || 0) + ")";
+        document.getElementById("revRange").textContent = money(data.rangeTotal?.totalUsd) + " (" + (data.rangeTotal?.payments || 0) + ")";
+        document.getElementById("revActive").textContent = String(data.activeSubscribers || 0);
+        document.getElementById("revPending").textContent = money(data.pending?.totalUsd) + " (" + (data.pending?.count || 0) + ")";
+
+        const pb = document.getElementById("revPeriodBody"); pb.innerHTML = "";
+        if (!(data.byPeriod || []).length) { const tr = document.createElement("tr"); const td = document.createElement("td"); td.colSpan = 3; td.className = "muted"; td.textContent = "No revenue in this range."; tr.appendChild(td); pb.appendChild(tr); }
+        (data.byPeriod || []).forEach((r) => {
+          const tr = document.createElement("tr");
+          [subRevPeriodLabel(r.bucket, data.groupBy), String(r.payments), money(r.totalUsd)].forEach((t) => { const td = document.createElement("td"); td.textContent = t; tr.appendChild(td); });
+          pb.appendChild(tr);
+        });
+
+        const tb = document.getElementById("revTierBody"); tb.innerHTML = "";
+        (data.byTier || []).forEach((r) => {
+          const tr = document.createElement("tr");
+          [r.tierName, String(r.payments), money(r.totalUsd)].forEach((t) => { const td = document.createElement("td"); td.textContent = t; tr.appendChild(td); });
+          tb.appendChild(tr);
+        });
+        setStatus(status, "", "#8a6d1f");
+      } catch (e) { setStatus(status, e.message, "#a33d3d"); }
     }
 
     async function loadSubSettings() {
@@ -4081,6 +4146,7 @@
       }
     }
 
+    document.getElementById("revRefresh").addEventListener("click", loadSubRevenue);
     document.getElementById("subSettingsSave").addEventListener("click", saveSubSettings);
     document.getElementById("subTierAdd").addEventListener("click", addSubTier);
     document.getElementById("subPaymentsRefresh").addEventListener("click", loadSubPayments);
