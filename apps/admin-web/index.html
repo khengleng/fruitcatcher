@@ -492,6 +492,83 @@
       display: flex;
       gap: 8px;
     }
+
+    /* ===== Revamped admin shell: compact header + grouped sidebar ===== */
+    #adminApp header {
+      align-items: center;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px 20px;
+      box-shadow: 0 8px 24px rgba(39, 30, 18, 0.06);
+    }
+    #adminApp header h1 {
+      font-size: 22px;
+      letter-spacing: -0.01em;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+    #adminApp header h1::before {
+      content: "🎓";
+      font-size: 22px;
+    }
+    #adminApp header > div:first-child p.muted { font-size: 13px; margin-top: 2px; }
+
+    .shell { grid-template-columns: 244px minmax(0, 1fr); gap: 20px; }
+
+    .sidenav {
+      gap: 4px;
+      padding: 14px 12px;
+      border-radius: 14px;
+      max-height: calc(100vh - 110px);
+      overflow-y: auto;
+    }
+    .nav-group { display: flex; flex-direction: column; gap: 3px; margin-bottom: 12px; }
+    .nav-group:last-child { margin-bottom: 0; }
+    .nav-group-title {
+      font-size: 10.5px;
+      font-weight: 800;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: #9a948a;
+      padding: 4px 10px 2px;
+    }
+    .sidenav .tab {
+      width: 100%;
+      min-height: 38px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-align: left;
+      justify-content: flex-start;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--ink);
+      font-weight: 600;
+      font-size: 14px;
+      border-radius: 9px;
+      padding: 8px 10px;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+    .sidenav .tab .ico { font-size: 15px; width: 20px; text-align: center; flex: none; }
+    .sidenav .tab:hover { background: #f0ebe0; }
+    .sidenav .tab.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+      box-shadow: 0 6px 16px rgba(190, 75, 42, 0.22);
+    }
+    .sidenav .tab.active .ico { filter: saturate(0) brightness(2.4); }
+
+    @media (max-width: 820px) {
+      .shell { grid-template-columns: 1fr; }
+      .sidenav { position: static; max-height: none; flex-direction: row; flex-wrap: wrap; }
+      .nav-group { margin-bottom: 6px; }
+      .nav-group-title { width: 100%; }
+      .sidenav .tab { width: auto; }
+      #adminApp header h1 { font-size: 19px; }
+    }
   </style>
 	</head>
 	<body>
@@ -537,23 +614,47 @@
 	    </header>
 
 	    <div class="shell">
-	      <nav class="tabs">
-        <button class="tab active" data-tab="settings" data-role="admin">Settings</button>
-        <button class="tab" data-tab="sessions" data-role="admin">Quiz Sessions</button>
-        <button class="tab" data-tab="students" data-role="admin">Students</button>
-        <button class="tab" data-tab="questions" data-role="admin">Question Bank</button>
-        <button class="tab" data-tab="groups" data-role="admin">Groups</button>
-        <button class="tab" data-tab="activeSessions" data-role="admin">Active Sessions</button>
-        <button class="tab" data-tab="onlineUsers" data-role="admin">Online Users</button>
-        <button class="tab" data-tab="analytics" data-role="admin">Analytics</button>
-        <button class="tab" data-tab="audit" data-role="admin">Audit Log</button>
-        <button class="tab" data-tab="aiUsage" data-role="admin">📊 AI Usage</button>
-        <button class="tab" data-tab="worksheets" data-role="staff">📄 Worksheets</button>
-        <button class="tab" data-tab="shares" data-role="staff">🔗 Shared Quizzes</button>
-        <button class="tab" data-tab="classrooms" data-role="staff">🏫 Classrooms</button>
-        <button class="tab" data-tab="support" data-role="admin">🎧 Support</button>
-        <button class="tab" data-tab="subscriptions" data-role="admin">💳 Subscriptions</button>
-        <button class="tab" data-tab="users" data-role="admin">Users</button>
+	      <nav class="tabs sidenav">
+        <div class="nav-group">
+          <div class="nav-group-title">Teaching</div>
+          <button class="tab" data-tab="worksheets" data-role="staff"><span class="ico">📄</span><span>Worksheets</span></button>
+          <button class="tab" data-tab="shares" data-role="staff"><span class="ico">🔗</span><span>Shared Quizzes</span></button>
+          <button class="tab" data-tab="classrooms" data-role="staff"><span class="ico">🏫</span><span>Classrooms</span></button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">Insights</div>
+          <button class="tab" data-tab="analytics" data-role="admin"><span class="ico">📈</span><span>Analytics</span></button>
+          <button class="tab" data-tab="aiUsage" data-role="admin"><span class="ico">📊</span><span>AI Usage</span></button>
+          <button class="tab" data-tab="audit" data-role="admin"><span class="ico">🛡️</span><span>Audit Log</span></button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">Content</div>
+          <button class="tab" data-tab="questions" data-role="admin"><span class="ico">📚</span><span>Question Bank</span></button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">People</div>
+          <button class="tab" data-tab="students" data-role="admin"><span class="ico">🧑‍🎓</span><span>Students</span></button>
+          <button class="tab" data-tab="groups" data-role="admin"><span class="ico">👥</span><span>Groups</span></button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">Live activity</div>
+          <button class="tab" data-tab="activeSessions" data-role="admin"><span class="ico">🟢</span><span>Active Sessions</span></button>
+          <button class="tab" data-tab="onlineUsers" data-role="admin"><span class="ico">🌐</span><span>Online Users</span></button>
+          <button class="tab" data-tab="sessions" data-role="admin"><span class="ico">🧾</span><span>Quiz Sessions</span></button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">Revenue</div>
+          <button class="tab" data-tab="subscriptions" data-role="admin"><span class="ico">💳</span><span>Subscriptions</span></button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">Communication</div>
+          <button class="tab" data-tab="support" data-role="admin"><span class="ico">🎧</span><span>Support</span></button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">System</div>
+          <button class="tab active" data-tab="settings" data-role="admin"><span class="ico">⚙️</span><span>Settings</span></button>
+          <button class="tab" data-tab="users" data-role="admin"><span class="ico">🔐</span><span>Users &amp; Roles</span></button>
+        </div>
       </nav>
 
       <section id="settingsPanel" class="panel">
@@ -2813,6 +2914,11 @@
       document.querySelectorAll("button.tab").forEach((button) => {
         const needsAdmin = button.dataset.role === "admin";
         button.hidden = needsAdmin && !isAdmin;
+      });
+      // Hide a sidebar group when all of its items are hidden for this role.
+      document.querySelectorAll(".nav-group").forEach((group) => {
+        const anyVisible = [...group.querySelectorAll("button.tab")].some((b) => !b.hidden);
+        group.hidden = !anyVisible;
       });
       // Land teachers/facilitators straight on the worksheet builder.
       showTab(isAdmin ? "settings" : "worksheets");
