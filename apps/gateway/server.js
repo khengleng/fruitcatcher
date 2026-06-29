@@ -3028,8 +3028,9 @@ function localizeVideoQuery(query, language) {
   return hasKhmer ? query : `${query} ពន្យល់ជាភាសាខ្មែរ`;
 }
 
+// Query in the quiz's own language — used to find a native-language video.
 function videoQueryFor(question, config) {
-  let query = String(question?.videoQuery || "").trim();
+  let query = String(question?.videoQueryLocal || question?.videoQuery || "").trim();
   if (!query) {
     const subject = getSubjectLabel((config && config.subject) || question?.subject || "");
     const topic = String(question?.question || "")
@@ -3041,6 +3042,15 @@ function videoQueryFor(question, config) {
     query = `${subject} ${topic} explained`.trim();
   }
   return localizeVideoQuery(query, config && config.language);
+}
+
+// Always-English query — used to find an English video (e.g. as a captioned
+// fallback when no Khmer video exists).
+function englishVideoQueryFor(question, config) {
+  const query = String(question?.videoQuery || "").trim();
+  if (query) return query;
+  const subject = getSubjectLabel((config && config.subject) || question?.subject || "");
+  return `${subject} explained`.trim();
 }
 
 const VIDEO_STOPWORDS = new Set(["the", "a", "an", "of", "to", "for", "and", "how", "what", "is", "in", "on", "with", "step", "by", "explained", "tutorial", "lesson", "video", "grade", "using", "your"]);
@@ -3075,11 +3085,12 @@ function rankVideoItems(items, query) {
     .sort((a, b) => (b.score - a.score) || (a.order - b.order));
 }
 
-async function youtubeSearchCandidates(query, language) {
+async function youtubeSearchCandidates(query, language, requireCaptions) {
   const relevanceLanguage = language === "khmer" ? "km" : "en";
-  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=8`
+  let url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=8`
     + `&safeSearch=strict&videoEmbeddable=true&relevanceLanguage=${relevanceLanguage}`
     + `&q=${encodeURIComponent(query)}&key=${YOUTUBE_API_KEY}`;
+  if (requireCaptions) url += "&videoCaption=closedCaption"; // only videos with captions (translatable to Khmer)
   const response = await fetchWithTimeout(url, { method: "GET" }, OPENAI_TIMEOUT_MS);
   if (!response.ok) {
     throw new Error(`YouTube search failed: ${response.status}`);
@@ -3098,7 +3109,7 @@ const VIDEO_RELEVANCE_SCHEMA = {
   properties: { relevantIds: { type: "array", items: { type: "string" } } }
 };
 
-async function judgeVideoRelevance(question, items, config) {
+async function judgeVideoRelevance(question, items, config, requiredLanguageLabel) {
   const top = items.slice(0, 6);
   if (!top.length) return [];
   const list = top.map((it) => `[${it.id}] ${it.title}${it.description ? " — " + it.description.slice(0, 150) : ""}`).join("\n");
@@ -3107,12 +3118,12 @@ async function judgeVideoRelevance(question, items, config) {
 
 Question: ${question?.question || ""}
 ${correct ? `Correct answer: ${correct.text}\n` : ""}Intended for: ${getAlignmentTarget(config)}
-Required language: ${getLanguageLabel((config && config.language) || "english")}
+Required spoken/written language of the video: ${requiredLanguageLabel}
 
 Candidate YouTube videos:
 ${list}
 
-In "relevantIds", return the ids of ONLY the videos that clearly teach the exact method or concept needed to solve this question, at the right grade level AND in the required language. Rank them best-first. Exclude anything off-topic, the wrong level, the wrong language, or only loosely related. Be strict — if none are a strong match, return an empty list.`;
+In "relevantIds", return the ids of ONLY the videos that clearly teach the exact method or concept needed to solve this question, at the right grade level AND in ${requiredLanguageLabel}. Rank them best-first. Exclude anything off-topic, the wrong level, the wrong language, or only loosely related. Be strict — if none are a strong match, return an empty list.`;
   const { text } = await llmJson({
     input: prompt,
     jsonSchema: { name: "video_relevance", schema: VIDEO_RELEVANCE_SCHEMA },
@@ -3132,60 +3143,89 @@ In "relevantIds", return the ids of ONLY the videos that clearly teach the exact
 // call), then pick a DIFFERENT video per question so same-topic questions don't
 // all show the same clip. The pick is deterministic (hash of the question), so
 // a given question always maps to the same video. Falls back to a search link.
-async function resolveVideo(question, config) {
-  const query = videoQueryFor(question, config);
-  const fallback = { url: youtubeSearchUrl(query), embedUrl: null };
-  if (!YOUTUBE_API_KEY || !videoEmbedEnabled || !query) {
-    return fallback;
-  }
-  const language = (config && config.language) || "english";
-  // Strip numbers from the key so questions that differ only by their numbers
-  // (e.g. "3/4 of 24" vs "5/6 of 36") share one candidate pool to rotate over.
-  const conceptKey = normalizePrompt(query).replace(/[0-9]+/g, " ").replace(/\s+/g, " ").trim();
-  const key = `${conceptKey}|${language === "khmer" ? "km" : "en"}`;
-
-  let candidates = videoCache.get(key);
+// Find relevant candidate video ids for one search (cached per cacheKey).
+// Runs the AI relevance judge on the fast provider; on the slow fallback it
+// keeps only strong keyword matches. Returns [] when nothing is confidently
+// relevant.
+async function resolveCandidateIds({ question, config, query, language, cacheKey, requireCaptions, requiredLanguageLabel }) {
+  let candidates = videoCache.get(cacheKey);
   if (!candidates) {
-    candidates = await getCachedCandidates(key);
-    if (candidates) videoCache.set(key, candidates);
+    candidates = await getCachedCandidates(cacheKey);
+    if (candidates) videoCache.set(cacheKey, candidates);
   }
-  if (!candidates) {
-    try {
-      const items = await youtubeSearchCandidates(query, language);
-      if (!items.length) {
-        return fallback;
+  if (candidates) return candidates;
+  try {
+    const items = await youtubeSearchCandidates(query, language, requireCaptions);
+    if (!items.length) return [];
+    let ids = [];
+    if (!fallbackActive()) {
+      try {
+        ids = await judgeVideoRelevance(question, items, config, requiredLanguageLabel);
+      } catch (error) {
+        console.error("Video relevance judge failed:", error.message);
       }
-      // Relevance guardrail: let the model keep only genuinely-on-topic videos.
-      // Skipped on the slow fallback provider; then we require a strong keyword
-      // match instead, and otherwise show a search link rather than a weak embed.
-      let ids = [];
-      if (!fallbackActive()) {
-        try {
-          ids = await judgeVideoRelevance(question, items, config);
-        } catch (error) {
-          console.error("Video relevance judge failed:", error.message);
-        }
-      }
-      if (!ids.length) {
-        ids = items.filter((it) => it.score >= 2).map((it) => it.id);
-      }
-      if (!ids.length) {
-        return fallback;
-      }
-      candidates = ids.slice(0, 6);
-      if (videoCache.size > 5000) videoCache.clear();
-      videoCache.set(key, candidates);
-      await putCachedCandidates(key, candidates);
-    } catch (error) {
-      console.error("YouTube resolve failed:", error.message);
-      return fallback;
     }
+    if (!ids.length) {
+      ids = items.filter((it) => it.score >= 2).map((it) => it.id);
+    }
+    if (!ids.length) return [];
+    ids = ids.slice(0, 6);
+    if (videoCache.size > 5000) videoCache.clear();
+    videoCache.set(cacheKey, ids);
+    await putCachedCandidates(cacheKey, ids);
+    return ids;
+  } catch (error) {
+    console.error("YouTube resolve failed:", error.message);
+    return [];
   }
-  if (!candidates.length) {
-    return fallback;
+}
+
+function pickVideo(question, ids, kmCaptions) {
+  const id = ids[hashString(question?.question) % ids.length];
+  if (kmCaptions) {
+    // English video shown with Khmer (auto-translated) captions turned on.
+    return {
+      url: `https://www.youtube.com/watch?v=${id}&cc_load_policy=1&hl=km`,
+      embedUrl: `https://www.youtube.com/embed/${id}?cc_load_policy=1&cc_lang_pref=km&hl=km`,
+      captionLanguage: "km"
+    };
   }
-  const id = candidates[hashString(question?.question) % candidates.length];
   return { url: `https://www.youtube.com/watch?v=${id}`, embedUrl: `https://www.youtube.com/embed/${id}` };
+}
+
+async function resolveVideo(question, config) {
+  const language = (config && config.language) || "english";
+  const wantsKhmer = language === "khmer" || language === "bilingual";
+  const nativeQuery = videoQueryFor(question, config);
+  const fallbackLink = { url: youtubeSearchUrl(nativeQuery), embedUrl: null };
+  if (!YOUTUBE_API_KEY || !videoEmbedEnabled || !nativeQuery) {
+    return fallbackLink;
+  }
+  // Strip numbers so questions differing only by their numbers share a pool.
+  const conceptKey = normalizePrompt(englishVideoQueryFor(question, config))
+    .replace(/[0-9]+/g, " ").replace(/\s+/g, " ").trim();
+
+  // Stage 1: a relevant video in the quiz's own language.
+  const nativeIds = await resolveCandidateIds({
+    question, config, query: nativeQuery, language,
+    cacheKey: `${conceptKey}|${wantsKhmer ? "km" : "en"}`,
+    requireCaptions: false,
+    requiredLanguageLabel: getLanguageLabel(language)
+  });
+  if (nativeIds.length) return pickVideo(question, nativeIds, false);
+
+  // Stage 2 (Khmer/bilingual only): no Khmer video found → use a relevant
+  // English video shown with Khmer auto-translated captions.
+  if (wantsKhmer) {
+    const ccIds = await resolveCandidateIds({
+      question, config, query: englishVideoQueryFor(question, config), language: "english",
+      cacheKey: `${conceptKey}|en-kmcc`,
+      requireCaptions: true,
+      requiredLanguageLabel: "English"
+    });
+    if (ccIds.length) return pickVideo(question, ccIds, true);
+  }
+  return fallbackLink;
 }
 
 // A reliable "watch an explanation" link: prefer the AI's suggested search
@@ -3195,18 +3235,7 @@ function buildVideoUrl(question, config) {
   if (!question) {
     return null;
   }
-  let query = String(question.videoQuery || "").trim();
-  if (!query) {
-    const subject = getSubjectLabel((config && config.subject) || question.subject || "");
-    const topic = String(question.question || "")
-      .replace(/[^\p{L}\p{N}\s]/gu, " ")
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 8)
-      .join(" ");
-    query = `${subject} ${topic} explained`.trim();
-  }
-  return youtubeSearchUrl(localizeVideoQuery(query, config && config.language));
+  return youtubeSearchUrl(videoQueryFor(question, config));
 }
 
 function getSoloSession(sessionId) {
@@ -6800,10 +6829,11 @@ async function fetchWithTimeout(url, options, timeoutMs) {
 const QUIZ_QUESTION_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["workedSolution", "question", "choices", "correctChoice", "shortExplanation", "elaboration", "videoQuery", "subject"],
+  required: ["workedSolution", "question", "choices", "correctChoice", "shortExplanation", "elaboration", "videoQuery", "videoQueryLocal", "subject"],
   properties: {
     workedSolution: { type: "string" },
     videoQuery: { type: "string" },
+    videoQueryLocal: { type: "string" },
     question: { type: "string" },
     choices: {
       type: "array",
@@ -6967,9 +6997,8 @@ Requirements:
 - A short explanation under 30 words
 - A more detailed elaboration under 90 words
 - NOTATION: write all math and science notation so it displays cleanly without a full LaTeX renderer. Use ^ for exponents (x^2, 10^3), a slash or \\frac{a}{b} for fractions, sqrt() for square roots, and plain symbols (×, ÷, ±, °, ≤, ≥, π) and chemical formulas like H2O, CO2, with charges written like Na^+ or SO4^2-. Do NOT use LaTeX environments, matrices, integrals/summations, indexed roots like \\sqrt[3]{}, \\text{}, \\vec{}, or multi-line LaTeX (\\\\).
-- In "videoQuery", ${(config.language === "khmer" || config.language === "bilingual")
-  ? "a precise YouTube search query (6-12 words) WRITTEN IN KHMER (ភាសាខ្មែរ) for a Khmer-language video tutorial that teaches the exact method needed to SOLVE this question at this grade level. Phrase it the way a Khmer learner would search for a lesson. Example: របៀបគណនាផ្ទៃក្រឡាចតុកោណកែង ថ្នាក់ទី៤"
-  : "a precise English YouTube search query (6-12 words) for a tutorial that teaches the exact method or concept needed to SOLVE this question at this grade level. Phrase it the way a learner searches for a lesson and include the grade/level when helpful. Examples: how to find the area of a rectangle grade 4; balancing chemical equations step by step grade 10; subtracting fractions with different denominators explained"}
+- In "videoQuery", a precise ENGLISH YouTube search query (6-12 words) for a tutorial that teaches the exact method or concept needed to SOLVE this question at this grade level. Phrase it the way a learner searches for a lesson and include the grade/level when helpful. Examples: how to find the area of a rectangle grade 4; balancing chemical equations step by step grade 10; subtracting fractions with different denominators explained.
+- In "videoQueryLocal", the SAME search query written in the quiz's language (${getLanguageLabel(config.language)}). ${(config.language === "khmer" || config.language === "bilingual") ? "Write it in Khmer script (ភាសាខ្មែរ), e.g. របៀបគណនាផ្ទៃក្រឡាចតុកោណកែង ថ្នាក់ទី៤." : "For English this can be identical to videoQuery."}
 - Keep the question answerable by Grade ${config.gradeLevel} learners
 - CURRICULUM ALIGNMENT (important): this question is for ${getAlignmentTarget(config)}. Use ONLY concepts, skills, and vocabulary that are appropriate for that level — never content from a higher grade, a different subject, or outside the stated program.
 - ${getCurriculumInstruction(config.curriculum)}
