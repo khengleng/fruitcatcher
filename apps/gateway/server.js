@@ -1610,6 +1610,24 @@ function verifySubscriberToken(token) {
   }
 }
 
+// Telegram bot token: lets the gateway message subscribers directly (e.g. an
+// admin replying to a solo-quiz taker, or an approval notification).
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+async function sendTelegramMessage(chatId, text) {
+  if (!TELEGRAM_BOT_TOKEN || !chatId || !text) return false;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: String(text).slice(0, 4000), disable_web_page_preview: true })
+    });
+    return res.ok;
+  } catch (error) {
+    console.error("Telegram send failed:", error.message);
+    return false;
+  }
+}
+
 // Shared-secret guard for calls coming from the Telegram bot service.
 const BOT_API_SECRET = process.env.BOT_API_SECRET || "";
 function requireBot(req, res, next) {
@@ -3576,6 +3594,12 @@ app.post("/admin/subscription/payments/:id/approve", requireAdmin, async (req, r
     const subscriber = await extendSubscriber(payment.subscriber_id, Number(payment.duration_days));
     await logAuditAction("subscription.payment.approve", "subscription_payments", id,
       { durationDays: Number(payment.duration_days), activeUntil: subscriber?.active_until }, req);
+    // Let the subscriber know their access is live.
+    if (subscriber?.telegram_id) {
+      const until = subscriber.active_until ? new Date(subscriber.active_until).toUTCString().replace(/ GMT$/, " UTC") : "";
+      sendTelegramMessage(subscriber.telegram_id,
+        `✅ Your subscription is now active until ${until}.\n\nOpen the bot and tap "Take a quiz" to start. Enjoy!`).catch(() => {});
+    }
     res.json({ ok: true, subscriber: subscriber ? publicSubscriber(subscriber) : null });
   });
 });
@@ -3711,6 +3735,23 @@ app.delete("/admin/subscription/subscribers/:id", requireAdmin, async (req, res)
     const id = normalizeAdminId(req.params.id, "subscriber id");
     await dbQueryRequired("DELETE FROM subscribers WHERE id = $1", [id]);
     await logAuditAction("subscription.subscriber.delete", "subscribers", id, {}, req);
+    res.json({ ok: true });
+  });
+});
+
+// Send a Telegram message to a subscriber (admin replying to a quiz taker).
+app.post("/admin/subscription/subscribers/:id/message", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  await runAdminAction(res, async () => {
+    if (!TELEGRAM_BOT_TOKEN) { res.status(503).json({ error: "Telegram bot token is not configured on the gateway." }); return; }
+    const id = normalizeAdminId(req.params.id, "subscriber id");
+    const text = String(req.body?.text || "").trim().slice(0, 4000);
+    requireValid(text.length >= 1, "Message text is required");
+    const subscriber = await getSubscriberById(id);
+    if (!subscriber || !subscriber.telegram_id) { res.status(404).json({ error: "Subscriber or Telegram chat not found" }); return; }
+    const sent = await sendTelegramMessage(subscriber.telegram_id, `💬 Message from LyHuor Learning:\n\n${text}`);
+    if (!sent) { res.status(502).json({ error: "Telegram did not accept the message (the user may have blocked the bot)." }); return; }
+    await logAuditAction("subscription.subscriber.message", "subscribers", id, { length: text.length }, req);
     res.json({ ok: true });
   });
 });

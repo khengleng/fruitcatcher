@@ -4099,7 +4099,16 @@
             try { await api(`/admin/subscription/payments/${encodeURIComponent(p.id)}/reject`, { method: "POST" }); loadSubPayments(); }
             catch (e) { setStatus(document.getElementById("subPaymentsStatus"), e.message, "#a33d3d"); }
           });
-          actTd.appendChild(okBtn); actTd.appendChild(noBtn);
+          const msgBtn = document.createElement("button"); msgBtn.textContent = "Message"; msgBtn.className = "small"; msgBtn.style.marginLeft = "6px";
+          msgBtn.addEventListener("click", async () => {
+            const text = prompt(`Send a Telegram message to ${subUserLabel(p)}:`);
+            if (!text || !text.trim()) return;
+            try {
+              await api(`/admin/subscription/subscribers/${encodeURIComponent(p.subscriberId)}/message`, { method: "POST", body: JSON.stringify({ text }) });
+              setStatus(document.getElementById("subPaymentsStatus"), "Message sent ✓", "#1f7a4d");
+            } catch (e) { setStatus(document.getElementById("subPaymentsStatus"), e.message, "#a33d3d"); }
+          });
+          actTd.appendChild(okBtn); actTd.appendChild(noBtn); actTd.appendChild(msgBtn);
           tr.appendChild(actTd);
           body.appendChild(tr);
         });
@@ -4137,13 +4146,22 @@
             try { await api(`/admin/subscription/subscribers/${encodeURIComponent(s.id)}/revoke`, { method: "POST" }); loadSubSubscribers(); }
             catch (e) { setStatus(document.getElementById("subSubscribersStatus"), e.message, "#a33d3d"); }
           });
+          const msgBtn = document.createElement("button"); msgBtn.textContent = "Message"; msgBtn.className = "small"; msgBtn.style.marginLeft = "6px";
+          msgBtn.addEventListener("click", async () => {
+            const text = prompt(`Send a Telegram message to ${subUserLabel(s)}:`);
+            if (!text || !text.trim()) return;
+            try {
+              await api(`/admin/subscription/subscribers/${encodeURIComponent(s.id)}/message`, { method: "POST", body: JSON.stringify({ text }) });
+              setStatus(document.getElementById("subSubscribersStatus"), "Message sent ✓", "#1f7a4d");
+            } catch (e) { setStatus(document.getElementById("subSubscribersStatus"), e.message, "#a33d3d"); }
+          });
           const delBtn = document.createElement("button"); delBtn.textContent = "Delete"; delBtn.className = "small secondary"; delBtn.style.marginLeft = "6px";
           delBtn.addEventListener("click", async () => {
             if (!confirm(`Permanently delete ${subUserLabel(s)} and all their payment records? This removes their revenue from reports.`)) return;
             try { await api(`/admin/subscription/subscribers/${encodeURIComponent(s.id)}`, { method: "DELETE" }); loadSubSubscribers(); loadSubRevenue(); }
             catch (e) { setStatus(document.getElementById("subSubscribersStatus"), e.message, "#a33d3d"); }
           });
-          actTd.appendChild(extBtn); actTd.appendChild(revBtn); actTd.appendChild(delBtn);
+          actTd.appendChild(extBtn); actTd.appendChild(revBtn); actTd.appendChild(msgBtn); actTd.appendChild(delBtn);
           tr.appendChild(actTd);
           body.appendChild(tr);
         });
