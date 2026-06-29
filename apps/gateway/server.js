@@ -1627,6 +1627,40 @@ async function sendTelegramMessage(chatId, text) {
   }
 }
 
+// Send a photo or document (from a base64 upload) via Telegram multipart.
+async function sendTelegramFile(chatId, kind, { dataBase64, filename, mime, caption }) {
+  if (!TELEGRAM_BOT_TOKEN || !chatId || !dataBase64) return false;
+  try {
+    const method = kind === "photo" ? "sendPhoto" : "sendDocument";
+    const field = kind === "photo" ? "photo" : "document";
+    const buffer = Buffer.from(String(dataBase64), "base64");
+    const form = new FormData();
+    form.append("chat_id", String(chatId));
+    if (caption) form.append("caption", String(caption).slice(0, 1024));
+    form.append(field, new Blob([buffer], { type: mime || "application/octet-stream" }), filename || (kind === "photo" ? "photo.jpg" : "file"));
+    const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/${method}`, { method: "POST", body: form });
+    return res.ok;
+  } catch (error) {
+    console.error("Telegram file send failed:", error.message);
+    return false;
+  }
+}
+
+async function sendTelegramLocation(chatId, latitude, longitude) {
+  if (!TELEGRAM_BOT_TOKEN || !chatId) return false;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendLocation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, latitude: Number(latitude), longitude: Number(longitude) })
+    });
+    return res.ok;
+  } catch (error) {
+    console.error("Telegram location send failed:", error.message);
+    return false;
+  }
+}
+
 // Shared-secret guard for calls coming from the Telegram bot service.
 const BOT_API_SECRET = process.env.BOT_API_SECRET || "";
 function requireBot(req, res, next) {
@@ -2576,7 +2610,7 @@ async function markProgressSession(room) {
   }
 }
 
-app.use(express.json());
+app.use(express.json({ limit: "8mb" }));
 app.use((req, res, next) => {
   const origin = req.get("origin");
   const isAdminRequest = req.path.startsWith("/admin");
@@ -3744,13 +3778,38 @@ app.post("/admin/subscription/subscribers/:id/message", requireAdmin, async (req
   await runAdminAction(res, async () => {
     if (!TELEGRAM_BOT_TOKEN) { res.status(503).json({ error: "Telegram bot token is not configured on the gateway." }); return; }
     const id = normalizeAdminId(req.params.id, "subscriber id");
-    const text = String(req.body?.text || "").trim().slice(0, 4000);
-    requireValid(text.length >= 1, "Message text is required");
     const subscriber = await getSubscriberById(id);
     if (!subscriber || !subscriber.telegram_id) { res.status(404).json({ error: "Subscriber or Telegram chat not found" }); return; }
-    const sent = await sendTelegramMessage(subscriber.telegram_id, `💬 Message from LyHuor Learning:\n\n${text}`);
-    if (!sent) { res.status(502).json({ error: "Telegram did not accept the message (the user may have blocked the bot)." }); return; }
-    await logAuditAction("subscription.subscriber.message", "subscribers", id, { length: text.length }, req);
+    const chatId = subscriber.telegram_id;
+
+    const text = String(req.body?.text || "").trim().slice(0, 4000);
+    const caption = String(req.body?.caption || text || "").trim().slice(0, 1024);
+    const attachment = req.body?.attachment;
+    const location = req.body?.location;
+
+    let sent = false;
+    const kinds = [];
+    if (attachment && attachment.dataBase64) {
+      const kind = attachment.kind === "document" ? "document" : "photo";
+      sent = await sendTelegramFile(chatId, kind, {
+        dataBase64: attachment.dataBase64,
+        filename: String(attachment.filename || "").slice(0, 120),
+        mime: String(attachment.mime || ""),
+        caption: caption || undefined
+      });
+      kinds.push(kind);
+    } else if (location && location.latitude != null && location.longitude != null) {
+      sent = await sendTelegramLocation(chatId, location.latitude, location.longitude);
+      kinds.push("location");
+      if (sent && text) await sendTelegramMessage(chatId, text);
+    } else {
+      requireValid(text.length >= 1, "Message text is required");
+      sent = await sendTelegramMessage(chatId, `💬 Message from LyHuor Learning:\n\n${text}`);
+      kinds.push("text");
+    }
+
+    if (!sent) { res.status(502).json({ error: "Telegram did not accept the message (the user may have blocked the bot, or the file is too large)." }); return; }
+    await logAuditAction("subscription.subscriber.message", "subscribers", id, { kinds }, req);
     res.json({ ok: true });
   });
 });

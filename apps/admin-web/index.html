@@ -1476,6 +1476,39 @@
             <tbody id="subSubscribersBody"></tbody>
           </table>
         </div>
+
+        <!-- Telegram composer modal -->
+        <div id="msgModal" hidden style="position:fixed; inset:0; background:rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center; z-index:1000;">
+          <div style="background:#fff; color:#111; width:min(520px,94vw); max-height:92vh; overflow:auto; border-radius:14px; padding:18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <strong id="msgModalTitle">Message subscriber</strong>
+              <button id="msgClose" class="small secondary">✕</button>
+            </div>
+            <div id="msgEmojiRow" style="display:flex; flex-wrap:wrap; gap:4px; margin:10px 0;"></div>
+            <textarea id="msgText" rows="4" maxlength="4000" placeholder="Type your message… (emoji welcome 🙂)" style="width:100%;"></textarea>
+
+            <div style="margin-top:12px; border-top:1px solid #eee; padding-top:10px;">
+              <label style="font-weight:700; font-size:13px;">📎 Attach photo or file (optional)</label>
+              <input id="msgFile" type="file" style="width:100%; margin-top:4px;">
+              <div id="msgFileInfo" class="muted" style="font-size:12px;"></div>
+            </div>
+
+            <div style="margin-top:12px; border-top:1px solid #eee; padding-top:10px;">
+              <label style="font-weight:700; font-size:13px;">📍 Share a location (optional)</label>
+              <div class="row" style="display:flex; gap:6px; flex-wrap:wrap; align-items:flex-end; margin-top:4px;">
+                <label style="width:130px;">Latitude<input id="msgLat" type="number" step="any" placeholder="11.5564"></label>
+                <label style="width:130px;">Longitude<input id="msgLng" type="number" step="any" placeholder="104.9282"></label>
+                <button id="msgUseLoc" class="small secondary" type="button">Use my location</button>
+              </div>
+            </div>
+
+            <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px; align-items:center;">
+              <span id="msgStatus" class="muted" style="margin-right:auto;"></span>
+              <button id="msgCancel" class="secondary">Cancel</button>
+              <button id="msgSend">Send</button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section id="usersPanel" class="panel" hidden>
@@ -4100,14 +4133,7 @@
             catch (e) { setStatus(document.getElementById("subPaymentsStatus"), e.message, "#a33d3d"); }
           });
           const msgBtn = document.createElement("button"); msgBtn.textContent = "Message"; msgBtn.className = "small"; msgBtn.style.marginLeft = "6px";
-          msgBtn.addEventListener("click", async () => {
-            const text = prompt(`Send a Telegram message to ${subUserLabel(p)}:`);
-            if (!text || !text.trim()) return;
-            try {
-              await api(`/admin/subscription/subscribers/${encodeURIComponent(p.subscriberId)}/message`, { method: "POST", body: JSON.stringify({ text }) });
-              setStatus(document.getElementById("subPaymentsStatus"), "Message sent ✓", "#1f7a4d");
-            } catch (e) { setStatus(document.getElementById("subPaymentsStatus"), e.message, "#a33d3d"); }
-          });
+          msgBtn.addEventListener("click", () => openMessageModal(p.subscriberId, subUserLabel(p)));
           actTd.appendChild(okBtn); actTd.appendChild(noBtn); actTd.appendChild(msgBtn);
           tr.appendChild(actTd);
           body.appendChild(tr);
@@ -4147,14 +4173,7 @@
             catch (e) { setStatus(document.getElementById("subSubscribersStatus"), e.message, "#a33d3d"); }
           });
           const msgBtn = document.createElement("button"); msgBtn.textContent = "Message"; msgBtn.className = "small"; msgBtn.style.marginLeft = "6px";
-          msgBtn.addEventListener("click", async () => {
-            const text = prompt(`Send a Telegram message to ${subUserLabel(s)}:`);
-            if (!text || !text.trim()) return;
-            try {
-              await api(`/admin/subscription/subscribers/${encodeURIComponent(s.id)}/message`, { method: "POST", body: JSON.stringify({ text }) });
-              setStatus(document.getElementById("subSubscribersStatus"), "Message sent ✓", "#1f7a4d");
-            } catch (e) { setStatus(document.getElementById("subSubscribersStatus"), e.message, "#a33d3d"); }
-          });
+          msgBtn.addEventListener("click", () => openMessageModal(s.id, subUserLabel(s)));
           const delBtn = document.createElement("button"); delBtn.textContent = "Delete"; delBtn.className = "small secondary"; delBtn.style.marginLeft = "6px";
           delBtn.addEventListener("click", async () => {
             if (!confirm(`Permanently delete ${subUserLabel(s)} and all their payment records? This removes their revenue from reports.`)) return;
@@ -4169,6 +4188,84 @@
         setStatus(document.getElementById("subSubscribersStatus"), e.message, "#a33d3d");
       }
     }
+
+    // ===== Telegram composer (emoji / file / location) =====
+    let subMsgTargetId = null;
+    const SUB_EMOJIS = ["😀","🙂","😉","👍","🙏","❤️","✅","🎉","🔥","📚","⏰","💳","▶️","📍","👏","💯"];
+
+    function openMessageModal(id, label) {
+      subMsgTargetId = id;
+      document.getElementById("msgModalTitle").textContent = "Message " + (label || "subscriber");
+      document.getElementById("msgText").value = "";
+      document.getElementById("msgFile").value = "";
+      document.getElementById("msgFileInfo").textContent = "";
+      document.getElementById("msgLat").value = "";
+      document.getElementById("msgLng").value = "";
+      setStatus(document.getElementById("msgStatus"), "", "#8a6d1f");
+      document.getElementById("msgModal").hidden = false;
+    }
+    function closeMessageModal() { document.getElementById("msgModal").hidden = true; subMsgTargetId = null; }
+
+    function insertAtCursor(textarea, str) {
+      const start = textarea.selectionStart || 0, end = textarea.selectionEnd || 0;
+      textarea.value = textarea.value.slice(0, start) + str + textarea.value.slice(end);
+      textarea.selectionStart = textarea.selectionEnd = start + str.length;
+      textarea.focus();
+    }
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => { const s = String(r.result); resolve(s.slice(s.indexOf(",") + 1)); };
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+    }
+    async function sendComposed() {
+      if (!subMsgTargetId) return;
+      const status = document.getElementById("msgStatus");
+      const text = document.getElementById("msgText").value.trim();
+      const file = document.getElementById("msgFile").files[0];
+      const lat = document.getElementById("msgLat").value;
+      const lng = document.getElementById("msgLng").value;
+      const body = {};
+      if (text) body.text = text;
+      try {
+        if (file) {
+          if (file.size > 5 * 1024 * 1024) { setStatus(status, "File too large (max 5 MB).", "#a33d3d"); return; }
+          setStatus(status, "Uploading…", "#8a6d1f");
+          body.attachment = { kind: file.type.startsWith("image/") ? "photo" : "document", filename: file.name, mime: file.type, dataBase64: await fileToBase64(file) };
+          if (text) body.caption = text;
+        } else if (lat !== "" && lng !== "") {
+          body.location = { latitude: Number(lat), longitude: Number(lng) };
+        } else if (!text) {
+          setStatus(status, "Type a message, attach a file, or set a location.", "#a33d3d"); return;
+        }
+        setStatus(status, "Sending…", "#8a6d1f");
+        await api(`/admin/subscription/subscribers/${encodeURIComponent(subMsgTargetId)}/message`, { method: "POST", body: JSON.stringify(body) });
+        setStatus(status, "Sent ✓", "#1f7a4d");
+        setTimeout(closeMessageModal, 700);
+      } catch (e) { setStatus(status, e.message, "#a33d3d"); }
+    }
+    (function () {
+      const row = document.getElementById("msgEmojiRow");
+      SUB_EMOJIS.forEach((e) => { const b = document.createElement("button"); b.type = "button"; b.textContent = e; b.className = "secondary small"; b.style.padding = "2px 7px"; b.addEventListener("click", () => insertAtCursor(document.getElementById("msgText"), e)); row.appendChild(b); });
+    })();
+    document.getElementById("msgClose").addEventListener("click", closeMessageModal);
+    document.getElementById("msgCancel").addEventListener("click", closeMessageModal);
+    document.getElementById("msgSend").addEventListener("click", sendComposed);
+    document.getElementById("msgFile").addEventListener("change", () => {
+      const f = document.getElementById("msgFile").files[0];
+      document.getElementById("msgFileInfo").textContent = f ? `${f.name} — ${(f.size / 1024).toFixed(0)} KB${f.size > 5 * 1024 * 1024 ? " (too large, max 5 MB)" : ""}` : "";
+    });
+    document.getElementById("msgUseLoc").addEventListener("click", () => {
+      const status = document.getElementById("msgStatus");
+      if (!navigator.geolocation) { setStatus(status, "Geolocation not available in this browser.", "#a33d3d"); return; }
+      setStatus(status, "Getting your location…", "#8a6d1f");
+      navigator.geolocation.getCurrentPosition(
+        (pos) => { document.getElementById("msgLat").value = pos.coords.latitude.toFixed(6); document.getElementById("msgLng").value = pos.coords.longitude.toFixed(6); setStatus(status, "Location set ✓", "#1f7a4d"); },
+        () => setStatus(status, "Could not get your location.", "#a33d3d")
+      );
+    });
 
     document.getElementById("revRefresh").addEventListener("click", loadSubRevenue);
     document.getElementById("subSettingsSave").addEventListener("click", saveSubSettings);
