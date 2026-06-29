@@ -621,12 +621,52 @@
     /* Modals */
     #msgModal > div, #qaiModal > div { border-radius: 18px !important; box-shadow: 0 30px 90px rgba(0, 0, 0, 0.32) !important; }
 
-    @media (max-width: 860px) {
-      .shell { grid-template-columns: 1fr; }
-      .sidenav { position: static; max-height: none; flex-direction: row; flex-wrap: wrap; align-items: flex-start; }
-      .nav-group { margin-bottom: 6px; }
-      .nav-group-title { width: 100%; }
-      .sidenav .tab { width: auto; }
+    /* Header lead + sidebar toggle */
+    .header-lead { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .nav-toggle {
+      flex: none; width: 38px; height: 38px; min-height: 38px; padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: transparent; color: var(--ink); box-shadow: none; border-radius: 9px;
+    }
+    .nav-toggle:hover { background: rgba(0, 0, 0, 0.05); filter: none; }
+    .nav-toggle svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; }
+
+    .nav-backdrop {
+      position: fixed; inset: 0; background: rgba(0, 0, 0, 0.34); z-index: 150;
+      opacity: 0; pointer-events: none; transition: opacity 0.22s ease;
+      -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+    }
+    body.nav-open .nav-backdrop { opacity: 1; pointer-events: auto; }
+
+    /* Desktop: collapsed icon-only rail */
+    body.nav-rail .shell { grid-template-columns: 64px minmax(0, 1fr); }
+    body.nav-rail .sidenav { padding: 12px 8px; }
+    body.nav-rail .sidenav .tab { justify-content: center; padding: 8px 0; gap: 0; }
+    body.nav-rail .sidenav .tab > span:last-child { display: none; }
+    body.nav-rail .nav-group-title { display: none; }
+    body.nav-rail .nav-group { gap: 2px; margin-bottom: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+    body.nav-rail .nav-group:first-child { border-top: 0; padding-top: 0; }
+
+    @media (min-width: 901px) { .nav-backdrop { display: none; } }
+
+    /* Narrow screens: auto-collapsed off-canvas drawer */
+    @media (max-width: 900px) {
+      .shell { grid-template-columns: minmax(0, 1fr); }
+      .shell > .panel { grid-column: 1; }
+      .sidenav {
+        position: fixed; top: 0; left: 0; bottom: 0; z-index: 200;
+        width: 270px; max-height: none; border-radius: 0 18px 18px 0;
+        transform: translateX(-106%);
+        transition: transform 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.22);
+      }
+      body.nav-open .sidenav { transform: translateX(0); }
+      /* Rail mode is meaningless on mobile — always show full labels in the drawer. */
+      body.nav-rail .shell { grid-template-columns: minmax(0, 1fr); }
+      body.nav-rail .sidenav { padding: 12px 10px; }
+      body.nav-rail .sidenav .tab { justify-content: flex-start; padding: 7px 10px; gap: 11px; }
+      body.nav-rail .sidenav .tab > span:last-child { display: inline; }
+      body.nav-rail .nav-group-title { display: block; }
       #adminApp header { position: static; }
       #adminApp header h1 { font-size: 17px; }
     }
@@ -662,9 +702,14 @@
 
 	  <main id="adminApp" hidden>
 	    <header>
-	      <div>
-	        <h1>Learning with AI Center</h1>
-	        <p class="muted">Manage live TV quiz settings and review persisted student progress from Postgres.</p>
+	      <div class="header-lead">
+	        <button id="navToggle" class="nav-toggle" aria-label="Collapse menu" title="Collapse menu">
+	          <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+	        </button>
+	        <div>
+	          <h1>Learning with AI Center</h1>
+	          <p class="muted">Manage live TV quiz settings and review persisted student progress from Postgres.</p>
+	        </div>
 	      </div>
 	      <div class="admin-userbar">
 	        <span id="adminUserBadge" class="pill">Signed out</span>
@@ -674,6 +719,7 @@
 	      </div>
 	    </header>
 
+	    <div class="nav-backdrop" id="navBackdrop"></div>
 	    <div class="shell">
 	      <nav class="tabs sidenav">
         <div class="nav-group">
@@ -713,7 +759,7 @@
         </div>
         <div class="nav-group">
           <div class="nav-group-title">System</div>
-          <button class="tab active" data-tab="settings" data-role="admin"><span class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M18 6l-1.6 1.6M7.6 16.4 6 18M18 18l-1.6-1.6M7.6 7.6 6 6"/></svg></span><span>Settings</span></button>
+          <button class="tab active" data-tab="settings" data-role="admin"><span class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l1.7-1.3-1.7-3-2 .8a7.5 7.5 0 0 0-1.7-1l-.3-2.1h-3.4l-.3 2.1a7.5 7.5 0 0 0-1.7 1l-2-.8-1.7 3L6.6 11a7.6 7.6 0 0 0 0 2l-1.7 1.3 1.7 3 2-.8a7.5 7.5 0 0 0 1.7 1l.3 2.1h3.4l.3-2.1a7.5 7.5 0 0 0 1.7-1l2 .8 1.7-3z"/></svg></span><span>Settings</span></button>
           <button class="tab" data-tab="users" data-role="admin"><span class="ico"><svg viewBox="0 0 24 24"><circle cx="8.5" cy="8.5" r="4.5"/><path d="M11.7 11.7L20 20M16.5 16.5l2-2M18.5 18.5l2-2"/></svg></span><span>Users &amp; Roles</span></button>
         </div>
       </nav>
@@ -4503,6 +4549,51 @@
     document.querySelectorAll("button.tab").forEach((button) => {
       button.addEventListener("click", () => showTab(button.dataset.tab));
     });
+
+    // ===== Collapsible sidebar (icon rail on desktop, drawer on mobile) =====
+    (function () {
+      const toggle = document.getElementById("navToggle");
+      const backdrop = document.getElementById("navBackdrop");
+      const RAIL_KEY = "fc_admin_nav_rail";
+      const isNarrow = () => window.matchMedia("(max-width: 900px)").matches;
+      // Tooltips so the icon-only rail stays usable.
+      document.querySelectorAll(".sidenav .tab").forEach((b) => {
+        const lbl = b.querySelector("span:last-child");
+        if (lbl) b.title = lbl.textContent.trim();
+      });
+      function syncToggleTitle() {
+        if (!toggle) return;
+        toggle.title = isNarrow() ? "Menu" : (document.body.classList.contains("nav-rail") ? "Expand menu" : "Collapse menu");
+      }
+      function applyRailPref() {
+        if (!isNarrow() && localStorage.getItem(RAIL_KEY) === "1") document.body.classList.add("nav-rail");
+        else document.body.classList.remove("nav-rail");
+        syncToggleTitle();
+      }
+      if (toggle) toggle.addEventListener("click", () => {
+        if (isNarrow()) {
+          document.body.classList.toggle("nav-open");
+        } else {
+          const rail = document.body.classList.toggle("nav-rail");
+          try { localStorage.setItem(RAIL_KEY, rail ? "1" : "0"); } catch (e) {}
+        }
+        syncToggleTitle();
+      });
+      if (backdrop) backdrop.addEventListener("click", () => document.body.classList.remove("nav-open"));
+      document.querySelectorAll("button.tab").forEach((b) => b.addEventListener("click", () => {
+        if (isNarrow()) document.body.classList.remove("nav-open");
+      }));
+      let rt;
+      window.addEventListener("resize", () => {
+        clearTimeout(rt);
+        rt = setTimeout(() => {
+          if (isNarrow()) document.body.classList.remove("nav-rail");
+          else { document.body.classList.remove("nav-open"); applyRailPref(); }
+          syncToggleTitle();
+        }, 120);
+      });
+      applyRailPref();
+    })();
 
     document.getElementById("loginButton").addEventListener("click", async () => {
       try {
