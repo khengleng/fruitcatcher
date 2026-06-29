@@ -3410,6 +3410,34 @@ app.post("/bot/subscription/payments", requireBot, async (req, res) => {
   }
 });
 
+// Public, token-authenticated: lets the solo quiz app show the signed-in
+// subscriber their remaining credit (days left). No bot secret needed — the
+// signed subscriber token is proof of identity.
+app.get("/solo/subscription", async (req, res) => {
+  try {
+    const claim = verifySubscriberToken(req.query.token || "");
+    if (!claim || !db) {
+      res.json({ active: false, daysRemaining: 0 });
+      return;
+    }
+    const subscriber = await getSubscriberById(claim.sub);
+    const active = subscriberIsActive(subscriber);
+    let daysRemaining = 0;
+    if (active && subscriber.active_until) {
+      daysRemaining = Math.max(0, Math.ceil((new Date(subscriber.active_until).getTime() - Date.now()) / 86400000));
+    }
+    res.json({
+      active,
+      activeUntil: subscriber ? subscriber.active_until : null,
+      daysRemaining,
+      displayName: subscriber ? subscriber.display_name : null
+    });
+  } catch (error) {
+    console.error("Solo subscription status failed:", error);
+    res.json({ active: false, daysRemaining: 0 });
+  }
+});
+
 // ============================================================================
 // Subscriptions — admin management
 // ============================================================================

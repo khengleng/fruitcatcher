@@ -610,6 +610,7 @@
         <div class="trust-badge">Khmer, English, or bilingual</div>
         <div class="trust-badge">Progress saved for review</div>
       </div>
+      <div id="soloCredit" hidden style="margin:10px 0; padding:10px 14px; border-radius:12px; font-weight:700; text-align:center;"></div>
       <div class="room-form">
         <input id="playerNameInput" maxlength="24" placeholder="NAME" autocomplete="off">
         <input id="roomCodeInput" maxlength="6" placeholder="ROOM" autocomplete="off">
@@ -787,6 +788,31 @@
       try { return params.get("sub") || localStorage.getItem(SUB_TOKEN_KEY) || ""; } catch (e) { return ""; }
     }
 
+    // Show the subscriber their remaining credit (days left) in solo mode.
+    async function refreshSoloCredit() {
+      const el = document.getElementById("soloCredit");
+      if (!el) return;
+      const token = getSubscriberToken();
+      if (!token) { el.hidden = true; return; }
+      try {
+        const res = await fetch(`${gatewayHttpUrl}/solo/subscription?token=${encodeURIComponent(token)}`);
+        const data = await res.json().catch(() => ({}));
+        if (data.active) {
+          const d = data.daysRemaining;
+          el.textContent = `✅ Subscription active — ${d} day${d === 1 ? "" : "s"} left`;
+          el.style.background = "rgba(105,230,166,0.16)";
+          el.style.color = "#69e6a6";
+        } else {
+          el.textContent = "❌ No active subscription — subscribe in our Telegram bot to play.";
+          el.style.background = "rgba(255,211,79,0.16)";
+          el.style.color = "#ffd166";
+        }
+        el.hidden = false;
+      } catch (e) {
+        el.hidden = true;
+      }
+    }
+
     if (isSoloMode) {
       document.body.classList.add("solo-mode");
     }
@@ -858,6 +884,9 @@
         soloGradeEl.disabled = true;
         soloHeroEl.querySelector("h2") && (soloHeroEl.querySelector("h2").textContent = "Your teacher's quiz");
       }
+
+      // Show remaining subscription credit (for self-serve / Telegram solo).
+      refreshSoloCredit();
     }
 
     function getCurriculumLabel(value) {
@@ -1028,7 +1057,11 @@
             studentName: normalizedPlayerName || "Student",
             clientId: savedSession.clientId,
             shareId: params.get("shareId") || "",
-            studentToken: (function () { try { return localStorage.getItem("fruitcatcher_student_token") || ""; } catch (e) { return ""; } })(),
+            // Only attach the logged-in student identity for classroom assignments.
+            // For self-serve / Telegram solo quizzes, use the name typed here.
+            studentToken: (params.get("classroomId")
+              ? (function () { try { return localStorage.getItem("fruitcatcher_student_token") || ""; } catch (e) { return ""; } })()
+              : ""),
             subscriberToken: getSubscriberToken(),
             classroomId: params.get("classroomId") || "",
             source: params.get("source") || "web",
