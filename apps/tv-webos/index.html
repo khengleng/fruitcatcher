@@ -810,6 +810,9 @@
             var vlabel = state.videoEmbedUrl
               ? '📺 Scan to watch on your phone — or press <b style="color:#69e6a6;">▶ PLAY</b> / <b style="color:#69e6a6;">YELLOW</b> to play on this TV'
               : '📺 Scan to watch the explanation on YouTube';
+            if (state.videoCaptionLanguage === "km") {
+              vlabel += '<br><b style="color:#ffd166;">🎬 English video · Khmer subtitles</b>';
+            }
             revealHtml += '<div class="video-hint"><img class="video-qr" src="' + vqr + '" alt="QR"><span>' + vlabel + '</span></div>';
           }
           ui.explanation.innerHTML = revealHtml;

@@ -354,6 +354,7 @@
     }
 
     .yt-wrap { margin-top: 10px; }
+    .yt-note { font-size: 12px; font-weight: 700; color: #ffd166; background: rgba(255,211,79,0.14); border-radius: 8px; padding: 5px 10px; margin-bottom: 6px; display: inline-block; }
     .yt-embed {
       position: relative;
       width: 100%;
@@ -1452,7 +1453,10 @@
         if (latestState.status === "REVIEWING") {
           let exp = formatMathHTML(`${latestState.shortExplanation} ${latestState.elaboration}`);
           if (latestState.videoEmbedUrl) {
-            exp += `<div class="yt-wrap"><div class="yt-embed"><iframe src="${latestState.videoEmbedUrl}" title="Explanation video" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe></div></div>`;
+            const vidLabel = latestState.videoCaptionLanguage === "km"
+              ? `<div class="yt-note">🎬 English video · Khmer subtitles (វីដេអូអង់គ្លេស · អក្សររត់ខ្មែរ)</div>`
+              : "";
+            exp += `<div class="yt-wrap">${vidLabel}<div class="yt-embed"><iframe src="${latestState.videoEmbedUrl}" title="Explanation video" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe></div></div>`;
           } else if (latestState.videoUrl) {
             exp += `<div class="yt-wrap"><a class="yt-link" href="${latestState.videoUrl}" target="_blank" rel="noopener">▶ Watch an explanation on YouTube</a></div>`;
           }

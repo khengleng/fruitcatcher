@@ -3260,6 +3260,7 @@ function buildSoloState(session) {
     elaboration: session.status === "REVIEWING" ? session.currentQuestion?.elaboration || "" : "",
     videoUrl: session.status === "REVIEWING" ? (session.currentQuestion?.resolvedVideo?.url || buildVideoUrl(session.currentQuestion, session.config)) : null,
     videoEmbedUrl: session.status === "REVIEWING" ? (session.currentQuestion?.resolvedVideo?.embedUrl || null) : null,
+    videoCaptionLanguage: session.status === "REVIEWING" ? (session.currentQuestion?.resolvedVideo?.captionLanguage || null) : null,
     answerCount: session.status === "ANSWERING" && session.currentAnswer ? 1 : 0,
     leaderboard: [
       {
@@ -3565,6 +3566,7 @@ app.post("/solo/sessions/:id/answer", async (req, res) => {
       elaboration: session.currentQuestion.elaboration || "",
       videoUrl: video.url,
       videoEmbedUrl: video.embedUrl,
+      videoCaptionLanguage: video.captionLanguage || null,
       scoreAfter: session.score,
       source: session.currentQuestion.source || null,
       model: session.currentQuestion.model || null
@@ -5587,6 +5589,7 @@ function buildRoomState(roomCode, viewerWs = null) {
     elaboration: room.revealAnswer ? room.currentQuestion?.elaboration || "" : "",
     videoUrl: room.revealAnswer ? (room.currentQuestion?.resolvedVideo?.url || buildVideoUrl(room.currentQuestion, getSessionConfig(room))) : null,
     videoEmbedUrl: room.revealAnswer ? (room.currentQuestion?.resolvedVideo?.embedUrl || null) : null,
+    videoCaptionLanguage: room.revealAnswer ? (room.currentQuestion?.resolvedVideo?.captionLanguage || null) : null,
     deadlineAt: room.deadlineAt,
     answerCount: room.answerCount || 0,
     leaderboard: getLeaderboard(room),
