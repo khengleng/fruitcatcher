@@ -1610,9 +1610,8 @@ function verifySubscriberToken(token) {
   }
 }
 
-// Telegram bot token: lets the gateway message subscribers directly (e.g. an
-// admin replying to a solo-quiz taker, or an approval notification).
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+// Send a Telegram message directly to a chat — an admin replying to a solo-quiz
+// taker, or an approval notification. Uses TELEGRAM_BOT_TOKEN defined above.
 async function sendTelegramMessage(chatId, text) {
   if (!TELEGRAM_BOT_TOKEN || !chatId || !text) return false;
   try {
