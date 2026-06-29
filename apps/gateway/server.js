@@ -39,6 +39,9 @@ const FALLBACK_LLM_URL = process.env.FALLBACK_LLM_URL || "";
 const FALLBACK_LLM_KEY = process.env.FALLBACK_LLM_KEY || "";
 const FALLBACK_LLM_MODEL = process.env.FALLBACK_LLM_MODEL || "Qwen3.6-27B";
 const FALLBACK_MAX_TOKENS = Number(process.env.FALLBACK_MAX_TOKENS || 2048);
+// Self-hosted models are typically slower than OpenAI, especially for long
+// structured prompts and non-English (e.g. Khmer) output — give them more time.
+const FALLBACK_TIMEOUT_MS = Number(process.env.FALLBACK_TIMEOUT_MS || 60000);
 const FALLBACK_LLM_CONFIGURED = Boolean(FALLBACK_LLM_URL && FALLBACK_LLM_KEY);
 // After an OpenAI auth/credit failure, skip OpenAI for this long and use the
 // fallback directly, then retry OpenAI (auto-recovery when credit is topped up).
@@ -1425,9 +1428,11 @@ function getAlignmentTarget(config) {
 
 function getFallbackQuestion(room) {
   const config = getSessionConfig(room);
-  const subject = SUPPORTED_SUBJECTS.includes(config.subject) ? config.subject : "math";
+  // Some subjects (e.g. IELTS/SAT) have no deterministic bank — fall back to math.
+  const requested = SUPPORTED_SUBJECTS.includes(config.subject) ? config.subject : "math";
+  const subject = FALLBACK_QUESTION_BANK[requested] ? requested : "math";
   const band = getGradeBand(config.gradeLevel);
-  const bank = FALLBACK_QUESTION_BANK[subject][band];
+  const bank = (FALLBACK_QUESTION_BANK[subject] && FALLBACK_QUESTION_BANK[subject][band]) || FALLBACK_QUESTION_BANK.math[band];
   const template = bank[room.questionIndex % bank.length];
 
   return {
@@ -6783,7 +6788,7 @@ async function callFallbackChat({ instructions, input, jsonSchema }) {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${FALLBACK_LLM_KEY}` },
     body: JSON.stringify(body)
-  }, OPENAI_TIMEOUT_MS);
+  }, FALLBACK_TIMEOUT_MS);
   if (!response.ok) {
     const message = await response.text().catch(() => "");
     throw new Error(`Fallback LLM request failed: ${response.status} ${message.slice(0, 300)}`);
