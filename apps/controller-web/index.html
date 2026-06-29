@@ -1123,7 +1123,12 @@
         setStatus(latestState.status === "FINISHED" ? "Quiz complete." : "Question ready.", "#69e6a6");
         renderState();
       } catch (error) {
-        setStatus(error.message || "Could not load question.", "#ff9b7d");
+        if (error.status === 404) {
+          resetSoloQuiz();
+          setStatus("Your quiz session expired. Tap Start to begin a fresh quiz.", "#ffd166");
+        } else {
+          setStatus(error.message || "Could not load question.", "#ff9b7d");
+        }
         renderState();
       }
     }
@@ -1152,7 +1157,13 @@
         setStatus(data.result?.isCorrect ? "Correct. Review the explanation." : "Review the explanation.", data.result?.isCorrect ? "#69e6a6" : "#ff9b7d");
         renderState();
       } catch (error) {
-        setStatus(error.message || "Could not submit answer.", "#ff9b7d");
+        if (error.status === 404) {
+          // The server restarted (e.g. a deploy) and lost this in-memory session.
+          resetSoloQuiz();
+          setStatus("Your quiz session expired. Tap Start to begin a fresh quiz.", "#ffd166");
+        } else {
+          setStatus(error.message || "Could not submit answer.", "#ff9b7d");
+        }
         renderState();
       }
     }
