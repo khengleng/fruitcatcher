@@ -4137,7 +4137,13 @@
             try { await api(`/admin/subscription/subscribers/${encodeURIComponent(s.id)}/revoke`, { method: "POST" }); loadSubSubscribers(); }
             catch (e) { setStatus(document.getElementById("subSubscribersStatus"), e.message, "#a33d3d"); }
           });
-          actTd.appendChild(extBtn); actTd.appendChild(revBtn);
+          const delBtn = document.createElement("button"); delBtn.textContent = "Delete"; delBtn.className = "small secondary"; delBtn.style.marginLeft = "6px";
+          delBtn.addEventListener("click", async () => {
+            if (!confirm(`Permanently delete ${subUserLabel(s)} and all their payment records? This removes their revenue from reports.`)) return;
+            try { await api(`/admin/subscription/subscribers/${encodeURIComponent(s.id)}`, { method: "DELETE" }); loadSubSubscribers(); loadSubRevenue(); }
+            catch (e) { setStatus(document.getElementById("subSubscribersStatus"), e.message, "#a33d3d"); }
+          });
+          actTd.appendChild(extBtn); actTd.appendChild(revBtn); actTd.appendChild(delBtn);
           tr.appendChild(actTd);
           body.appendChild(tr);
         });

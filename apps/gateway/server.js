@@ -3704,6 +3704,17 @@ app.post("/admin/subscription/subscribers/:id/revoke", requireAdmin, async (req,
   });
 });
 
+// Permanently delete a subscriber and all their payments (test/spam cleanup).
+app.delete("/admin/subscription/subscribers/:id", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  await runAdminAction(res, async () => {
+    const id = normalizeAdminId(req.params.id, "subscriber id");
+    await dbQueryRequired("DELETE FROM subscribers WHERE id = $1", [id]);
+    await logAuditAction("subscription.subscriber.delete", "subscribers", id, {}, req);
+    res.json({ ok: true });
+  });
+});
+
 async function isAuthorized(req) {
   if (!ADMIN_TOKEN) {
     return false;
