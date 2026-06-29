@@ -106,14 +106,48 @@ const mainMenu = {
   ]
 };
 
+// Persistent buttons that stay docked above the text box — no typing needed.
+const SUBSCRIBE_BTN = "💳 Subscribe";
+const STATUS_BTN = "📊 My status";
+const QUIZ_BTN = "▶️ Take a quiz";
+const replyKeyboard = {
+  keyboard: [[{ text: SUBSCRIBE_BTN }], [{ text: STATUS_BTN }, { text: QUIZ_BTN }]],
+  resize_keyboard: true,
+  is_persistent: true,
+  input_field_placeholder: "Tap a button below 👇"
+};
+
+// Map a typed command, a reply-keyboard tap, or a slash command to an action.
+function matchMenuCommand(text) {
+  const t = String(text || "").trim().toLowerCase();
+  if (!t) return null;
+  if (t === "/start" || t === "start" || t === "menu" || t === "/menu") return "start";
+  if (t.startsWith("/subscribe") || t.includes("subscribe")) return "subscribe";
+  if (t.startsWith("/status") || t.includes("status")) return "status";
+  if (t.startsWith("/quiz") || t.includes("quiz")) return "quiz";
+  return null;
+}
+
+// Register the bot's command list (powers the "Menu" button by the text box).
+async function setupBotMenu() {
+  await tg("setMyCommands", {
+    commands: [
+      { command: "subscribe", description: "💳 Subscribe / see plans" },
+      { command: "status", description: "📊 My subscription status" },
+      { command: "quiz", description: "▶️ Take a quiz" }
+    ]
+  });
+  await tg("setChatMenuButton", { menu_button: { type: "commands" } });
+}
+
 // Remembers which tier a user is paying for, until they send their proof.
 const pendingTier = new Map();
 
 async function showWelcome(chatId) {
   await sendText(
     chatId,
-    "👋 Welcome to <b>LyHuor Learning</b>!\n\nSolo quizzes are for subscribers. Choose a plan, pay, and send your receipt here — an admin will activate your access.",
-    mainMenu
+    "👋 Welcome to <b>LyHuor Learning</b>!\n\nSolo quizzes are for subscribers. Use the buttons below 👇\n\n💳 <b>Subscribe</b> — choose a plan and pay\n📊 <b>My status</b> — check your access\n▶️ <b>Take a quiz</b> — start learning",
+    replyKeyboard
   );
 }
 
@@ -269,23 +303,24 @@ async function handleTelegramUpdate(update) {
   const from = message.from || {};
   if (!chatId) return;
 
-  // Payment proof: a photo (with a pending tier) or text that isn't a command.
+  // A menu button / command always wins — even mid-payment, so a user can bail.
+  const cmd = matchMenuCommand(message.text || "");
+  if (cmd === "subscribe") return void (await showTiers(chatId));
+  if (cmd === "status") return void (await showStatus(chatId));
+  if (cmd === "quiz") return void (await startQuiz(chatId));
+  if (cmd === "start") return void (await showWelcome(chatId));
+
+  // Otherwise, payment proof: a photo (with a pending tier) or free text.
   if (subscriptionsEnabled && pendingTier.has(String(chatId))) {
     if (Array.isArray(message.photo) && message.photo.length) {
       const fileId = message.photo[message.photo.length - 1].file_id;
-      const handled = await submitProof(chatId, from, { proofFileId: fileId, proofText: cleanText(message.caption, 200) });
-      if (handled) return;
+      if (await submitProof(chatId, from, { proofFileId: fileId, proofText: cleanText(message.caption, 200) })) return;
     } else if (message.text && !message.text.startsWith("/")) {
-      const handled = await submitProof(chatId, from, { proofText: cleanText(message.text, 200) });
-      if (handled) return;
+      if (await submitProof(chatId, from, { proofText: cleanText(message.text, 200) })) return;
     }
   }
 
-  const text = String(message.text || "").trim().toLowerCase();
-  if (text === "/subscribe" || text === "subscribe") return void (await showTiers(chatId));
-  if (text === "/status" || text === "status") return void (await showStatus(chatId));
-  if (text === "/quiz" || text === "quiz") return void (await startQuiz(chatId));
-  // /start or anything else → welcome menu.
+  // Anything else → welcome menu (which docks the persistent buttons).
   await showWelcome(chatId);
 }
 
@@ -400,4 +435,7 @@ app.post("/messenger/webhook", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Bot gateway listening on ${PORT} (subscriptions ${subscriptionsEnabled ? "on" : "off"})`);
+  if (TELEGRAM_BOT_TOKEN) {
+    setupBotMenu().then(() => console.log("Telegram bot menu/commands registered.")).catch((e) => console.error("Bot menu setup failed:", e.message));
+  }
 });
