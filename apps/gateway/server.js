@@ -54,6 +54,10 @@ const FALLBACK_LLM_CONFIGURED = Boolean(FALLBACK_LLM_URL && FALLBACK_LLM_KEY);
 const OPENAI_COOLDOWN_MS = Number(process.env.OPENAI_COOLDOWN_MS || 5 * 60 * 1000);
 let openaiCooldownUntil = 0;
 function llmConfigured() { return Boolean(OPENAI_API_KEY) || FALLBACK_LLM_CONFIGURED; }
+// True when calls will go to the (slower) fallback provider rather than OpenAI.
+function fallbackActive() {
+  return !OPENAI_API_KEY || (FALLBACK_LLM_CONFIGURED && Date.now() < openaiCooldownUntil);
+}
 // Token pricing in USD per 1,000,000 tokens. Defaults assume "mini"-tier rates;
 // override per deployment. OPENAI_PRICING can hold a JSON map of per-model rates,
 // e.g. {"gpt-5.4-mini":{"input":0.15,"output":0.60}}.
@@ -7170,7 +7174,9 @@ async function generateQuestion(room) {
           throw new Error(`Math/science notation will not render cleanly: ${question.question}`);
         }
 
-        if (OPENAI_VERIFY_ENABLED) {
+        // Verify with the independent model — but skip it on the slow fallback
+        // provider (self-hosted) to keep generation responsive there.
+        if (OPENAI_VERIFY_ENABLED && !fallbackActive()) {
           const verdict = await verifyOpenAIQuestion(question, room);
           const verifiedChoice = String(verdict?.correctChoice || "").toUpperCase();
           const generatedChoice = String(question.correctChoice || "").toUpperCase();
