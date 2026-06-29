@@ -1612,24 +1612,27 @@ function verifySubscriberToken(token) {
 
 // Send a Telegram message directly to a chat — an admin replying to a solo-quiz
 // taker, or an approval notification. Uses TELEGRAM_BOT_TOKEN defined above.
+// These send helpers return the Telegram message_id on success (so we can later
+// edit/delete the message), or null on failure.
 async function sendTelegramMessage(chatId, text) {
-  if (!TELEGRAM_BOT_TOKEN || !chatId || !text) return false;
+  if (!TELEGRAM_BOT_TOKEN || !chatId || !text) return null;
   try {
     const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: chatId, text: String(text).slice(0, 4000), disable_web_page_preview: true })
     });
-    return res.ok;
+    const data = await res.json().catch(() => ({}));
+    return data?.ok ? data.result.message_id : null;
   } catch (error) {
     console.error("Telegram send failed:", error.message);
-    return false;
+    return null;
   }
 }
 
 // Send a photo or document (from a base64 upload) via Telegram multipart.
 async function sendTelegramFile(chatId, kind, { dataBase64, filename, mime, caption }) {
-  if (!TELEGRAM_BOT_TOKEN || !chatId || !dataBase64) return false;
+  if (!TELEGRAM_BOT_TOKEN || !chatId || !dataBase64) return null;
   try {
     const method = kind === "photo" ? "sendPhoto" : "sendDocument";
     const field = kind === "photo" ? "photo" : "document";
@@ -1639,25 +1642,59 @@ async function sendTelegramFile(chatId, kind, { dataBase64, filename, mime, capt
     if (caption) form.append("caption", String(caption).slice(0, 1024));
     form.append(field, new Blob([buffer], { type: mime || "application/octet-stream" }), filename || (kind === "photo" ? "photo.jpg" : "file"));
     const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/${method}`, { method: "POST", body: form });
-    return res.ok;
+    const data = await res.json().catch(() => ({}));
+    return data?.ok ? data.result.message_id : null;
   } catch (error) {
     console.error("Telegram file send failed:", error.message);
-    return false;
+    return null;
   }
 }
 
 async function sendTelegramLocation(chatId, latitude, longitude) {
-  if (!TELEGRAM_BOT_TOKEN || !chatId) return false;
+  if (!TELEGRAM_BOT_TOKEN || !chatId) return null;
   try {
     const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendLocation`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: chatId, latitude: Number(latitude), longitude: Number(longitude) })
     });
-    return res.ok;
+    const data = await res.json().catch(() => ({}));
+    return data?.ok ? data.result.message_id : null;
   } catch (error) {
     console.error("Telegram location send failed:", error.message);
-    return false;
+    return null;
+  }
+}
+
+// Edit or delete a previously-sent Telegram message. Returns { ok, error }.
+async function editTelegramMessage(chatId, messageId, { text, caption }) {
+  if (!TELEGRAM_BOT_TOKEN) return { ok: false, error: "Bot not configured" };
+  const method = caption != null ? "editMessageCaption" : "editMessageText";
+  const payload = { chat_id: String(chatId), message_id: Number(messageId) };
+  if (caption != null) payload.caption = String(caption).slice(0, 1024);
+  else payload.text = String(text || "").slice(0, 4000);
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/${method}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    return data?.ok ? { ok: true } : { ok: false, error: data?.description || "Telegram rejected the edit" };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+}
+
+async function deleteTelegramMessage(chatId, messageId) {
+  if (!TELEGRAM_BOT_TOKEN) return { ok: false, error: "Bot not configured" };
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/deleteMessage`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: String(chatId), message_id: Number(messageId) })
+    });
+    const data = await res.json().catch(() => ({}));
+    return data?.ok ? { ok: true } : { ok: false, error: data?.description || "Telegram rejected the delete" };
+  } catch (error) {
+    return { ok: false, error: error.message };
   }
 }
 
@@ -2233,6 +2270,8 @@ async function initDatabase() {
       latitude DOUBLE PRECISION,
       longitude DOUBLE PRECISION,
       sent_by TEXT,
+      telegram_message_id BIGINT,
+      deleted_at TIMESTAMPTZ,
       read_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
@@ -2249,6 +2288,8 @@ async function initDatabase() {
 
 async function runDatabaseMigrations() {
   const migrations = [
+    "ALTER TABLE subscriber_messages ADD COLUMN IF NOT EXISTS telegram_message_id BIGINT",
+    "ALTER TABLE subscriber_messages ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE students ADD COLUMN IF NOT EXISTS display_name TEXT",
     "ALTER TABLE students ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
     "ALTER TABLE students ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
@@ -2882,16 +2923,18 @@ async function extendSubscriber(subscriberId, days) {
 async function logSubscriberMessage(subscriberId, fields) {
   if (!db || !subscriberId) return;
   try {
-    await dbQuery(
+    const result = await dbQuery(
       `INSERT INTO subscriber_messages
-         (id, subscriber_id, direction, kind, body, file_id, file_name, latitude, longitude, sent_by, read_at, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+         (id, subscriber_id, direction, kind, body, file_id, file_name, latitude, longitude, sent_by, telegram_message_id, read_at, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()) RETURNING id`,
       [createId(), subscriberId, fields.direction, fields.kind || "text", fields.body || null,
        fields.fileId || null, fields.fileName || null,
        fields.latitude == null ? null : Number(fields.latitude),
        fields.longitude == null ? null : Number(fields.longitude),
-       fields.sentBy || null, fields.direction === "out" ? new Date() : null]
+       fields.sentBy || null, fields.telegramMessageId == null ? null : Number(fields.telegramMessageId),
+       fields.direction === "out" ? new Date() : null]
     );
+    return result?.rows?.[0]?.id || null;
   } catch (error) {
     console.error("Log subscriber message failed:", error.message);
   }
@@ -3859,7 +3902,7 @@ app.post("/admin/subscription/subscribers/:id/message", requireAdmin, async (req
     const location = req.body?.location;
 
     const sentBy = req.adminUser?.username || "admin";
-    let sent = false;
+    let sent = null;
     const kinds = [];
     if (attachment && attachment.dataBase64) {
       const kind = attachment.kind === "document" ? "document" : "photo";
@@ -3868,19 +3911,19 @@ app.post("/admin/subscription/subscribers/:id/message", requireAdmin, async (req
         dataBase64: attachment.dataBase64, filename, mime: String(attachment.mime || ""), caption: caption || undefined
       });
       kinds.push(kind);
-      if (sent) await logSubscriberMessage(id, { direction: "out", kind, body: caption || null, fileName: filename, sentBy });
+      if (sent) await logSubscriberMessage(id, { direction: "out", kind, body: caption || null, fileName: filename, sentBy, telegramMessageId: sent });
     } else if (location && location.latitude != null && location.longitude != null) {
       sent = await sendTelegramLocation(chatId, location.latitude, location.longitude);
       kinds.push("location");
       if (sent) {
-        await logSubscriberMessage(id, { direction: "out", kind: "location", latitude: location.latitude, longitude: location.longitude, sentBy });
-        if (text) { await sendTelegramMessage(chatId, text); await logSubscriberMessage(id, { direction: "out", kind: "text", body: text, sentBy }); }
+        await logSubscriberMessage(id, { direction: "out", kind: "location", latitude: location.latitude, longitude: location.longitude, sentBy, telegramMessageId: sent });
+        if (text) { const tid = await sendTelegramMessage(chatId, text); await logSubscriberMessage(id, { direction: "out", kind: "text", body: text, sentBy, telegramMessageId: tid }); }
       }
     } else {
       requireValid(text.length >= 1, "Message text is required");
       sent = await sendTelegramMessage(chatId, `💬 Message from LyHuor Learning:\n\n${text}`);
       kinds.push("text");
-      if (sent) await logSubscriberMessage(id, { direction: "out", kind: "text", body: text, sentBy });
+      if (sent) await logSubscriberMessage(id, { direction: "out", kind: "text", body: text, sentBy, telegramMessageId: sent });
     }
 
     if (!sent) { res.status(502).json({ error: "Telegram did not accept the message (the user may have blocked the bot, or the file is too large)." }); return; }
@@ -3900,16 +3943,80 @@ app.get("/admin/subscription/subscribers/:id/messages", requireAdmin, async (req
     const subscriber = await getSubscriberById(id);
     res.json({
       subscriber: subscriber ? { id: subscriber.id, displayName: subscriber.display_name, telegramUsername: subscriber.telegram_username, telegramId: subscriber.telegram_id } : null,
-      messages: result.rows.map((m) => ({
-        id: m.id, direction: m.direction, kind: m.kind, body: m.body,
-        fileId: m.file_id, fileName: m.file_name, latitude: m.latitude, longitude: m.longitude,
-        sentBy: m.sent_by, createdAt: m.created_at
-      }))
+      messages: result.rows.map((m) => {
+        const ageMs = Date.now() - new Date(m.created_at).getTime();
+        const within48h = ageMs < 48 * 60 * 60 * 1000;
+        const deleted = Boolean(m.deleted_at);
+        const recallable = m.direction === "out" && m.telegram_message_id != null && !deleted && within48h;
+        return {
+          id: m.id, direction: m.direction, kind: m.kind, body: m.body,
+          fileId: m.file_id, fileName: m.file_name, latitude: m.latitude, longitude: m.longitude,
+          sentBy: m.sent_by, createdAt: m.created_at,
+          deleted,
+          canDelete: recallable,
+          canEdit: recallable && m.kind !== "location"
+        };
+      })
     });
   } catch (error) {
     console.error("Load thread failed:", error);
     res.status(500).json({ error: "Could not load messages" });
   }
+});
+
+// Friendly explanation for Telegram's 48-hour edit/delete window.
+function humanizeTgError(err) {
+  const e = String(err || "").toLowerCase();
+  if (/can't be deleted|can't be edited|message to (delete|edit) not found|too old|not enough rights/.test(e)) {
+    return "Telegram only lets the bot edit or recall a message within 48 hours of sending it.";
+  }
+  return err || "Telegram rejected the request.";
+}
+
+async function loadOutboundMessage(id) {
+  const r = await dbQueryRequired(
+    `SELECT m.*, s.telegram_id FROM subscriber_messages m
+     JOIN subscribers s ON s.id = m.subscriber_id WHERE m.id = $1`, [id]);
+  return r.rows[0] || null;
+}
+
+// Edit a sent message (text body or attachment caption).
+app.patch("/admin/subscription/messages/:id", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  await runAdminAction(res, async () => {
+    const id = normalizeAdminId(req.params.id, "message id");
+    const newText = String(req.body?.text || "").trim().slice(0, 4000);
+    requireValid(newText.length >= 1, "Message text is required");
+    const m = await loadOutboundMessage(id);
+    if (!m) { res.status(404).json({ error: "Message not found" }); return; }
+    if (m.direction !== "out" || m.telegram_message_id == null) { res.status(400).json({ error: "Only messages you sent can be edited." }); return; }
+    if (m.deleted_at) { res.status(400).json({ error: "This message was already recalled." }); return; }
+    if (m.kind === "location") { res.status(400).json({ error: "Location messages can't be edited." }); return; }
+    const result = m.kind === "text"
+      ? await editTelegramMessage(m.telegram_id, m.telegram_message_id, { text: `💬 Message from LyHuor Learning:\n\n${newText}` })
+      : await editTelegramMessage(m.telegram_id, m.telegram_message_id, { caption: newText });
+    if (!result.ok) { res.status(502).json({ error: humanizeTgError(result.error) }); return; }
+    await dbQueryRequired("UPDATE subscriber_messages SET body = $2 WHERE id = $1", [id, newText]);
+    await logAuditAction("subscription.message.edit", "subscriber_messages", id, {}, req);
+    res.json({ ok: true });
+  });
+});
+
+// Recall (delete) a sent message from the subscriber's Telegram chat.
+app.delete("/admin/subscription/messages/:id", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  await runAdminAction(res, async () => {
+    const id = normalizeAdminId(req.params.id, "message id");
+    const m = await loadOutboundMessage(id);
+    if (!m) { res.status(404).json({ error: "Message not found" }); return; }
+    if (m.direction !== "out" || m.telegram_message_id == null) { res.status(400).json({ error: "Only messages you sent can be recalled." }); return; }
+    if (m.deleted_at) { res.json({ ok: true }); return; }
+    const result = await deleteTelegramMessage(m.telegram_id, m.telegram_message_id);
+    if (!result.ok) { res.status(502).json({ error: humanizeTgError(result.error) }); return; }
+    await dbQueryRequired("UPDATE subscriber_messages SET deleted_at = NOW() WHERE id = $1", [id]);
+    await logAuditAction("subscription.message.delete", "subscriber_messages", id, {}, req);
+    res.json({ ok: true });
+  });
 });
 
 // Proxy an incoming Telegram file (photo/document) for admin viewing.

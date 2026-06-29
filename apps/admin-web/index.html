@@ -4435,15 +4435,44 @@
       } catch (e) { alert(e.message); }
     }
 
+    async function editThreadMessage(m) {
+      const current = m.body || "";
+      const next = prompt(m.kind === "text" ? "Edit your message:" : "Edit the caption:", current);
+      if (next == null || !next.trim() || next === current) return;
+      try {
+        await api(`/admin/subscription/messages/${encodeURIComponent(m.id)}`, { method: "PATCH", body: JSON.stringify({ text: next }) });
+        setStatus(document.getElementById("msgStatus"), "Edited ✓", "#1f7a4d");
+        loadThread();
+      } catch (e) { setStatus(document.getElementById("msgStatus"), e.message, "#a33d3d"); }
+    }
+    async function recallThreadMessage(m) {
+      if (!confirm("Recall this message? It will be deleted from the subscriber's Telegram chat.")) return;
+      try {
+        await api(`/admin/subscription/messages/${encodeURIComponent(m.id)}`, { method: "DELETE" });
+        setStatus(document.getElementById("msgStatus"), "Recalled ✓", "#1f7a4d");
+        loadThread();
+      } catch (e) { setStatus(document.getElementById("msgStatus"), e.message, "#a33d3d"); }
+    }
+
     function renderThreadMessage(m) {
       const wrap = document.createElement("div");
       const out = m.direction === "out";
-      wrap.style.cssText = `max-width:80%; align-self:${out ? "flex-end" : "flex-start"}; background:${out ? "#d7f0e0" : "#fff"}; border:1px solid #e2e2e2; border-radius:12px; padding:8px 10px;`;
+      wrap.style.cssText = `max-width:82%; align-self:${out ? "flex-end" : "flex-start"}; background:${out ? "#d7f0e0" : "#fff"}; border:1px solid #e2e2e2; border-radius:12px; padding:8px 10px;`;
       const meta = document.createElement("div");
       meta.style.cssText = "font-size:11px; color:#888; margin-bottom:2px;";
       meta.textContent = (out ? ("You" + (m.sentBy ? " (" + m.sentBy + ")" : "")) : "Subscriber") + " · " + new Date(m.createdAt).toLocaleString();
       wrap.appendChild(meta);
-      if (m.body) { const t = document.createElement("div"); t.textContent = m.body; wrap.appendChild(t); }
+
+      if (m.deleted) {
+        const d = document.createElement("div");
+        d.textContent = "🚫 Message recalled";
+        d.style.cssText = "color:#999; font-style:italic;";
+        wrap.style.opacity = "0.7";
+        wrap.appendChild(d);
+        return wrap;
+      }
+
+      if (m.body) { const t = document.createElement("div"); t.textContent = m.body; t.style.whiteSpace = "pre-wrap"; wrap.appendChild(t); }
       if (m.kind === "photo" || m.kind === "document") {
         const line = document.createElement("div"); line.style.marginTop = "4px";
         const label = document.createElement("span"); label.textContent = (m.kind === "photo" ? "📷 " : "📎 ") + (m.fileName || m.kind);
@@ -4457,6 +4486,21 @@
       if (m.kind === "location" && m.latitude != null) {
         const a = document.createElement("a"); a.href = `https://maps.google.com/?q=${m.latitude},${m.longitude}`; a.target = "_blank";
         a.textContent = `📍 ${Number(m.latitude).toFixed(5)}, ${Number(m.longitude).toFixed(5)} (open map)`; wrap.appendChild(a);
+      }
+
+      // Edit / Recall controls on your own recent sent messages.
+      if (out && (m.canEdit || m.canDelete)) {
+        const actions = document.createElement("div");
+        actions.style.cssText = "display:flex; gap:8px; margin-top:6px;";
+        if (m.canEdit) {
+          const e = document.createElement("button"); e.textContent = "Edit"; e.className = "small secondary"; e.style.minHeight = "24px"; e.style.padding = "2px 8px";
+          e.addEventListener("click", () => editThreadMessage(m)); actions.appendChild(e);
+        }
+        if (m.canDelete) {
+          const r = document.createElement("button"); r.textContent = "Recall"; r.className = "small secondary"; r.style.minHeight = "24px"; r.style.padding = "2px 8px";
+          r.addEventListener("click", () => recallThreadMessage(m)); actions.appendChild(r);
+        }
+        wrap.appendChild(actions);
       }
       return wrap;
     }
