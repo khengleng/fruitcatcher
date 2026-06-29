@@ -41,7 +41,13 @@ const FALLBACK_LLM_MODEL = process.env.FALLBACK_LLM_MODEL || "Qwen3.6-27B";
 const FALLBACK_MAX_TOKENS = Number(process.env.FALLBACK_MAX_TOKENS || 2048);
 // Self-hosted models are typically slower than OpenAI, especially for long
 // structured prompts and non-English (e.g. Khmer) output — give them more time.
-const FALLBACK_TIMEOUT_MS = Number(process.env.FALLBACK_TIMEOUT_MS || 60000);
+// In milliseconds. Guard against it being given in seconds (e.g. "60" → 60s):
+// any value under 1000 is treated as seconds.
+const FALLBACK_TIMEOUT_MS = (() => {
+  const v = Number(process.env.FALLBACK_TIMEOUT_MS || 60000);
+  if (!Number.isFinite(v) || v <= 0) return 60000;
+  return v < 1000 ? v * 1000 : v;
+})();
 const FALLBACK_LLM_CONFIGURED = Boolean(FALLBACK_LLM_URL && FALLBACK_LLM_KEY);
 // After an OpenAI auth/credit failure, skip OpenAI for this long and use the
 // fallback directly, then retry OpenAI (auto-recovery when credit is topped up).
