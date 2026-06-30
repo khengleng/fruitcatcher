@@ -761,20 +761,35 @@
       geography: "Geography", history: "History", moral_civics: "Moral & Civics", ielts: "IELTS", sat: "SAT"
     };
     const CURRICULUM_SUBJECTS = {
-      cambodia_moeys: ["math", "khmer_language", "english", "physics", "chemistry", "biology", "earth_science", "general_science", "history", "geography", "moral_civics", "economics", "computer_science", "ict", "ielts", "sat"],
-      international: ["math", "algebra_1", "algebra_2", "geometry", "precalculus", "general_science", "physics", "chemistry", "biology", "english", "economics", "computer_science", "history", "geography", "ielts", "sat"],
+      cambodia_moeys: ["math", "khmer_language", "english", "physics", "chemistry", "biology", "earth_science", "general_science", "history", "geography", "moral_civics", "economics", "computer_science", "ict"],
+      international: ["math", "algebra_1", "algebra_2", "geometry", "precalculus", "general_science", "physics", "chemistry", "biology", "english", "economics", "computer_science", "history", "geography"],
       cambridge_igcse: ["math", "additional_mathematics", "physics", "chemistry", "biology", "combined_science", "english", "english_second_language", "economics", "business_studies", "accounting", "computer_science", "ict", "geography", "history"]
     };
-    function populateSoloSubjects(curriculum, desired) {
+    const ADDITIONAL_SUBJECTS = ["ielts", "sat"];
+    function buildSubjectOptions(selectEl, curriculum, desired) {
       const subs = CURRICULUM_SUBJECTS[curriculum] || CURRICULUM_SUBJECTS.international;
-      const want = desired || soloSubjectEl.value;
-      soloSubjectEl.innerHTML = "";
+      const want = desired || selectEl.value;
+      selectEl.innerHTML = "";
       subs.forEach((s) => {
         const o = document.createElement("option");
         o.value = s; o.textContent = SUBJECT_LABELS[s] || s;
-        soloSubjectEl.appendChild(o);
+        selectEl.appendChild(o);
       });
-      soloSubjectEl.value = subs.includes(want) ? want : subs[0];
+      if (ADDITIONAL_SUBJECTS.length) {
+        const og = document.createElement("optgroup");
+        og.label = "Test Prep";
+        ADDITIONAL_SUBJECTS.forEach((s) => {
+          const o = document.createElement("option");
+          o.value = s; o.textContent = SUBJECT_LABELS[s] || s;
+          og.appendChild(o);
+        });
+        selectEl.appendChild(og);
+      }
+      const all = subs.concat(ADDITIONAL_SUBJECTS);
+      selectEl.value = all.includes(want) ? want : subs[0];
+    }
+    function populateSoloSubjects(curriculum, desired) {
+      buildSubjectOptions(soloSubjectEl, curriculum, desired);
     }
     function populateSoloGrade(subject, desired) {
       const range = SUBJECT_GRADE_RANGES[subject];

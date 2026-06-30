@@ -163,10 +163,12 @@ const SUBJECT_LABELS = {
 
 // Which subjects each curriculum offers (drives the subject dropdown per curriculum).
 const CURRICULUM_SUBJECTS = {
-  cambodia_moeys: ["math", "khmer_language", "english", "physics", "chemistry", "biology", "earth_science", "general_science", "history", "geography", "moral_civics", "economics", "computer_science", "ict", "ielts", "sat"],
-  international: ["math", "algebra_1", "algebra_2", "geometry", "precalculus", "general_science", "physics", "chemistry", "biology", "english", "economics", "computer_science", "history", "geography", "ielts", "sat"],
+  cambodia_moeys: ["math", "khmer_language", "english", "physics", "chemistry", "biology", "earth_science", "general_science", "history", "geography", "moral_civics", "economics", "computer_science", "ict"],
+  international: ["math", "algebra_1", "algebra_2", "geometry", "precalculus", "general_science", "physics", "chemistry", "biology", "english", "economics", "computer_science", "history", "geography"],
   cambridge_igcse: ["math", "additional_mathematics", "physics", "chemistry", "biology", "combined_science", "english", "english_second_language", "economics", "business_studies", "accounting", "computer_science", "ict", "geography", "history"]
 };
+// Exam-prep subjects offered in addition to every curriculum's subjects.
+const ADDITIONAL_SUBJECTS = ["ielts", "sat"];
 
 // Math-track high-school courses are attached to the grades where they are normally
 // taught. The UI uses this to offer only the relevant grades for each subject.
@@ -1423,14 +1425,22 @@ function getGradeScope(config) {
     if (grade === 9) return "Grade 9 math: linear equations/inequalities and graphing, systems, exponent rules, polynomials and factoring, and an introduction to quadratics. Avoid trigonometry and calculus.";
     return "High-school math appropriate to this grade (algebra/geometry topics taught at or before this grade). Avoid calculus unless this is explicitly a calculus course.";
   }
-  if (subject === "english") {
+  if (subject === "english" || subject === "english_second_language") {
     if (grade <= 4) return "Lower-primary English: simple vocabulary, basic grammar (nouns, verbs, plurals, simple tenses), reading short sentences, and short comprehension on everyday topics.";
     if (grade <= 8) return "Middle-grade English: vocabulary in context, grammar (tenses, parts of speech, punctuation), and comprehension of short passages.";
     return "Upper-grade English: richer vocabulary, grammar/usage, and comprehension and inference on longer passages.";
   }
-  const band = getGradeBand(grade);
-  if (band === "lower") return "Lower-primary science: observable everyday phenomena (plants, animals, materials, weather, magnets, the senses). Keep it concrete; avoid formulas or abstract theory.";
-  if (band === "middle") return "Middle-grade science: foundational concepts with simple reasoning; avoid advanced formulas or upper-secondary-only content.";
+  // Only science subjects get the band-based science scope.
+  const SCIENCE_SUBJECTS = ["general_science", "combined_science", "biology", "chemistry", "physics", "earth_science"];
+  if (SCIENCE_SUBJECTS.includes(subject)) {
+    const band = getGradeBand(grade);
+    if (band === "lower") return "Lower-primary science: observable everyday phenomena (plants, animals, materials, weather, magnets, the senses). Keep it concrete; avoid formulas or abstract theory.";
+    if (band === "middle") return "Middle-grade science: foundational concepts with simple reasoning; avoid advanced formulas or upper-secondary-only content.";
+    return "";
+  }
+  // Other subjects (economics, history, geography, ICT, Khmer, etc.) have no
+  // deterministic grade scope; the subject instruction + curriculum + alignment
+  // target keep them on-topic and on-level.
   return "";
 }
 
@@ -2787,6 +2797,7 @@ app.get("/config", (_req, res) => {
     supportedSubjects: SUPPORTED_SUBJECTS,
     subjectLabels: SUBJECT_LABELS,
     curriculumSubjects: CURRICULUM_SUBJECTS,
+    additionalSubjects: ADDITIONAL_SUBJECTS,
     subjectGradeRanges: SUBJECT_GRADE_RANGES,
     supportedDifficultyModes: SUPPORTED_DIFFICULTY_MODES,
     supportedQuestionSources: SUPPORTED_QUESTION_SOURCES,
@@ -3432,6 +3443,7 @@ app.get("/solo/options", (_req, res) => {
     subjects: SUPPORTED_SUBJECTS,
     subjectLabels: SUBJECT_LABELS,
     curriculumSubjects: CURRICULUM_SUBJECTS,
+    additionalSubjects: ADDITIONAL_SUBJECTS,
     subjectGradeRanges: SUBJECT_GRADE_RANGES,
     difficultyModes: SUPPORTED_DIFFICULTY_MODES,
     questionSources: SUPPORTED_QUESTION_SOURCES,
