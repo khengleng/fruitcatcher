@@ -183,7 +183,9 @@ const SUBJECT_GRADE_RANGES = {
   business_studies: [9, 12],
   accounting: [9, 12],
   computer_science: [6, 12],
-  ict: [6, 12]
+  ict: [6, 12],
+  ielts: [9, 12],
+  sat: [9, 12]
 };
 
 // Cambodia MoEYS national curriculum: subjects are only taught at certain

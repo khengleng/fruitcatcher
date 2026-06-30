@@ -787,14 +787,6 @@
           <label>Brand title<input id="brandTitle" type="text"></label>
           <label>Brand caption<input id="brandCaption" type="text"></label>
           <label>
-            Curriculum
-            <select id="curriculum">
-              <option value="international">International</option>
-              <option value="cambodia_moeys">Cambodia MoEYS</option>
-              <option value="cambridge_igcse">Cambridge IGCSE</option>
-            </select>
-          </label>
-          <label>
             Language
             <select id="language">
               <option value="english">English</option>
@@ -803,37 +795,20 @@
             </select>
           </label>
           <label>
-            Subject
-            <select id="subject">
-              <option value="math">Math</option>
-              <option value="algebra_1">Algebra 1</option>
-              <option value="algebra_2">Algebra 2</option>
-              <option value="geometry">Geometry</option>
-              <option value="precalculus">Precalculus</option>
-              <option value="general_science">General Science</option>
-              <option value="biology">Biology</option>
-              <option value="chemistry">Chemistry</option>
-              <option value="physics">Physics</option>
-              <option value="english">English</option>
-              <option value="ielts">IELTS</option>
-              <option value="sat">SAT</option>
+            Curriculum
+            <select id="curriculum">
+              <option value="international">International</option>
+              <option value="cambodia_moeys">Cambodia MoEYS</option>
+              <option value="cambridge_igcse">Cambridge IGCSE</option>
             </select>
           </label>
           <label>
             Grade level
-            <select id="gradeLevel">
-              <option value="2">Grade 2</option>
-              <option value="3">Grade 3</option>
-              <option value="4">Grade 4</option>
-              <option value="5">Grade 5</option>
-              <option value="6">Grade 6</option>
-              <option value="7">Grade 7</option>
-              <option value="8">Grade 8</option>
-              <option value="9">Grade 9</option>
-              <option value="10">Grade 10</option>
-              <option value="11">Grade 11</option>
-              <option value="12">Grade 12</option>
-            </select>
+            <select id="gradeLevel"></select>
+          </label>
+          <label>
+            Subject
+            <select id="subject"></select>
           </label>
           <label>
             Difficulty mode
@@ -1060,6 +1035,13 @@
           <h3>🤖 AI-Generate Questions</h3>
           <p class="muted">Generate verified questions and add them to the bank. Every question is independently re-solved for a correct answer key before you save.</p>
           <div class="ws-grid">
+            <label>Language
+              <select id="qaiLanguage">
+                <option value="english">English</option>
+                <option value="khmer">Khmer</option>
+                <option value="bilingual">Bilingual</option>
+              </select>
+            </label>
             <label>Curriculum
               <select id="qaiCurriculum">
                 <option value="international">International</option>
@@ -1067,18 +1049,11 @@
                 <option value="cambridge_igcse">Cambridge IGCSE</option>
               </select>
             </label>
-            <label>Subject
-              <select id="qaiSubject"></select>
-            </label>
             <label>Grade
               <select id="qaiGrade"></select>
             </label>
-            <label>Language
-              <select id="qaiLanguage">
-                <option value="english">English</option>
-                <option value="khmer">Khmer</option>
-                <option value="bilingual">Bilingual</option>
-              </select>
+            <label>Subject
+              <select id="qaiSubject"></select>
             </label>
             <label>Difficulty
               <select id="qaiDifficulty">
@@ -1393,6 +1368,13 @@
           <label>Title
             <input id="wsTitle" type="text" maxlength="120" placeholder="e.g. Grade 6 Math — Week 3 Homework">
           </label>
+          <label>Language
+            <select id="wsLanguage">
+              <option value="english">English</option>
+              <option value="khmer">Khmer</option>
+              <option value="bilingual">Bilingual</option>
+            </select>
+          </label>
           <label>Curriculum
             <select id="wsCurriculum">
               <option value="international">International</option>
@@ -1400,18 +1382,11 @@
               <option value="cambridge_igcse">Cambridge IGCSE</option>
             </select>
           </label>
-          <label>Subject
-            <select id="wsSubject"></select>
-          </label>
           <label>Grade
             <select id="wsGrade"></select>
           </label>
-          <label>Language
-            <select id="wsLanguage">
-              <option value="english">English</option>
-              <option value="khmer">Khmer</option>
-              <option value="bilingual">Bilingual</option>
-            </select>
+          <label>Subject
+            <select id="wsSubject"></select>
           </label>
           <label>Difficulty
             <select id="wsDifficulty">
@@ -1468,6 +1443,13 @@
           <label>Title
             <input id="shTitle" type="text" maxlength="120" placeholder="e.g. Grade 6 Math — Friday Quiz">
           </label>
+          <label>Language
+            <select id="shLanguage">
+              <option value="english">English</option>
+              <option value="khmer">Khmer</option>
+              <option value="bilingual">Bilingual</option>
+            </select>
+          </label>
           <label>Curriculum
             <select id="shCurriculum">
               <option value="international">International</option>
@@ -1475,18 +1457,11 @@
               <option value="cambridge_igcse">Cambridge IGCSE</option>
             </select>
           </label>
-          <label>Subject
-            <select id="shSubject"></select>
-          </label>
           <label>Grade
             <select id="shGrade"></select>
           </label>
-          <label>Language
-            <select id="shLanguage">
-              <option value="english">English</option>
-              <option value="khmer">Khmer</option>
-              <option value="bilingual">Bilingual</option>
-            </select>
+          <label>Subject
+            <select id="shSubject"></select>
           </label>
           <label>Difficulty
             <select id="shDifficulty">
@@ -1928,8 +1903,9 @@
       fields.brandCaption.value = config.brandCaption || "";
       fields.curriculum.value = config.curriculum || "international";
       fields.language.value = config.language || "english";
-      populateSubjectSelect(fields.subject, fields.curriculum.value, config.subject || "math");
-      populateGradeSelect(fields.gradeLevel, fields.subject.value, config.gradeLevel || 6, fields.curriculum.value);
+      fillFullGrades(fields.gradeLevel, config.gradeLevel || 6);
+      populateSubjectSelect(fields.subject, fields.curriculum.value, Number(fields.gradeLevel.value), config.subject || "math");
+      syncLanguageToSubject(fields.subject, fields.language);
       fields.difficultyMode.value = config.difficultyMode || "standard";
       fields.questionSource.value = config.questionSource || "openai_fallback";
       fields.questionsPerRound.value = config.questionsPerRound ?? "";
@@ -3140,7 +3116,7 @@
     const wsEl = (id) => document.getElementById(id);
 
     function initWorksheetGrades() {
-      populateGradeSelect(wsEl("wsGrade"), wsEl("wsSubject")?.value || "math", 6, wsEl("wsCurriculum")?.value);
+      fillFullGrades(wsEl("wsGrade"), 6);
     }
 
     function worksheetConfig() {
@@ -3539,9 +3515,13 @@
       cambridge_igcse: ["math", "additional_mathematics", "physics", "chemistry", "biology", "combined_science", "english", "english_second_language", "economics", "business_studies", "accounting", "computer_science", "ict", "geography", "history"]
     };
     const ADDITIONAL_SUBJECTS = ["ielts", "sat"];
-    function populateSubjectSelect(subjectEl, curriculum, desired) {
+    // Subject list filtered by curriculum AND grade (IELTS/SAT as a Test Prep group).
+    function populateSubjectSelect(subjectEl, curriculum, grade, desired) {
       if (!subjectEl) return;
-      const subs = CURRICULUM_SUBJECTS[curriculum] || CURRICULUM_SUBJECTS.international;
+      const g = Number(grade) || 6;
+      const within = (s) => { const r = gradeRangeFor(s, curriculum); return g >= r[0] && g <= r[1]; };
+      const subs = (CURRICULUM_SUBJECTS[curriculum] || CURRICULUM_SUBJECTS.international).filter(within);
+      const extra = ADDITIONAL_SUBJECTS.filter(within);
       const want = desired || subjectEl.value;
       subjectEl.innerHTML = "";
       subs.forEach((s) => {
@@ -3549,18 +3529,30 @@
         o.value = s; o.textContent = SUBJECT_LABELS[s] || s;
         subjectEl.appendChild(o);
       });
-      if (ADDITIONAL_SUBJECTS.length) {
+      if (extra.length) {
         const og = document.createElement("optgroup");
         og.label = "Test Prep";
-        ADDITIONAL_SUBJECTS.forEach((s) => {
+        extra.forEach((s) => {
           const o = document.createElement("option");
           o.value = s; o.textContent = SUBJECT_LABELS[s] || s;
           og.appendChild(o);
         });
         subjectEl.appendChild(og);
       }
-      const all = subs.concat(ADDITIONAL_SUBJECTS);
-      subjectEl.value = all.includes(want) ? want : subs[0];
+      const all = subs.concat(extra);
+      subjectEl.value = all.includes(want) ? want : (subs[0] || all[0] || "math");
+    }
+    // Fill a grade <select> with the full range (grade is chosen before subject now).
+    function fillFullGrades(gradeEl, desired) {
+      if (!gradeEl) return;
+      const cur = desired != null ? Number(desired) : Number(gradeEl.value) || 6;
+      gradeEl.innerHTML = "";
+      for (let g = 2; g <= 12; g++) {
+        const o = document.createElement("option");
+        o.value = String(g); o.textContent = "Grade " + g;
+        gradeEl.appendChild(o);
+      }
+      gradeEl.value = String(cur >= 2 && cur <= 12 ? cur : 6);
     }
     // Language is fixed for language-specific subjects (Khmer Language -> Khmer;
     // English subjects/exams -> English), keeping the selection consistent.
@@ -3571,22 +3563,20 @@
       if (lock) { languageEl.value = lock; languageEl.dataset.locked = "1"; languageEl.disabled = true; }
       else if (languageEl.dataset.locked) { languageEl.dataset.locked = ""; languageEl.disabled = false; }
     }
-    // Keep a subject dropdown in sync with its curriculum dropdown (refresh grades
-    // and lock language to the subject where required).
-    function wireCurriculumSubject(curriculumEl, subjectEl, gradeEl, languageEl) {
+    // Grade-first selection flow (Language -> Curriculum -> Grade -> Subject), same
+    // as the student solo flow: the subject list follows curriculum + grade, and
+    // the language is locked for language-specific subjects.
+    function wireSelectionFlow(languageEl, curriculumEl, gradeEl, subjectEl) {
       if (!curriculumEl || !subjectEl) return;
-      populateSubjectSelect(subjectEl, curriculumEl.value, subjectEl.value);
-      if (gradeEl) populateGradeSelect(gradeEl, subjectEl.value, undefined, curriculumEl.value);
-      syncLanguageToSubject(subjectEl, languageEl);
-      const refresh = () => {
-        if (gradeEl) populateGradeSelect(gradeEl, subjectEl.value, undefined, curriculumEl.value);
+      fillFullGrades(gradeEl);
+      const rebuild = () => {
+        populateSubjectSelect(subjectEl, curriculumEl.value, gradeEl ? Number(gradeEl.value) : 6, subjectEl.value);
         syncLanguageToSubject(subjectEl, languageEl);
       };
-      curriculumEl.addEventListener("change", () => {
-        populateSubjectSelect(subjectEl, curriculumEl.value);
-        refresh();
-      });
-      subjectEl.addEventListener("change", refresh);
+      rebuild();
+      curriculumEl.addEventListener("change", rebuild);
+      if (gradeEl) gradeEl.addEventListener("change", rebuild);
+      subjectEl.addEventListener("change", () => syncLanguageToSubject(subjectEl, languageEl));
     }
 
     function gradesForSubject(subject, curriculum) {
@@ -3615,7 +3605,7 @@
     }
 
     function initQaiGrades() {
-      populateGradeSelect(wsEl("qaiGrade"), wsEl("qaiSubject")?.value || "math", 6, wsEl("qaiCurriculum")?.value);
+      fillFullGrades(wsEl("qaiGrade"), 6);
     }
 
     function qaiConfig() {
@@ -3855,12 +3845,10 @@
 
     initWorksheetGrades();
     initQaiGrades();
-    // Re-scope the grade options whenever the subject changes so math-track courses
-    // only ever offer the grades they are taught in.
-    // (subject -> grade refresh is handled inside wireCurriculumSubject, with curriculum.)
-    // Make every subject dropdown follow its curriculum dropdown (settings, AI bank, manual, worksheet, share).
-    wireCurriculumSubject(fields.curriculum, fields.subject, fields.gradeLevel, fields.language);
-    wireCurriculumSubject(wsEl("qaiCurriculum"), wsEl("qaiSubject"), wsEl("qaiGrade"), wsEl("qaiLanguage"));
+    // Grade-first flow (Language -> Curriculum -> Grade -> Subject) on every builder:
+    // the subject list follows curriculum + grade, and language locks to the subject.
+    wireSelectionFlow(fields.language, fields.curriculum, fields.gradeLevel, fields.subject);
+    wireSelectionFlow(wsEl("qaiLanguage"), wsEl("qaiCurriculum"), wsEl("qaiGrade"), wsEl("qaiSubject"));
     // Manual question editor: offer ALL subjects (so any saved question can be edited).
     (function () {
       const el = document.getElementById("qSubject");
@@ -3871,13 +3859,13 @@
         el.value = SUBJECT_LABELS[cur] ? cur : "math";
       }
     })();
-    wireCurriculumSubject(wsEl("wsCurriculum"), wsEl("wsSubject"), wsEl("wsGrade"), wsEl("wsLanguage"));
-    wireCurriculumSubject(wsEl("shCurriculum"), wsEl("shSubject"), wsEl("shGrade"), wsEl("shLanguage"));
+    wireSelectionFlow(wsEl("wsLanguage"), wsEl("wsCurriculum"), wsEl("wsGrade"), wsEl("wsSubject"));
+    wireSelectionFlow(wsEl("shLanguage"), wsEl("shCurriculum"), wsEl("shGrade"), wsEl("shSubject"));
     // ===== Shared quizzes =====
     let sharesTelegramConfigured = false;
 
     function initShareGrades() {
-      populateGradeSelect(wsEl("shGrade"), wsEl("shSubject")?.value || "math", 6, wsEl("shCurriculum")?.value);
+      fillFullGrades(wsEl("shGrade"), 6);
     }
 
     async function createShare() {
