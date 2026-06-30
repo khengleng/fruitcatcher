@@ -747,11 +747,35 @@
 
     // Math-track courses only offer the grades they are taught in (mirror of the gateway).
     const SUBJECT_GRADE_RANGES = {
-      algebra_1: [8, 9],
-      algebra_2: [10, 11],
-      geometry: [9, 10],
-      precalculus: [11, 12]
+      algebra_1: [8, 9], algebra_2: [10, 11], geometry: [9, 10], precalculus: [11, 12],
+      additional_mathematics: [10, 12], combined_science: [9, 11], economics: [9, 12],
+      business_studies: [9, 12], accounting: [9, 12], computer_science: [6, 12], ict: [6, 12]
     };
+    // Subjects offered per curriculum, and their display labels (mirror of the gateway).
+    const SUBJECT_LABELS = {
+      math: "Math", algebra_1: "Algebra 1", algebra_2: "Algebra 2", geometry: "Geometry", precalculus: "Precalculus",
+      additional_mathematics: "Additional Mathematics", general_science: "General Science", combined_science: "Combined Science",
+      biology: "Biology", chemistry: "Chemistry", physics: "Physics", earth_science: "Earth Science",
+      computer_science: "Computer Science", ict: "ICT", english: "English", english_second_language: "English (Second Language)",
+      khmer_language: "Khmer Language", economics: "Economics", business_studies: "Business Studies", accounting: "Accounting",
+      geography: "Geography", history: "History", moral_civics: "Moral & Civics", ielts: "IELTS", sat: "SAT"
+    };
+    const CURRICULUM_SUBJECTS = {
+      cambodia_moeys: ["math", "khmer_language", "english", "physics", "chemistry", "biology", "earth_science", "general_science", "history", "geography", "moral_civics", "economics", "computer_science", "ict", "ielts", "sat"],
+      international: ["math", "algebra_1", "algebra_2", "geometry", "precalculus", "general_science", "physics", "chemistry", "biology", "english", "economics", "computer_science", "history", "geography", "ielts", "sat"],
+      cambridge_igcse: ["math", "additional_mathematics", "physics", "chemistry", "biology", "combined_science", "english", "english_second_language", "economics", "business_studies", "accounting", "computer_science", "ict", "geography", "history"]
+    };
+    function populateSoloSubjects(curriculum, desired) {
+      const subs = CURRICULUM_SUBJECTS[curriculum] || CURRICULUM_SUBJECTS.international;
+      const want = desired || soloSubjectEl.value;
+      soloSubjectEl.innerHTML = "";
+      subs.forEach((s) => {
+        const o = document.createElement("option");
+        o.value = s; o.textContent = SUBJECT_LABELS[s] || s;
+        soloSubjectEl.appendChild(o);
+      });
+      soloSubjectEl.value = subs.includes(want) ? want : subs[0];
+    }
     function populateSoloGrade(subject, desired) {
       const range = SUBJECT_GRADE_RANGES[subject];
       const min = range ? range[0] : 2;
@@ -771,6 +795,10 @@
       else soloGradeEl.value = String(allowed[0]);
     }
     soloSubjectEl.addEventListener("change", () => populateSoloGrade(soloSubjectEl.value));
+    soloCurriculumEl.addEventListener("change", () => {
+      populateSoloSubjects(soloCurriculumEl.value);
+      populateSoloGrade(soloSubjectEl.value);
+    });
     const sessionStorageKey = "fruitcatcher-controller-session-v2";
 
     const params = new URLSearchParams(window.location.search);
@@ -874,7 +902,7 @@
       joinButton.textContent = "Start";
       soloCurriculumEl.value = params.get("curriculum") || "cambodia_moeys";
       soloLanguageEl.value = params.get("language") || "khmer";
-      soloSubjectEl.value = params.get("subject") || "math";
+      populateSoloSubjects(soloCurriculumEl.value, params.get("subject") || "math");
       populateSoloGrade(soloSubjectEl.value, params.get("grade") || "6");
 
       // A teacher-shared quiz locks the settings so the student takes exactly

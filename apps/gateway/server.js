@@ -110,21 +110,78 @@ const SUPPORTED_SUBJECTS = [
   "algebra_2",
   "geometry",
   "precalculus",
+  "additional_mathematics",
   "general_science",
+  "combined_science",
   "biology",
   "chemistry",
   "physics",
+  "earth_science",
+  "computer_science",
+  "ict",
   "english",
+  "english_second_language",
+  "khmer_language",
+  "economics",
+  "business_studies",
+  "accounting",
+  "geography",
+  "history",
+  "moral_civics",
   "ielts",
   "sat"
 ];
+
+// Display names for every subject.
+const SUBJECT_LABELS = {
+  math: "Math",
+  algebra_1: "Algebra 1",
+  algebra_2: "Algebra 2",
+  geometry: "Geometry",
+  precalculus: "Precalculus",
+  additional_mathematics: "Additional Mathematics",
+  general_science: "General Science",
+  combined_science: "Combined Science",
+  biology: "Biology",
+  chemistry: "Chemistry",
+  physics: "Physics",
+  earth_science: "Earth Science",
+  computer_science: "Computer Science",
+  ict: "ICT",
+  english: "English",
+  english_second_language: "English (Second Language)",
+  khmer_language: "Khmer Language",
+  economics: "Economics",
+  business_studies: "Business Studies",
+  accounting: "Accounting",
+  geography: "Geography",
+  history: "History",
+  moral_civics: "Moral & Civics",
+  ielts: "IELTS",
+  sat: "SAT"
+};
+
+// Which subjects each curriculum offers (drives the subject dropdown per curriculum).
+const CURRICULUM_SUBJECTS = {
+  cambodia_moeys: ["math", "khmer_language", "english", "physics", "chemistry", "biology", "earth_science", "general_science", "history", "geography", "moral_civics", "economics", "computer_science", "ict", "ielts", "sat"],
+  international: ["math", "algebra_1", "algebra_2", "geometry", "precalculus", "general_science", "physics", "chemistry", "biology", "english", "economics", "computer_science", "history", "geography", "ielts", "sat"],
+  cambridge_igcse: ["math", "additional_mathematics", "physics", "chemistry", "biology", "combined_science", "english", "english_second_language", "economics", "business_studies", "accounting", "computer_science", "ict", "geography", "history"]
+};
+
 // Math-track high-school courses are attached to the grades where they are normally
 // taught. The UI uses this to offer only the relevant grades for each subject.
 const SUBJECT_GRADE_RANGES = {
   algebra_1: [8, 9],
   algebra_2: [10, 11],
   geometry: [9, 10],
-  precalculus: [11, 12]
+  precalculus: [11, 12],
+  additional_mathematics: [10, 12],
+  combined_science: [9, 11],
+  economics: [9, 12],
+  business_studies: [9, 12],
+  accounting: [9, 12],
+  computer_science: [6, 12],
+  ict: [6, 12]
 };
 const SUPPORTED_CURRICULUMS = ["international", "cambodia_moeys", "cambridge_igcse"];
 const SUPPORTED_LANGUAGES = ["english", "khmer", "bilingual"];
@@ -1220,55 +1277,7 @@ function getCurriculumLabel(curriculum) {
 }
 
 function getSubjectLabel(subject) {
-  if (subject === "general_science") {
-    return "General Science";
-  }
-
-  if (subject === "biology") {
-    return "Biology";
-  }
-
-  if (subject === "chemistry") {
-    return "Chemistry";
-  }
-
-  if (subject === "physics") {
-    return "Physics";
-  }
-
-  if (subject === "math") {
-    return "Math";
-  }
-
-  if (subject === "algebra_1") {
-    return "Algebra 1";
-  }
-
-  if (subject === "algebra_2") {
-    return "Algebra 2";
-  }
-
-  if (subject === "geometry") {
-    return "Geometry";
-  }
-
-  if (subject === "precalculus") {
-    return "Precalculus";
-  }
-
-  if (subject === "english") {
-    return "English";
-  }
-
-  if (subject === "ielts") {
-    return "IELTS";
-  }
-
-  if (subject === "sat") {
-    return "SAT";
-  }
-
-  return subject;
+  return SUBJECT_LABELS[subject] || subject;
 }
 
 // Topic scope for the math-track courses so the AI generates on-syllabus problems
@@ -1299,7 +1308,22 @@ function getSubjectInstruction(subject) {
     return "This is SAT exam preparation. Write SAT-style multiple-choice questions. Alternate between SAT Math (algebra, problem-solving and data analysis, and advanced math — no calculator-only tricks) and SAT Reading & Writing (evidence-based reading comprehension, command of evidence, words in context, and standard English grammar/expression). Keep the difficulty and style true to the digital SAT, and make each question self-contained.";
   }
 
-  return "";
+  const extra = {
+    additional_mathematics: "This is Additional Mathematics (e.g. Cambridge IGCSE Add Maths). Draw from: functions, quadratic functions, indices and surds, factors of polynomials, simultaneous equations, logarithmic and exponential functions, straight-line graphs, circular measure, trigonometry, permutations and combinations, vectors, and introductory differentiation and integration.",
+    combined_science: "This is Combined Science (integrated biology, chemistry, and physics at a combined-science level). Rotate across the three sciences with topics appropriate for the grade; keep practical, exam-style contexts.",
+    earth_science: "This is Earth Science. Draw from: rocks and minerals, the rock cycle, plate tectonics, the water cycle, weather and climate, the atmosphere, the solar system and Earth in space, and natural resources and the environment.",
+    computer_science: "This is Computer Science. Draw from: algorithms and pseudocode, programming concepts (variables, loops, conditionals, functions), data representation (binary, hexadecimal, ASCII), boolean logic, computer architecture, networks and the internet, and databases. Keep it conceptual and self-contained.",
+    ict: "This is ICT (Information and Communication Technology). Draw from: applications software (word processing, spreadsheets, databases, presentations), file management, the internet and email, networks, online safety and digital citizenship, and the effective use of technology.",
+    english_second_language: "This is English as a Second Language (ESL). Write self-contained multiple-choice questions on reading comprehension, vocabulary in context, everyday grammar, and practical communication for second-language learners. Include any short passage in the question text.",
+    khmer_language: "This is Khmer language study. Write the question and all answer options in Khmer (ភាសាខ្មែរ). Draw from: reading comprehension, vocabulary, grammar, spelling, and Khmer writing conventions.",
+    economics: "This is Economics. Draw from: basic economic problem and scarcity, demand and supply and the price mechanism, elasticity, markets and competition, production and costs, money and banking, and basic macroeconomics (inflation, unemployment, GDP) at the appropriate level.",
+    business_studies: "This is Business Studies. Draw from: business activity and enterprise, business organisation and ownership, marketing, operations/production, finance and accounts, and people in business (motivation, organisation, management).",
+    accounting: "This is Accounting. Draw from: the accounting equation, double-entry bookkeeping, books of prime entry, ledgers and the trial balance, income statements and balance sheets, depreciation, and accounting principles. Keep figures clean and self-contained.",
+    geography: "This is Geography. Draw from: physical geography (landforms, rivers, weather and climate, ecosystems) and human geography (population, settlement, migration, economic activity, development, and the environment).",
+    history: "This is History. Write accurate, neutral, source- or fact-based multiple-choice questions on key periods, events, causes, and consequences appropriate to the grade. Avoid contested opinion as fact; stick to widely accepted history.",
+    moral_civics: "This is Moral and Civics education. Draw from: rights and responsibilities, citizenship, rule of law, community and society, ethics and values, and good civic behaviour appropriate to the grade."
+  };
+  return extra[subject] || "";
 }
 
 function getLanguageLabel(language) {
@@ -2761,6 +2785,8 @@ app.get("/config", (_req, res) => {
     supportedCurriculums: SUPPORTED_CURRICULUMS,
     supportedLanguages: SUPPORTED_LANGUAGES,
     supportedSubjects: SUPPORTED_SUBJECTS,
+    subjectLabels: SUBJECT_LABELS,
+    curriculumSubjects: CURRICULUM_SUBJECTS,
     subjectGradeRanges: SUBJECT_GRADE_RANGES,
     supportedDifficultyModes: SUPPORTED_DIFFICULTY_MODES,
     supportedQuestionSources: SUPPORTED_QUESTION_SOURCES,
@@ -3404,6 +3430,8 @@ app.get("/solo/options", (_req, res) => {
     curriculums: SUPPORTED_CURRICULUMS,
     languages: SUPPORTED_LANGUAGES,
     subjects: SUPPORTED_SUBJECTS,
+    subjectLabels: SUBJECT_LABELS,
+    curriculumSubjects: CURRICULUM_SUBJECTS,
     subjectGradeRanges: SUBJECT_GRADE_RANGES,
     difficultyModes: SUPPORTED_DIFFICULTY_MODES,
     questionSources: SUPPORTED_QUESTION_SOURCES,

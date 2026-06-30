@@ -1963,7 +1963,7 @@
       fields.brandCaption.value = config.brandCaption || "";
       fields.curriculum.value = config.curriculum || "international";
       fields.language.value = config.language || "english";
-      fields.subject.value = config.subject || "math";
+      populateSubjectSelect(fields.subject, fields.curriculum.value, config.subject || "math");
       populateGradeSelect(fields.gradeLevel, fields.subject.value, config.gradeLevel || 6);
       fields.difficultyMode.value = config.difficultyMode || "standard";
       fields.questionSource.value = config.questionSource || "openai_fallback";
@@ -3547,13 +3547,45 @@
     // Math-track courses are taught at specific grades; mirror of the gateway's
     // SUBJECT_GRADE_RANGES so each subject only offers the grades it belongs to.
     const SUBJECT_GRADE_RANGES = {
-      algebra_1: [8, 9],
-      algebra_2: [10, 11],
-      geometry: [9, 10],
-      precalculus: [11, 12],
-      ielts: [9, 12],
-      sat: [9, 12]
+      algebra_1: [8, 9], algebra_2: [10, 11], geometry: [9, 10], precalculus: [11, 12],
+      ielts: [9, 12], sat: [9, 12], additional_mathematics: [10, 12], combined_science: [9, 11],
+      economics: [9, 12], business_studies: [9, 12], accounting: [9, 12], computer_science: [6, 12], ict: [6, 12]
     };
+    const SUBJECT_LABELS = {
+      math: "Math", algebra_1: "Algebra 1", algebra_2: "Algebra 2", geometry: "Geometry", precalculus: "Precalculus",
+      additional_mathematics: "Additional Mathematics", general_science: "General Science", combined_science: "Combined Science",
+      biology: "Biology", chemistry: "Chemistry", physics: "Physics", earth_science: "Earth Science",
+      computer_science: "Computer Science", ict: "ICT", english: "English", english_second_language: "English (Second Language)",
+      khmer_language: "Khmer Language", economics: "Economics", business_studies: "Business Studies", accounting: "Accounting",
+      geography: "Geography", history: "History", moral_civics: "Moral & Civics", ielts: "IELTS", sat: "SAT"
+    };
+    const CURRICULUM_SUBJECTS = {
+      cambodia_moeys: ["math", "khmer_language", "english", "physics", "chemistry", "biology", "earth_science", "general_science", "history", "geography", "moral_civics", "economics", "computer_science", "ict", "ielts", "sat"],
+      international: ["math", "algebra_1", "algebra_2", "geometry", "precalculus", "general_science", "physics", "chemistry", "biology", "english", "economics", "computer_science", "history", "geography", "ielts", "sat"],
+      cambridge_igcse: ["math", "additional_mathematics", "physics", "chemistry", "biology", "combined_science", "english", "english_second_language", "economics", "business_studies", "accounting", "computer_science", "ict", "geography", "history"]
+    };
+    function populateSubjectSelect(subjectEl, curriculum, desired) {
+      if (!subjectEl) return;
+      const subs = CURRICULUM_SUBJECTS[curriculum] || CURRICULUM_SUBJECTS.international;
+      const want = desired || subjectEl.value;
+      subjectEl.innerHTML = "";
+      subs.forEach((s) => {
+        const o = document.createElement("option");
+        o.value = s; o.textContent = SUBJECT_LABELS[s] || s;
+        subjectEl.appendChild(o);
+      });
+      subjectEl.value = subs.includes(want) ? want : subs[0];
+    }
+    // Keep a subject dropdown in sync with its curriculum dropdown (and refresh grades).
+    function wireCurriculumSubject(curriculumEl, subjectEl, gradeEl) {
+      if (!curriculumEl || !subjectEl) return;
+      populateSubjectSelect(subjectEl, curriculumEl.value, subjectEl.value);
+      if (gradeEl) populateGradeSelect(gradeEl, subjectEl.value);
+      curriculumEl.addEventListener("change", () => {
+        populateSubjectSelect(subjectEl, curriculumEl.value);
+        if (gradeEl) populateGradeSelect(gradeEl, subjectEl.value);
+      });
+    }
 
     function gradesForSubject(subject) {
       const range = SUBJECT_GRADE_RANGES[subject];
@@ -3828,6 +3860,21 @@
     fields.subject.addEventListener("change", () => populateGradeSelect(fields.gradeLevel, fields.subject.value));
     wsEl("qaiSubject").addEventListener("change", () => populateGradeSelect(wsEl("qaiGrade"), wsEl("qaiSubject").value));
     wsEl("wsSubject").addEventListener("change", () => populateGradeSelect(wsEl("wsGrade"), wsEl("wsSubject").value));
+    // Make every subject dropdown follow its curriculum dropdown (settings, AI bank, manual, worksheet, share).
+    wireCurriculumSubject(fields.curriculum, fields.subject, fields.gradeLevel);
+    wireCurriculumSubject(wsEl("qaiCurriculum"), wsEl("qaiSubject"), wsEl("qaiGrade"));
+    // Manual question editor: offer ALL subjects (so any saved question can be edited).
+    (function () {
+      const el = document.getElementById("qSubject");
+      if (el) {
+        const cur = el.value;
+        el.innerHTML = "";
+        Object.keys(SUBJECT_LABELS).forEach((s) => { const o = document.createElement("option"); o.value = s; o.textContent = SUBJECT_LABELS[s]; el.appendChild(o); });
+        el.value = SUBJECT_LABELS[cur] ? cur : "math";
+      }
+    })();
+    wireCurriculumSubject(wsEl("wsCurriculum"), wsEl("wsSubject"), wsEl("wsGrade"));
+    wireCurriculumSubject(wsEl("shCurriculum"), wsEl("shSubject"), wsEl("shGrade"));
     // ===== Shared quizzes =====
     let sharesTelegramConfigured = false;
 
