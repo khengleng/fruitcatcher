@@ -619,14 +619,6 @@
       </div>
       <div id="soloOptions" class="solo-options" hidden>
         <div class="solo-field">
-          <label for="soloCurriculum">Curriculum</label>
-          <select id="soloCurriculum">
-            <option value="cambodia_moeys">Cambodia MoEYS</option>
-            <option value="international">International</option>
-            <option value="cambridge_igcse">Cambridge IGCSE</option>
-          </select>
-        </div>
-        <div class="solo-field">
           <label for="soloLanguage">Language</label>
           <select id="soloLanguage">
             <option value="khmer">Khmer</option>
@@ -635,20 +627,11 @@
           </select>
         </div>
         <div class="solo-field">
-          <label for="soloSubject">Subject</label>
-          <select id="soloSubject">
-            <option value="math">Math</option>
-            <option value="algebra_1">Algebra 1</option>
-            <option value="algebra_2">Algebra 2</option>
-            <option value="geometry">Geometry</option>
-            <option value="precalculus">Precalculus</option>
-            <option value="english">English</option>
-            <option value="general_science">General Science</option>
-            <option value="biology">Biology</option>
-            <option value="chemistry">Chemistry</option>
-            <option value="physics">Physics</option>
-            <option value="ielts">IELTS</option>
-            <option value="sat">SAT</option>
+          <label for="soloCurriculum">Curriculum</label>
+          <select id="soloCurriculum">
+            <option value="cambodia_moeys">Cambodia MoEYS</option>
+            <option value="international">International</option>
+            <option value="cambridge_igcse">Cambridge IGCSE</option>
           </select>
         </div>
         <div class="solo-field">
@@ -666,6 +649,10 @@
             <option value="11">Grade 11</option>
             <option value="12">Grade 12</option>
           </select>
+        </div>
+        <div class="solo-field">
+          <label for="soloSubject">Subject</label>
+          <select id="soloSubject"></select>
         </div>
       </div>
       <div id="status" class="status" style="margin-top:12px;">Disconnected</div>
@@ -775,8 +762,13 @@
       cambridge_igcse: ["math", "additional_mathematics", "physics", "chemistry", "biology", "combined_science", "english", "english_second_language", "economics", "business_studies", "accounting", "computer_science", "ict", "geography", "history"]
     };
     const ADDITIONAL_SUBJECTS = ["ielts", "sat"];
-    function buildSubjectOptions(selectEl, curriculum, desired) {
-      const subs = CURRICULUM_SUBJECTS[curriculum] || CURRICULUM_SUBJECTS.international;
+    // The subject list is filtered by the chosen curriculum AND grade, so only
+    // subjects actually taught at that grade/curriculum appear (e.g. no Physics
+    // at MoEYS Grade 2). IELTS/SAT show as a "Test Prep" group when in range.
+    function buildSubjectOptions(selectEl, curriculum, grade, desired) {
+      const within = (s) => { const r = gradeRangeFor(s, curriculum); return grade >= r[0] && grade <= r[1]; };
+      const subs = (CURRICULUM_SUBJECTS[curriculum] || CURRICULUM_SUBJECTS.international).filter(within);
+      const extra = ADDITIONAL_SUBJECTS.filter(within);
       const want = desired || selectEl.value;
       selectEl.innerHTML = "";
       subs.forEach((s) => {
@@ -784,45 +776,34 @@
         o.value = s; o.textContent = SUBJECT_LABELS[s] || s;
         selectEl.appendChild(o);
       });
-      if (ADDITIONAL_SUBJECTS.length) {
+      if (extra.length) {
         const og = document.createElement("optgroup");
         og.label = "Test Prep";
-        ADDITIONAL_SUBJECTS.forEach((s) => {
+        extra.forEach((s) => {
           const o = document.createElement("option");
           o.value = s; o.textContent = SUBJECT_LABELS[s] || s;
           og.appendChild(o);
         });
         selectEl.appendChild(og);
       }
-      const all = subs.concat(ADDITIONAL_SUBJECTS);
-      selectEl.value = all.includes(want) ? want : subs[0];
+      const all = subs.concat(extra);
+      selectEl.value = all.includes(want) ? want : (subs[0] || all[0] || "math");
     }
-    function populateSoloSubjects(curriculum, desired) {
-      buildSubjectOptions(soloSubjectEl, curriculum, desired);
+    // Language is fixed for language-specific subjects (Khmer Language -> Khmer;
+    // English subjects/exams -> English), so the selection stays consistent.
+    const SUBJECT_LANGUAGE_LOCK = { khmer_language: "khmer", english: "english", english_second_language: "english", ielts: "english", sat: "english" };
+    function syncLanguageToSubject() {
+      const lock = SUBJECT_LANGUAGE_LOCK[soloSubjectEl.value];
+      if (lock) { soloLanguageEl.value = lock; soloLanguageEl.dataset.locked = "1"; soloLanguageEl.disabled = true; }
+      else if (soloLanguageEl.dataset.locked) { soloLanguageEl.dataset.locked = ""; soloLanguageEl.disabled = false; }
     }
-    function populateSoloGrade(subject, desired) {
-      const range = gradeRangeFor(subject, soloCurriculumEl.value);
-      const min = range[0];
-      const max = range[1];
-      const current = desired != null ? Number(desired) : Number(soloGradeEl.value);
-      const allowed = [];
-      soloGradeEl.innerHTML = "";
-      for (let g = min; g <= max; g++) {
-        allowed.push(g);
-        const opt = document.createElement("option");
-        opt.value = String(g);
-        opt.textContent = `Grade ${g}`;
-        soloGradeEl.appendChild(opt);
-      }
-      if (allowed.includes(current)) soloGradeEl.value = String(current);
-      else if (allowed.includes(6)) soloGradeEl.value = "6";
-      else soloGradeEl.value = String(allowed[0]);
+    function populateSoloSubjects(desired) {
+      buildSubjectOptions(soloSubjectEl, soloCurriculumEl.value, Number(soloGradeEl.value), desired);
+      syncLanguageToSubject();
     }
-    soloSubjectEl.addEventListener("change", () => populateSoloGrade(soloSubjectEl.value));
-    soloCurriculumEl.addEventListener("change", () => {
-      populateSoloSubjects(soloCurriculumEl.value);
-      populateSoloGrade(soloSubjectEl.value);
-    });
+    soloCurriculumEl.addEventListener("change", () => populateSoloSubjects());
+    soloGradeEl.addEventListener("change", () => populateSoloSubjects());
+    soloSubjectEl.addEventListener("change", syncLanguageToSubject);
     const sessionStorageKey = "fruitcatcher-controller-session-v2";
 
     const params = new URLSearchParams(window.location.search);
@@ -924,10 +905,10 @@
       soloOptionsEl.hidden = false;
       soloTrustPanelEl.hidden = false;
       joinButton.textContent = "Start";
-      soloCurriculumEl.value = params.get("curriculum") || "cambodia_moeys";
       soloLanguageEl.value = params.get("language") || "khmer";
-      populateSoloSubjects(soloCurriculumEl.value, params.get("subject") || "math");
-      populateSoloGrade(soloSubjectEl.value, params.get("grade") || "6");
+      soloCurriculumEl.value = params.get("curriculum") || "cambodia_moeys";
+      soloGradeEl.value = params.get("grade") || "6";
+      populateSoloSubjects(params.get("subject") || "math");
 
       // A teacher-shared quiz locks the settings so the student takes exactly
       // what the teacher assigned.

@@ -454,7 +454,11 @@
       if (value === "english") return "English";
       if (value === "ielts") return "IELTS";
       if (value === "sat") return "SAT";
-      // Math-track courses (algebra_1, geometry, precalculus, ...) format cleanly.
+      if (value === "ict") return "ICT";
+      if (value === "moral_civics") return "Moral & Civics";
+      if (value === "english_second_language") return "English (Second Language)";
+      if (value === "khmer_language") return "Khmer Language";
+      // Other subjects (additional_mathematics, computer_science, ...) format cleanly.
       if (typeof value === "string" && value) return value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
       return value;
     }

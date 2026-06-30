@@ -205,6 +205,16 @@ const MOEYS_SUBJECT_GRADE_RANGES = {
 };
 const SUPPORTED_CURRICULUMS = ["international", "cambodia_moeys", "cambridge_igcse"];
 const SUPPORTED_LANGUAGES = ["english", "khmer", "bilingual"];
+// Some subjects are tied to a language (a Khmer-language question must be in
+// Khmer; English exams/learning must be in English). Keeps subject + language
+// consistent.
+const SUBJECT_LANGUAGE_LOCK = {
+  khmer_language: "khmer",
+  english: "english",
+  english_second_language: "english",
+  ielts: "english",
+  sat: "english"
+};
 const SUPPORTED_DIFFICULTY_MODES = ["easy", "standard", "challenge"];
 const SUPPORTED_QUESTION_SOURCES = [
   "question_bank_openai",
@@ -5493,10 +5503,15 @@ function sanitizeConfig(input) {
   nextConfig.language = SUPPORTED_LANGUAGES.includes(nextConfig.language) ? nextConfig.language : "english";
   nextConfig.subject = SUPPORTED_SUBJECTS.includes(nextConfig.subject) ? nextConfig.subject : "math";
   // Keep the grade within the range where the subject is actually taught for
-  // this curriculum (e.g. no Grade-2 Physics under Cambodia MoEYS).
+  // this curriculum (e.g. no Grade-2 Physics under Cambodia MoEYS), and lock the
+  // language for language-specific subjects (Khmer Language -> Khmer; English
+  // subjects/exams -> English).
   {
     const [gMin, gMax] = gradeRangeFor(nextConfig.subject, nextConfig.curriculum);
     nextConfig.gradeLevel = Math.min(gMax, Math.max(gMin, Math.round(nextConfig.gradeLevel)));
+    if (SUBJECT_LANGUAGE_LOCK[nextConfig.subject]) {
+      nextConfig.language = SUBJECT_LANGUAGE_LOCK[nextConfig.subject];
+    }
   }
   nextConfig.difficultyMode = SUPPORTED_DIFFICULTY_MODES.includes(nextConfig.difficultyMode) ? nextConfig.difficultyMode : "standard";
   nextConfig.questionSource = SUPPORTED_QUESTION_SOURCES.includes(nextConfig.questionSource) ? nextConfig.questionSource : "openai_fallback";

@@ -3562,17 +3562,31 @@
       const all = subs.concat(ADDITIONAL_SUBJECTS);
       subjectEl.value = all.includes(want) ? want : subs[0];
     }
-    // Keep a subject dropdown in sync with its curriculum dropdown (and refresh grades).
-    function wireCurriculumSubject(curriculumEl, subjectEl, gradeEl) {
+    // Language is fixed for language-specific subjects (Khmer Language -> Khmer;
+    // English subjects/exams -> English), keeping the selection consistent.
+    const SUBJECT_LANGUAGE_LOCK = { khmer_language: "khmer", english: "english", english_second_language: "english", ielts: "english", sat: "english" };
+    function syncLanguageToSubject(subjectEl, languageEl) {
+      if (!languageEl) return;
+      const lock = SUBJECT_LANGUAGE_LOCK[subjectEl.value];
+      if (lock) { languageEl.value = lock; languageEl.dataset.locked = "1"; languageEl.disabled = true; }
+      else if (languageEl.dataset.locked) { languageEl.dataset.locked = ""; languageEl.disabled = false; }
+    }
+    // Keep a subject dropdown in sync with its curriculum dropdown (refresh grades
+    // and lock language to the subject where required).
+    function wireCurriculumSubject(curriculumEl, subjectEl, gradeEl, languageEl) {
       if (!curriculumEl || !subjectEl) return;
       populateSubjectSelect(subjectEl, curriculumEl.value, subjectEl.value);
       if (gradeEl) populateGradeSelect(gradeEl, subjectEl.value, undefined, curriculumEl.value);
-      const refreshGrade = () => { if (gradeEl) populateGradeSelect(gradeEl, subjectEl.value, undefined, curriculumEl.value); };
+      syncLanguageToSubject(subjectEl, languageEl);
+      const refresh = () => {
+        if (gradeEl) populateGradeSelect(gradeEl, subjectEl.value, undefined, curriculumEl.value);
+        syncLanguageToSubject(subjectEl, languageEl);
+      };
       curriculumEl.addEventListener("change", () => {
         populateSubjectSelect(subjectEl, curriculumEl.value);
-        refreshGrade();
+        refresh();
       });
-      subjectEl.addEventListener("change", refreshGrade);
+      subjectEl.addEventListener("change", refresh);
     }
 
     function gradesForSubject(subject, curriculum) {
@@ -3845,8 +3859,8 @@
     // only ever offer the grades they are taught in.
     // (subject -> grade refresh is handled inside wireCurriculumSubject, with curriculum.)
     // Make every subject dropdown follow its curriculum dropdown (settings, AI bank, manual, worksheet, share).
-    wireCurriculumSubject(fields.curriculum, fields.subject, fields.gradeLevel);
-    wireCurriculumSubject(wsEl("qaiCurriculum"), wsEl("qaiSubject"), wsEl("qaiGrade"));
+    wireCurriculumSubject(fields.curriculum, fields.subject, fields.gradeLevel, fields.language);
+    wireCurriculumSubject(wsEl("qaiCurriculum"), wsEl("qaiSubject"), wsEl("qaiGrade"), wsEl("qaiLanguage"));
     // Manual question editor: offer ALL subjects (so any saved question can be edited).
     (function () {
       const el = document.getElementById("qSubject");
@@ -3857,8 +3871,8 @@
         el.value = SUBJECT_LABELS[cur] ? cur : "math";
       }
     })();
-    wireCurriculumSubject(wsEl("wsCurriculum"), wsEl("wsSubject"), wsEl("wsGrade"));
-    wireCurriculumSubject(wsEl("shCurriculum"), wsEl("shSubject"), wsEl("shGrade"));
+    wireCurriculumSubject(wsEl("wsCurriculum"), wsEl("wsSubject"), wsEl("wsGrade"), wsEl("wsLanguage"));
+    wireCurriculumSubject(wsEl("shCurriculum"), wsEl("shSubject"), wsEl("shGrade"), wsEl("shLanguage"));
     // ===== Shared quizzes =====
     let sharesTelegramConfigured = false;
 
