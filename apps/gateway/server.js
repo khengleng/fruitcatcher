@@ -126,7 +126,7 @@ const SUBJECT_GRADE_RANGES = {
   geometry: [9, 10],
   precalculus: [11, 12]
 };
-const SUPPORTED_CURRICULUMS = ["international", "cambodia_moeys"];
+const SUPPORTED_CURRICULUMS = ["international", "cambodia_moeys", "cambridge_igcse"];
 const SUPPORTED_LANGUAGES = ["english", "khmer", "bilingual"];
 const SUPPORTED_DIFFICULTY_MODES = ["easy", "standard", "challenge"];
 const SUPPORTED_QUESTION_SOURCES = [
@@ -1212,6 +1212,9 @@ function getCurriculumLabel(curriculum) {
   if (curriculum === "cambodia_moeys") {
     return "Cambodia MoEYS";
   }
+  if (curriculum === "cambridge_igcse") {
+    return "Cambridge IGCSE";
+  }
 
   return "International";
 }
@@ -1369,6 +1372,9 @@ function notationRenders(question) {
 function getCurriculumInstruction(curriculum) {
   if (curriculum === "cambodia_moeys") {
     return "Follow the Cambodia Ministry of Education, Youth and Sport (MoEYS) national curriculum scope and sequence for the selected grade: use only topics, methods, and vocabulary taught at or before this grade in Cambodian schools, with locally familiar contexts and units. Do not introduce content from higher grades.";
+  }
+  if (curriculum === "cambridge_igcse") {
+    return "Follow the Cambridge IGCSE (International General Certificate of Secondary Education) syllabus scope, methods, command words, and notation as set by Cambridge International for the selected subject. Keep the difficulty and style consistent with IGCSE assessment (typically ages 14-16), with globally understandable, exam-style contexts. Do not introduce content beyond the IGCSE syllabus for the selected grade.";
   }
 
   return "Follow a standard international-school curriculum scope and sequence for the selected grade: use only topics and methods taught at or before this grade internationally, keeping contexts globally understandable. Do not claim official Cambridge or IB affiliation, and do not introduce content from higher grades.";

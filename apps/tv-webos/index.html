@@ -428,7 +428,9 @@
     let videoOpen = false;
 
     function getCurriculumLabel(value) {
-      return value === "cambodia_moeys" ? "Cambodia MoEYS" : "International";
+      if (value === "cambodia_moeys") return "Cambodia MoEYS";
+      if (value === "cambridge_igcse") return "Cambridge IGCSE";
+      return "International";
     }
 
     function getLanguageLabel(value) {

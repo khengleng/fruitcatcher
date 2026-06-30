@@ -623,6 +623,7 @@
           <select id="soloCurriculum">
             <option value="cambodia_moeys">Cambodia MoEYS</option>
             <option value="international">International</option>
+            <option value="cambridge_igcse">Cambridge IGCSE</option>
           </select>
         </div>
         <div class="solo-field">
@@ -891,7 +892,9 @@
     }
 
     function getCurriculumLabel(value) {
-      return value === "cambodia_moeys" ? "Cambodia MoEYS" : "International";
+      if (value === "cambodia_moeys") return "Cambodia MoEYS";
+      if (value === "cambridge_igcse") return "Cambridge IGCSE";
+      return "International";
     }
 
     function getLanguageLabel(value) {
