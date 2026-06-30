@@ -185,6 +185,24 @@ const SUBJECT_GRADE_RANGES = {
   computer_science: [6, 12],
   ict: [6, 12]
 };
+
+// Cambodia MoEYS national curriculum: subjects are only taught at certain
+// grades. Separate Physics/Chemistry/Biology start in lower secondary (Gr 7);
+// primary uses integrated Science; Economics is upper secondary, etc. Used to
+// keep the subject relevant to the selected grade for the MoEYS curriculum.
+const MOEYS_SUBJECT_GRADE_RANGES = {
+  general_science: [2, 6],
+  physics: [7, 12],
+  chemistry: [7, 12],
+  biology: [7, 12],
+  earth_science: [7, 12],
+  economics: [11, 12],
+  computer_science: [9, 12],
+  ict: [7, 12],
+  english: [4, 12],
+  history: [4, 12],
+  geography: [4, 12]
+};
 const SUPPORTED_CURRICULUMS = ["international", "cambodia_moeys", "cambridge_igcse"];
 const SUPPORTED_LANGUAGES = ["english", "khmer", "bilingual"];
 const SUPPORTED_DIFFICULTY_MODES = ["easy", "standard", "challenge"];
@@ -197,6 +215,15 @@ const SUPPORTED_QUESTION_SOURCES = [
 ];
 const MIN_GRADE_LEVEL = 2;
 const MAX_GRADE_LEVEL = 12;
+
+// Resolve the [min, max] grade range for a subject under a curriculum (MoEYS has
+// its own subject-grade mapping; others use the default subject ranges).
+function gradeRangeFor(subject, curriculum) {
+  if (curriculum === "cambodia_moeys" && MOEYS_SUBJECT_GRADE_RANGES[subject]) {
+    return MOEYS_SUBJECT_GRADE_RANGES[subject];
+  }
+  return SUBJECT_GRADE_RANGES[subject] || [MIN_GRADE_LEVEL, MAX_GRADE_LEVEL];
+}
 const MAX_ROOM_PLAYERS = 40;
 const MAX_ROOMS = Number(process.env.MAX_ROOMS || 500);
 const ROOM_IDLE_TTL_MS = Number(process.env.ROOM_IDLE_TTL_MS || 3 * 60 * 60 * 1000);
@@ -2798,7 +2825,7 @@ app.get("/config", (_req, res) => {
     subjectLabels: SUBJECT_LABELS,
     curriculumSubjects: CURRICULUM_SUBJECTS,
     additionalSubjects: ADDITIONAL_SUBJECTS,
-    subjectGradeRanges: SUBJECT_GRADE_RANGES,
+    subjectGradeRanges: SUBJECT_GRADE_RANGES,    moeysSubjectGradeRanges: MOEYS_SUBJECT_GRADE_RANGES,
     supportedDifficultyModes: SUPPORTED_DIFFICULTY_MODES,
     supportedQuestionSources: SUPPORTED_QUESTION_SOURCES,
     minGradeLevel: MIN_GRADE_LEVEL,
@@ -3444,7 +3471,7 @@ app.get("/solo/options", (_req, res) => {
     subjectLabels: SUBJECT_LABELS,
     curriculumSubjects: CURRICULUM_SUBJECTS,
     additionalSubjects: ADDITIONAL_SUBJECTS,
-    subjectGradeRanges: SUBJECT_GRADE_RANGES,
+    subjectGradeRanges: SUBJECT_GRADE_RANGES,    moeysSubjectGradeRanges: MOEYS_SUBJECT_GRADE_RANGES,
     difficultyModes: SUPPORTED_DIFFICULTY_MODES,
     questionSources: SUPPORTED_QUESTION_SOURCES,
     minGradeLevel: MIN_GRADE_LEVEL,
@@ -5465,7 +5492,12 @@ function sanitizeConfig(input) {
   nextConfig.curriculum = SUPPORTED_CURRICULUMS.includes(nextConfig.curriculum) ? nextConfig.curriculum : "international";
   nextConfig.language = SUPPORTED_LANGUAGES.includes(nextConfig.language) ? nextConfig.language : "english";
   nextConfig.subject = SUPPORTED_SUBJECTS.includes(nextConfig.subject) ? nextConfig.subject : "math";
-  nextConfig.gradeLevel = Math.min(MAX_GRADE_LEVEL, Math.max(MIN_GRADE_LEVEL, Math.round(nextConfig.gradeLevel)));
+  // Keep the grade within the range where the subject is actually taught for
+  // this curriculum (e.g. no Grade-2 Physics under Cambodia MoEYS).
+  {
+    const [gMin, gMax] = gradeRangeFor(nextConfig.subject, nextConfig.curriculum);
+    nextConfig.gradeLevel = Math.min(gMax, Math.max(gMin, Math.round(nextConfig.gradeLevel)));
+  }
   nextConfig.difficultyMode = SUPPORTED_DIFFICULTY_MODES.includes(nextConfig.difficultyMode) ? nextConfig.difficultyMode : "standard";
   nextConfig.questionSource = SUPPORTED_QUESTION_SOURCES.includes(nextConfig.questionSource) ? nextConfig.questionSource : "openai_fallback";
   nextConfig.questionsPerRound = Math.min(20, Math.max(3, Math.round(nextConfig.questionsPerRound)));

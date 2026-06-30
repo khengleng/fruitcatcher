@@ -1929,7 +1929,7 @@
       fields.curriculum.value = config.curriculum || "international";
       fields.language.value = config.language || "english";
       populateSubjectSelect(fields.subject, fields.curriculum.value, config.subject || "math");
-      populateGradeSelect(fields.gradeLevel, fields.subject.value, config.gradeLevel || 6);
+      populateGradeSelect(fields.gradeLevel, fields.subject.value, config.gradeLevel || 6, fields.curriculum.value);
       fields.difficultyMode.value = config.difficultyMode || "standard";
       fields.questionSource.value = config.questionSource || "openai_fallback";
       fields.questionsPerRound.value = config.questionsPerRound ?? "";
@@ -3140,7 +3140,7 @@
     const wsEl = (id) => document.getElementById(id);
 
     function initWorksheetGrades() {
-      populateGradeSelect(wsEl("wsGrade"), wsEl("wsSubject")?.value || "math", 6);
+      populateGradeSelect(wsEl("wsGrade"), wsEl("wsSubject")?.value || "math", 6, wsEl("wsCurriculum")?.value);
     }
 
     function worksheetConfig() {
@@ -3516,6 +3516,15 @@
       ielts: [9, 12], sat: [9, 12], additional_mathematics: [10, 12], combined_science: [9, 11],
       economics: [9, 12], business_studies: [9, 12], accounting: [9, 12], computer_science: [6, 12], ict: [6, 12]
     };
+    // Cambodia MoEYS: subjects only taught at certain grades (mirror of the gateway).
+    const MOEYS_SUBJECT_GRADE_RANGES = {
+      general_science: [2, 6], physics: [7, 12], chemistry: [7, 12], biology: [7, 12], earth_science: [7, 12],
+      economics: [11, 12], computer_science: [9, 12], ict: [7, 12], english: [4, 12], history: [4, 12], geography: [4, 12]
+    };
+    function gradeRangeFor(subject, curriculum) {
+      if (curriculum === "cambodia_moeys" && MOEYS_SUBJECT_GRADE_RANGES[subject]) return MOEYS_SUBJECT_GRADE_RANGES[subject];
+      return SUBJECT_GRADE_RANGES[subject] || [2, 12];
+    }
     const SUBJECT_LABELS = {
       math: "Math", algebra_1: "Algebra 1", algebra_2: "Algebra 2", geometry: "Geometry", precalculus: "Precalculus",
       additional_mathematics: "Additional Mathematics", general_science: "General Science", combined_science: "Combined Science",
@@ -3557,27 +3566,27 @@
     function wireCurriculumSubject(curriculumEl, subjectEl, gradeEl) {
       if (!curriculumEl || !subjectEl) return;
       populateSubjectSelect(subjectEl, curriculumEl.value, subjectEl.value);
-      if (gradeEl) populateGradeSelect(gradeEl, subjectEl.value);
+      if (gradeEl) populateGradeSelect(gradeEl, subjectEl.value, undefined, curriculumEl.value);
+      const refreshGrade = () => { if (gradeEl) populateGradeSelect(gradeEl, subjectEl.value, undefined, curriculumEl.value); };
       curriculumEl.addEventListener("change", () => {
         populateSubjectSelect(subjectEl, curriculumEl.value);
-        if (gradeEl) populateGradeSelect(gradeEl, subjectEl.value);
+        refreshGrade();
       });
+      subjectEl.addEventListener("change", refreshGrade);
     }
 
-    function gradesForSubject(subject) {
-      const range = SUBJECT_GRADE_RANGES[subject];
+    function gradesForSubject(subject, curriculum) {
+      const range = gradeRangeFor(subject, curriculum);
       const grades = [];
-      const min = range ? range[0] : 2;
-      const max = range ? range[1] : 12;
-      for (let g = min; g <= max; g++) grades.push(g);
+      for (let g = range[0]; g <= range[1]; g++) grades.push(g);
       return grades;
     }
 
-    // Rebuild a grade <select> to only the grades valid for the chosen subject,
-    // keeping the current selection when it is still allowed.
-    function populateGradeSelect(selectEl, subject, desired) {
+    // Rebuild a grade <select> to only the grades valid for the chosen subject
+    // (and curriculum), keeping the current selection when it is still allowed.
+    function populateGradeSelect(selectEl, subject, desired, curriculum) {
       if (!selectEl) return;
-      const grades = gradesForSubject(subject);
+      const grades = gradesForSubject(subject, curriculum);
       const current = desired != null ? Number(desired) : Number(selectEl.value);
       selectEl.innerHTML = "";
       grades.forEach((g) => {
@@ -3592,7 +3601,7 @@
     }
 
     function initQaiGrades() {
-      populateGradeSelect(wsEl("qaiGrade"), wsEl("qaiSubject")?.value || "math", 6);
+      populateGradeSelect(wsEl("qaiGrade"), wsEl("qaiSubject")?.value || "math", 6, wsEl("qaiCurriculum")?.value);
     }
 
     function qaiConfig() {
@@ -3834,9 +3843,7 @@
     initQaiGrades();
     // Re-scope the grade options whenever the subject changes so math-track courses
     // only ever offer the grades they are taught in.
-    fields.subject.addEventListener("change", () => populateGradeSelect(fields.gradeLevel, fields.subject.value));
-    wsEl("qaiSubject").addEventListener("change", () => populateGradeSelect(wsEl("qaiGrade"), wsEl("qaiSubject").value));
-    wsEl("wsSubject").addEventListener("change", () => populateGradeSelect(wsEl("wsGrade"), wsEl("wsSubject").value));
+    // (subject -> grade refresh is handled inside wireCurriculumSubject, with curriculum.)
     // Make every subject dropdown follow its curriculum dropdown (settings, AI bank, manual, worksheet, share).
     wireCurriculumSubject(fields.curriculum, fields.subject, fields.gradeLevel);
     wireCurriculumSubject(wsEl("qaiCurriculum"), wsEl("qaiSubject"), wsEl("qaiGrade"));
@@ -3856,7 +3863,7 @@
     let sharesTelegramConfigured = false;
 
     function initShareGrades() {
-      populateGradeSelect(wsEl("shGrade"), wsEl("shSubject")?.value || "math", 6);
+      populateGradeSelect(wsEl("shGrade"), wsEl("shSubject")?.value || "math", 6, wsEl("shCurriculum")?.value);
     }
 
     async function createShare() {
@@ -4138,7 +4145,7 @@
     }
 
     initShareGrades();
-    wsEl("shSubject").addEventListener("change", () => populateGradeSelect(wsEl("shGrade"), wsEl("shSubject").value));
+    // (shSubject -> shGrade refresh handled inside wireCurriculumSubject, with curriculum.)
     wsEl("shCreateButton").addEventListener("click", createShare);
     wsEl("clCreateButton").addEventListener("click", createClassroom);
 

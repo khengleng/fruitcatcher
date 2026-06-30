@@ -751,6 +751,15 @@
       additional_mathematics: [10, 12], combined_science: [9, 11], economics: [9, 12],
       business_studies: [9, 12], accounting: [9, 12], computer_science: [6, 12], ict: [6, 12]
     };
+    // Cambodia MoEYS: subjects only taught at certain grades (mirror of the gateway).
+    const MOEYS_SUBJECT_GRADE_RANGES = {
+      general_science: [2, 6], physics: [7, 12], chemistry: [7, 12], biology: [7, 12], earth_science: [7, 12],
+      economics: [11, 12], computer_science: [9, 12], ict: [7, 12], english: [4, 12], history: [4, 12], geography: [4, 12]
+    };
+    function gradeRangeFor(subject, curriculum) {
+      if (curriculum === "cambodia_moeys" && MOEYS_SUBJECT_GRADE_RANGES[subject]) return MOEYS_SUBJECT_GRADE_RANGES[subject];
+      return SUBJECT_GRADE_RANGES[subject] || [2, 12];
+    }
     // Subjects offered per curriculum, and their display labels (mirror of the gateway).
     const SUBJECT_LABELS = {
       math: "Math", algebra_1: "Algebra 1", algebra_2: "Algebra 2", geometry: "Geometry", precalculus: "Precalculus",
@@ -792,9 +801,9 @@
       buildSubjectOptions(soloSubjectEl, curriculum, desired);
     }
     function populateSoloGrade(subject, desired) {
-      const range = SUBJECT_GRADE_RANGES[subject];
-      const min = range ? range[0] : 2;
-      const max = range ? range[1] : 12;
+      const range = gradeRangeFor(subject, soloCurriculumEl.value);
+      const min = range[0];
+      const max = range[1];
       const current = desired != null ? Number(desired) : Number(soloGradeEl.value);
       const allowed = [];
       soloGradeEl.innerHTML = "";
