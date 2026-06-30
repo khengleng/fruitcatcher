@@ -3102,6 +3102,9 @@ function hashString(value) {
 
 // Bias the search toward Khmer-language videos for Khmer/bilingual quizzes:
 // if the query has no Khmer script, append a Khmer "explained in Khmer" hint.
+// Bump this whenever the video relevance logic changes, to invalidate cached
+// (possibly now-rejected) picks so they are re-judged under the new guardrail.
+const VIDEO_REL_VERSION = "v2";
 function localizeVideoQuery(query, language) {
   if (!query) return query;
   const wantsKhmer = language === "khmer" || language === "bilingual";
@@ -3205,7 +3208,13 @@ Required spoken/written language of the video: ${requiredLanguageLabel}
 Candidate YouTube videos:
 ${list}
 
-In "relevantIds", return the ids of ONLY the videos that clearly teach the exact method or concept needed to solve this question, at the right grade level AND in ${requiredLanguageLabel}. Rank them best-first. Exclude anything off-topic, the wrong level, the wrong language, or only loosely related. Be strict — if none are a strong match, return an empty list.`;
+In "relevantIds", return the ids of ONLY the videos that clearly teach the EXACT method or concept needed to solve THIS question, at the right grade level, AND that are actually spoken/written in ${requiredLanguageLabel}.
+
+Be very strict:
+- The video must cover the specific topic of this question — reject generic "subject overview", motivational, or whole-chapter videos that only loosely touch it.
+- The video language must genuinely be ${requiredLanguageLabel}. If ${requiredLanguageLabel} is Khmer, the title/teaching must be in Khmer script (ភាសាខ្មែរ); a video that is actually in English, Hindi, Thai, Vietnamese, or another language does NOT qualify even if the subject matches.
+- When in doubt, leave it out. It is far better to return an empty list than to include a video that is off-topic or in the wrong language.
+Rank the qualifying videos best-first. If none clearly qualify, return an empty list.`;
   const { text } = await llmJson({
     input: prompt,
     jsonSchema: { name: "video_relevance", schema: VIDEO_RELEVANCE_SCHEMA },
@@ -3239,16 +3248,23 @@ async function resolveCandidateIds({ question, config, query, language, cacheKey
   try {
     const items = await youtubeSearchCandidates(query, language, requireCaptions);
     if (!items.length) return [];
+    // Always run the AI relevance judge (on OpenAI or the Qwen fallback) — it is
+    // the guardrail that keeps off-topic / wrong-language videos out, which
+    // matters most for Khmer where titles can't be keyword-matched reliably.
     let ids = [];
-    if (!fallbackActive()) {
-      try {
-        ids = await judgeVideoRelevance(question, items, config, requiredLanguageLabel);
-      } catch (error) {
-        console.error("Video relevance judge failed:", error.message);
-      }
+    try {
+      ids = await judgeVideoRelevance(question, items, config, requiredLanguageLabel);
+    } catch (error) {
+      console.error("Video relevance judge failed:", error.message);
     }
-    if (!ids.length) {
-      ids = items.filter((it) => it.score >= 2).map((it) => it.id);
+    // Keyword fallback ONLY for Latin-script queries (term matching is impossible
+    // for space-less Khmer text) and only on a strong title match, so we never
+    // show a loosely-related clip. For Khmer we trust the judge alone; if it found
+    // nothing we return [] and the caller falls back to an English video with
+    // Khmer captions (or a search link).
+    const queryHasKhmer = /[ក-៿]/.test(String(query || ""));
+    if (!ids.length && !queryHasKhmer) {
+      ids = items.filter((it) => it.score >= 3).map((it) => it.id);
     }
     if (!ids.length) return [];
     ids = ids.slice(0, 6);
@@ -3290,7 +3306,7 @@ async function resolveVideo(question, config) {
   // Stage 1: a relevant video in the quiz's own language.
   const nativeIds = await resolveCandidateIds({
     question, config, query: nativeQuery, language,
-    cacheKey: `${conceptKey}|${wantsKhmer ? "km" : "en"}`,
+    cacheKey: `${VIDEO_REL_VERSION}|${conceptKey}|${wantsKhmer ? "km" : "en"}`,
     requireCaptions: false,
     requiredLanguageLabel: getLanguageLabel(language)
   });
@@ -3301,7 +3317,7 @@ async function resolveVideo(question, config) {
   if (wantsKhmer) {
     const ccIds = await resolveCandidateIds({
       question, config, query: englishVideoQueryFor(question, config), language: "english",
-      cacheKey: `${conceptKey}|en-kmcc`,
+      cacheKey: `${VIDEO_REL_VERSION}|${conceptKey}|en-kmcc`,
       requireCaptions: true,
       requiredLanguageLabel: "English"
     });
