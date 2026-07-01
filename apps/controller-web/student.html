@@ -142,6 +142,11 @@
         <span id="linkCodeBox" style="font-weight:800; font-size:20px; letter-spacing:3px; color:var(--accent);"></span>
       </div>
       <div class="status" id="linkStatus"></div>
+
+      <h2 style="font-size:18px; margin:22px 0 6px;">🔔 Telegram notifications</h2>
+      <p class="muted" style="font-size:13px; margin:0 0 8px;">Get a message on Telegram when your parent sets you a new task.</p>
+      <div class="row"><button id="tgBtn" class="secondary">Connect Telegram</button></div>
+      <div class="status" id="tgStatus"></div>
     </section>
   </main>
 
@@ -479,6 +484,21 @@
         host.innerHTML = `<p class='muted' style='color:#ff9b7d;'>${escapeHtml(e.message)}</p>`;
       }
     }
+
+    $("tgBtn").addEventListener("click", async () => {
+      try {
+        setStatus($("tgStatus"), "Preparing…", "var(--accent)");
+        const data = await apiPost("/student/telegram/code", {}, true);
+        if (data.linked) { setStatus($("tgStatus"), "Already connected ✓ You'll get notifications on Telegram.", "var(--accent2)"); }
+        const link = data.botUsername ? `https://t.me/${data.botUsername}?start=link_${data.code}` : "";
+        $("tgStatus").innerHTML = link
+          ? `Open <a href="${link}" target="_blank" rel="noopener" style="color:var(--accent2);font-weight:800;">our Telegram bot</a> and tap Start to connect. (Code <b>${data.code}</b>)`
+          : `Open our Telegram bot and send: <b>/link ${data.code}</b>`;
+      } catch (e) {
+        if (/sign in/i.test(e.message)) { localStorage.removeItem(TOKEN_KEY); showSignedOut(); return; }
+        setStatus($("tgStatus"), e.message, "#ff9b7d");
+      }
+    });
 
     $("mistakesBtn").addEventListener("click", loadMistakes);
     async function loadMistakes() {

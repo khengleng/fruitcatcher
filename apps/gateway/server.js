@@ -1940,6 +1940,31 @@ async function deleteTelegramMessage(chatId, messageId) {
 
 // Shared-secret guard for calls coming from the Telegram bot service.
 const BOT_API_SECRET = process.env.BOT_API_SECRET || "";
+const TELEGRAM_BOT_USERNAME = process.env.TELEGRAM_BOT_USERNAME || "";
+
+// Best-effort Telegram notification (the gateway holds the bot token and can
+// send directly). Silent no-op if Telegram isn't configured or the recipient
+// hasn't linked their account.
+async function notifyTelegram(telegramId, text, buttonUrl, buttonLabel) {
+  if (!TELEGRAM_BOT_TOKEN || !telegramId) return;
+  try {
+    const payload = {
+      chat_id: String(telegramId),
+      text: String(text).slice(0, 3500),
+      parse_mode: "HTML",
+      disable_web_page_preview: true
+    };
+    if (buttonUrl) payload.reply_markup = { inline_keyboard: [[{ text: buttonLabel || "Open", url: buttonUrl }]] };
+    await fetchWithTimeout(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }, 8000);
+  } catch (error) {
+    console.error("notifyTelegram failed:", error.message);
+  }
+}
+
 function requireBot(req, res, next) {
   if (!BOT_API_SECRET) {
     res.status(503).json({ error: "Subscriptions are not configured." });
@@ -2361,6 +2386,19 @@ async function initDatabase() {
     )
   `);
   await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_daily_activity_student ON student_daily_activity(student_id, day DESC)");
+
+  // Opt-in Telegram notifications: link a portal account to a Telegram chat.
+  await dbQueryRequired("ALTER TABLE student_users ADD COLUMN IF NOT EXISTS telegram_id TEXT");
+  await dbQueryRequired("ALTER TABLE parent_users ADD COLUMN IF NOT EXISTS telegram_id TEXT");
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS telegram_link_codes (
+      code TEXT PRIMARY KEY,
+      account_type TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
 
   // Teacher-owned classrooms, their roster, and assigned quizzes.
   await dbQueryRequired(`
@@ -5900,6 +5938,63 @@ app.get("/student/mistakes", requireStudent, async (req, res) => {
   }
 });
 
+// ---- Opt-in Telegram notifications: link a portal account to a chat ----
+function tgEscape(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+async function createTelegramLinkCode(accountType, accountId) {
+  const code = generateLinkCode();
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  await dbQueryRequired(
+    "INSERT INTO telegram_link_codes (code, account_type, account_id, expires_at, created_at) VALUES ($1,$2,$3,$4,NOW()) ON CONFLICT (code) DO NOTHING",
+    [code, accountType, accountId, expiresAt]
+  );
+  return code;
+}
+
+app.post("/student/telegram/code", requireStudent, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const linked = await dbQuery("SELECT telegram_id FROM student_users WHERE id = $1", [req.studentUser.sub]);
+    const code = await createTelegramLinkCode("student", req.studentUser.sub);
+    res.json({ ok: true, code, botUsername: TELEGRAM_BOT_USERNAME || null, linked: Boolean(linked?.rows?.[0]?.telegram_id) });
+  } catch (error) {
+    console.error("student tg code failed:", error);
+    res.status(500).json({ error: "Could not create a code" });
+  }
+});
+
+app.post("/parent/telegram/code", requireParent, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const linked = await dbQuery("SELECT telegram_id FROM parent_users WHERE id = $1", [req.parentUser.sub]);
+    const code = await createTelegramLinkCode("parent", req.parentUser.sub);
+    res.json({ ok: true, code, botUsername: TELEGRAM_BOT_USERNAME || null, linked: Boolean(linked?.rows?.[0]?.telegram_id) });
+  } catch (error) {
+    console.error("parent tg code failed:", error);
+    res.status(500).json({ error: "Could not create a code" });
+  }
+});
+
+// Bot forwards "/link CODE" from a user: bind their Telegram chat to the account.
+app.post("/bot/telegram/link", requireBot, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const code = String(req.body?.code || "").trim().toUpperCase();
+    const telegramId = String(req.body?.telegramId || "").trim();
+    if (!code || !telegramId) { res.status(400).json({ error: "code and telegramId are required" }); return; }
+    const r = await dbQueryRequired("SELECT account_type, account_id, expires_at FROM telegram_link_codes WHERE code = $1", [code]);
+    const rec = r.rows[0];
+    if (!rec || new Date(rec.expires_at).getTime() < Date.now()) { res.status(404).json({ error: "invalid_or_expired" }); return; }
+    const table = rec.account_type === "parent" ? "parent_users" : "student_users";
+    const acct = await dbQueryRequired(`UPDATE ${table} SET telegram_id = $1 WHERE id = $2 RETURNING display_name`, [telegramId, rec.account_id]);
+    await dbQuery("DELETE FROM telegram_link_codes WHERE code = $1", [code]);
+    res.json({ ok: true, accountType: rec.account_type, name: acct.rows[0]?.display_name || "" });
+  } catch (error) {
+    console.error("bot telegram link failed:", error);
+    res.status(500).json({ error: "Could not link" });
+  }
+});
+
 // ============================================================================
 // Parents — accounts that link to a child and review progress / assign tasks
 // ============================================================================
@@ -6118,6 +6213,13 @@ app.post("/parent/children/:studentId/tasks", requireParent, async (req, res) =>
       [id, req.parentUser.sub, req.params.studentId, kind, title, note, curriculum, language, subject, grade, qpr, dueValid]
     );
     const r = await dbQueryRequired("SELECT * FROM parent_tasks WHERE id = $1", [id]);
+    // Notify the child on Telegram if they've linked their account.
+    const childTg = await dbQuery("SELECT telegram_id FROM student_users WHERE id = $1", [req.params.studentId]);
+    const childChat = childTg?.rows?.[0]?.telegram_id;
+    if (childChat) {
+      const what = kind === "quiz" ? ` (${tgEscape(getSubjectLabel(subject))} quiz, ${qpr} questions)` : "";
+      notifyTelegram(childChat, `📌 New task from your parent: <b>${tgEscape(title)}</b>${what}`, `${CONTROLLER_URL}/student.html`, "Open Student Portal");
+    }
     res.status(201).json({ ok: true, task: publicParentTask(r.rows[0]) });
   } catch (error) {
     console.error("Parent create task failed:", error);
@@ -6183,6 +6285,7 @@ app.post("/student/tasks/:id/complete", requireStudent, async (req, res) => {
       res.status(404).json({ error: "Task not found." });
       return;
     }
+    await notifyTaskParent(req.params.id, null);
     res.json({ ok: true });
   } catch (error) {
     console.error("Student complete task failed:", error);
@@ -6194,13 +6297,37 @@ app.post("/student/tasks/:id/complete", requireStudent, async (req, res) => {
 async function completeParentQuizTask(session) {
   if (!db || !session?.parentTaskId || !session?.studentUserId) return;
   try {
-    await dbQuery(
+    const upd = await dbQuery(
       `UPDATE parent_tasks SET status = 'done', score = $1, total = $2, completed_at = NOW()
-       WHERE id = $3 AND student_user_id = $4 AND kind = 'quiz'`,
+       WHERE id = $3 AND student_user_id = $4 AND kind = 'quiz' AND status <> 'done' RETURNING title`,
       [session.score, session.config.questionsPerRound, session.parentTaskId, session.studentUserId]
     );
+    if (upd?.rows?.[0]) {
+      await notifyTaskParent(session.parentTaskId, `${session.score}/${session.config.questionsPerRound}`);
+    }
   } catch (error) {
     console.error("Complete parent quiz task failed:", error.message);
+  }
+}
+
+// Notify the assigning parent (if linked) that their child finished a task.
+async function notifyTaskParent(taskId, scoreText) {
+  try {
+    const info = await dbQuery(
+      `SELECT pu.telegram_id AS chat, su.display_name AS child, pt.title AS title
+       FROM parent_tasks pt
+       JOIN parent_users pu ON pu.id = pt.parent_user_id
+       JOIN student_users su ON su.id = pt.student_user_id
+       WHERE pt.id = $1`,
+      [taskId]
+    );
+    const row = info?.rows?.[0];
+    if (row?.chat) {
+      const score = scoreText ? ` — score <b>${tgEscape(scoreText)}</b>` : "";
+      notifyTelegram(row.chat, `✅ ${tgEscape(row.child)} completed “${tgEscape(row.title)}”${score}`, `${CONTROLLER_URL}/parent.html`, "Open Parent Portal");
+    }
+  } catch (error) {
+    console.error("notifyTaskParent failed:", error.message);
   }
 }
 

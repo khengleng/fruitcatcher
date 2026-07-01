@@ -395,6 +395,19 @@ async function handleTelegramUpdate(update) {
   const from = message.from || {};
   if (!chatId) return;
 
+  // Account-notification linking: "/link CODE" or the "/start link_CODE" deeplink.
+  const linkMatch = String(message.text || "").trim().match(/^\/(?:link|start)\s+(?:link_)?([A-Za-z0-9]{4,12})$/i);
+  if (linkMatch && subscriptionsConfigured) {
+    const code = linkMatch[1].toUpperCase();
+    try {
+      const data = await gatewayApi("/bot/telegram/link", { method: "POST", body: { code, telegramId: String(chatId) } });
+      await sendText(chatId, `✅ Linked! You'll get notifications here${data.name ? " for <b>" + data.name + "</b>" : ""}.`);
+    } catch (e) {
+      await sendText(chatId, "That link code is invalid or has expired. Generate a fresh one in your portal and send it again.");
+    }
+    return;
+  }
+
   // A menu button / command always wins — even mid-payment, so a user can bail.
   const cmd = matchMenuCommand(message.text || "");
   if (cmd === "subscribe") return void (await showTiers(chatId));
