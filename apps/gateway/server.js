@@ -7044,6 +7044,64 @@ function courseDetailIsComplete(detail) {
   );
 }
 
+// Relevance guardrail for the course lesson — the counterpart to the video
+// relevance judge. Confirms the lesson teaches THIS question, is correct, on
+// grade level, and in the right language before it is shown.
+const COURSE_RELEVANCE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["relevant", "reason"],
+  properties: {
+    relevant: { type: "boolean" },
+    reason: { type: "string" }
+  }
+};
+
+// Returns true (show), false (reject), or null (couldn't judge → lenient, show).
+async function judgeCourseDetail(question, detail, config) {
+  if (!llmConfigured() || !courseDetailIsComplete(detail)) return null;
+  const correct = (question?.choices || []).find((c) => String(c.id) === String(question?.correctChoice));
+  const stepsText = (Array.isArray(detail.steps) ? detail.steps : []).map((s, i) => `${i + 1}. ${s}`).join("\n");
+  const pointsText = (Array.isArray(detail.keyPoints) ? detail.keyPoints : []).map((p) => `- ${p}`).join("\n");
+  const requiredLang = getLanguageLabel(config.language);
+  const prompt = `You are checking whether a short step-by-step lesson shown on a quiz review screen is trustworthy to show a Grade ${config.gradeLevel} student.
+
+Question: ${question?.question || ""}
+${correct ? `Correct answer: ${correct.text}\n` : ""}Intended for: ${getAlignmentTarget(config)}
+Required language: ${requiredLang}
+
+Lesson title: ${detail.title || ""}
+Lesson: ${detail.lesson || ""}
+Steps:
+${stepsText || "(none)"}
+Key points:
+${pointsText || "(none)"}
+
+Set "relevant" to true ONLY if ALL of these hold:
+- The lesson teaches the exact concept and method needed to solve THIS question — not a loosely related, generic, or off-topic lesson.
+- Every step and key point is factually and mathematically CORRECT, and following the steps leads to the correct answer above.
+- It fits the stated grade level (no higher-grade methods, no skipped or merged steps that a student couldn't follow).
+- It is written in ${requiredLang}${(config.language === "khmer" || config.language === "bilingual") ? " using Khmer script (ភាសាខ្មែរ)" : ""}.
+Be strict: when in doubt, set relevant to false. Give a one-line reason.`;
+  try {
+    const { text } = await llmJson({
+      input: prompt,
+      jsonSchema: { name: "course_relevance", schema: COURSE_RELEVANCE_SCHEMA },
+      model: OPENAI_MODEL,
+      usageContext: { usageSource: "solo" },
+      operation: "course_relevance"
+    });
+    const verdict = parseJsonLoose(text);
+    return typeof verdict?.relevant === "boolean" ? verdict.relevant : null;
+  } catch (error) {
+    // Transient judge failure: be lenient rather than nuke the lesson (the
+    // content already passed schema + notation checks). The verdict path still
+    // enforces relevance whenever the judge is reachable.
+    console.error("Course detail relevance judge failed:", error.message);
+    return null;
+  }
+}
+
 // Ask the LLM for just the review-screen mini-lesson for an existing question.
 async function generateCourseDetail(question, config) {
   if (!llmConfigured()) return null;
@@ -7063,29 +7121,51 @@ NOTATION: write all math and science notation so it displays cleanly without a f
     jsonSchema: { name: "lyhuor_course_detail", schema: COURSE_DETAIL_SCHEMA },
     model: OPENAI_MODEL,
     usageContext: { usageSource: "solo" },
-    operation: "generate"
+    operation: "course"
   });
   return text ? parseJsonLoose(text) : null;
 }
 
-// Guarantee the question carries a review-screen mini-lesson. OpenAI-generated
-// questions already have one (returned as-is); bank/fallback questions get one
-// generated lazily and cached onto the question object. Best-effort: on any
-// failure the review screen simply omits the card.
+// Guarantee the question carries a review-screen mini-lesson that passes the
+// relevance guardrail. Every source flows through here (OpenAI-bundled, bank,
+// and fallback), so the lesson is verified uniformly: generate if missing, judge
+// relevance, regenerate once if rejected, and drop it if it still doesn't pass
+// (fail-safe — no card rather than a wrong lesson). On a transient judge outage
+// the lesson is kept (judge returns null). Cached onto the question object.
 async function ensureCourseDetail(question, config) {
   if (!question) return null;
-  if (courseDetailIsComplete(question.courseDetail)) {
-    return question.courseDetail;
-  }
-  try {
-    const detail = await generateCourseDetail(question, config);
-    if (courseDetailIsComplete(detail)) {
-      question.courseDetail = detail;
+
+  async function candidate() {
+    if (courseDetailIsComplete(question.courseDetail)) return question.courseDetail;
+    try {
+      const detail = await generateCourseDetail(question, config);
+      return courseDetailIsComplete(detail) ? detail : null;
+    } catch (error) {
+      console.error("Course detail generation failed:", error.message);
+      return null;
     }
-  } catch (error) {
-    console.error("Course detail generation failed:", error.message);
   }
-  return courseDetailIsComplete(question.courseDetail) ? question.courseDetail : null;
+
+  let detail = await candidate();
+  if (!detail) { question.courseDetail = null; return null; }
+
+  // Relevance guardrail (mirrors the video judge): show only a lesson the judge
+  // confirms is on-topic, correct, on-level, and in the right language.
+  if (await judgeCourseDetail(question, detail, config) === false) {
+    let retry = null;
+    try {
+      retry = await generateCourseDetail(question, config);
+    } catch (error) {
+      console.error("Course detail regeneration failed:", error.message);
+    }
+    const retryOk = courseDetailIsComplete(retry) &&
+      (await judgeCourseDetail(question, retry, config)) !== false;
+    if (!retryOk) { question.courseDetail = null; return null; }
+    detail = retry;
+  }
+
+  question.courseDetail = detail;
+  return detail;
 }
 
 // Strip markdown fences / prose and parse the first JSON object found.
