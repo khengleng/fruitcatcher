@@ -328,6 +328,36 @@
       outline: 2px solid rgba(255, 211, 79, 0.5);
     }
 
+    /* The tapped answer while the server verifies it: keep it bright (override the
+       disabled dimming), pulse, and show a spinner so it clearly isn't stuck. */
+    .answer-btn.verifying {
+      position: relative;
+      opacity: 1;
+      padding-right: 48px;
+      animation: verify-pulse 1.3s ease-in-out infinite;
+    }
+    .answer-btn.verifying::after {
+      content: "";
+      position: absolute;
+      right: 16px;
+      top: 50%;
+      width: 18px;
+      height: 18px;
+      margin-top: -9px;
+      border: 2.5px solid rgba(255, 255, 255, 0.28);
+      border-top-color: var(--accent, #ffd34f);
+      border-radius: 50%;
+      animation: lc-spin 0.7s linear infinite;
+    }
+    @keyframes verify-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(255, 211, 79, 0); }
+      50% { box-shadow: 0 0 0 4px rgba(255, 211, 79, 0.22); }
+    }
+    .verify-bar { margin-top: 12px; }
+    @media (prefers-reduced-motion: reduce) {
+      .answer-btn.verifying, .answer-btn.verifying::after { animation: none; }
+    }
+
     .footer-actions {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -1546,6 +1576,10 @@
           }
         } else if (choice.id === latestState.selectedChoice) {
           button.classList.add("selected");
+          // Solo: the answer is submitted and we're waiting on the server.
+          if (isSoloMode && latestState.player?.answered) {
+            button.classList.add("verifying");
+          }
         }
 
         button.addEventListener("click", () => {
@@ -1556,6 +1590,20 @@
           });
         });
         answersEl.appendChild(button);
+      }
+
+      // Right below the buttons (where the student just tapped), a clear animated
+      // "we're verifying" cue so a slow response never looks frozen.
+      if (isSoloMode && latestState.status !== "REVIEWING" && latestState.player?.answered) {
+        const [t, s] = phaseMsg([
+          ["Verifying your answer", "Checking your choice and preparing your explanation, video, and mini-lesson…"],
+          ["Still working on it", "Thanks for your patience — almost ready! 🌟"],
+          ["Hang in there 🙏", "A slow connection can take a little longer. Your result is on the way!"]
+        ]);
+        const bar = document.createElement("div");
+        bar.className = "verify-bar";
+        bar.innerHTML = loadingBlock(t, s);
+        answersEl.appendChild(bar);
       }
     }
 
@@ -1661,14 +1709,9 @@
           }
           explanationEl.innerHTML = exp;
         } else if (isSoloMode && latestState.player?.answered) {
-          // Answer submitted; the server is resolving the explanation video and
-          // writing the step-by-step mini-lesson before it comes back.
-          const [t, s] = phaseMsg([
-            ["Great — marking your answer", "Finding a helpful video and writing your step-by-step mini-lesson. Hang tight! 📹📘"],
-            ["Still preparing your explanation", "Thanks for your patience — almost ready! 🌟"],
-            ["Hang in there 🙏", "A slow connection can take a little longer. Your video and mini-lesson are on the way!"]
-          ]);
-          explanationEl.innerHTML = loadingBlock(t, s);
+          // Answer submitted; the "verifying" cue is rendered in the answers area
+          // (on the tapped button + a bar right below it), so keep this clear.
+          explanationEl.innerHTML = "";
         } else {
           explanationEl.textContent = latestState.player?.answered
             ? "Answer sent. Waiting for other students or the timer."
