@@ -3823,6 +3823,19 @@ app.get("/solo/sessions/:id/progress", async (req, res) => {
     res.status(404).json({ error: "Solo session not found" });
     return;
   }
+  // If this session belongs to a logged-in student account, only that student —
+  // proving ownership with their token — may read their cross-subject progress.
+  // Anonymous / Telegram sessions have no account to authenticate against, so
+  // they stay readable via the session id (the same capability that already lets
+  // the holder answer the quiz and see the score).
+  if (session.studentUserId) {
+    const token = req.get("authorization")?.replace(/^Bearer\s+/i, "") || req.get("x-student-token") || "";
+    const claim = verifyStudentSession(token);
+    if (!claim || claim.sub !== session.studentUserId) {
+      res.status(403).json({ error: "Please sign in to view your progress." });
+      return;
+    }
+  }
   session.lastActivityAt = Date.now();
   try {
     const subjects = await getSubjectProgress(session.studentId);

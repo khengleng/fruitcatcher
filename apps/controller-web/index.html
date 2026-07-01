@@ -1201,7 +1201,8 @@
       const response = await fetch(`${gatewayHttpUrl}${path}`, {
         method: options.method || "GET",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          ...(options.headers || {})
         },
         body: options.body ? JSON.stringify(options.body) : undefined
       });
@@ -1710,11 +1711,18 @@
       if (progressShownFor === soloSessionId) return;
       progressShownFor = soloSessionId;
       progressEl.innerHTML = loadingBlock("Loading your progress", "Calculating your mastery by subject…");
+      // Send the student token so a logged-in student can view their own (gated)
+      // progress; anonymous sessions don't need it.
+      let studentTok = "";
+      try { studentTok = localStorage.getItem("fruitcatcher_student_token") || ""; } catch (e) {}
+      const opts = studentTok ? { headers: { "x-student-token": studentTok } } : {};
       try {
-        const data = await soloRequest(`/solo/sessions/${encodeURIComponent(soloSessionId)}/progress`);
+        const data = await soloRequest(`/solo/sessions/${encodeURIComponent(soloSessionId)}/progress`, opts);
         renderMasteryCards(progressEl, data.subjects || [], "Your progress by subject");
       } catch (e) {
-        progressEl.innerHTML = "";
+        progressEl.innerHTML = e.status === 403
+          ? '<p class="mastery-next" style="margin-top:8px;">Sign in to the Student Portal to see your progress by subject.</p>'
+          : "";
       }
     }
 
