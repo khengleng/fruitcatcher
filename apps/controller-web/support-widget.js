@@ -27,7 +27,11 @@
     + ".sw-btn svg{width:32px;height:32px;display:block;margin:0 auto;}"
     + ".sw-title{display:flex;align-items:center;gap:8px;}"
     + ".sw-avatar{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#ffd34f;flex:none;}"
-    + ".sw-avatar svg{width:18px;height:18px;display:block;}";
+    + ".sw-avatar svg{width:18px;height:18px;display:block;}"
+    + ".sw-row{display:flex;align-items:flex-end;gap:7px;max-width:92%;align-self:flex-start;}"
+    + ".sw-row .sw-msg{align-self:auto;max-width:calc(100% - 33px);}"
+    + ".sw-msg-avatar{flex:none;width:26px;height:26px;border-radius:50%;background:#ffd34f;display:inline-flex;align-items:center;justify-content:center;}"
+    + ".sw-msg-avatar svg{width:18px;height:18px;display:block;}";
   var style = document.createElement("style");
   style.textContent = css;
   document.head.appendChild(style);
@@ -68,12 +72,30 @@
   var input = panel.querySelector("#swInput");
   var sendBtn = panel.querySelector("#swSend");
 
-  function add(role, text) {
+  // A bot message: the robot avatar next to a left-aligned bubble.
+  function botRow(text) {
+    var row = document.createElement("div");
+    row.className = "sw-row";
+    row.innerHTML = '<div class="sw-msg-avatar">' + botIcon + '</div>';
     var el = document.createElement("div");
-    el.className = "sw-msg " + (role === "user" ? "sw-user" : "sw-bot");
+    el.className = "sw-msg sw-bot";
     el.textContent = text;
-    body.appendChild(el);
+    row.appendChild(el);
+    return row;
+  }
+
+  function add(role, text) {
+    var node;
+    if (role === "user") {
+      node = document.createElement("div");
+      node.className = "sw-msg sw-user";
+      node.textContent = text;
+    } else {
+      node = botRow(text);
+    }
+    body.appendChild(node);
     body.scrollTop = body.scrollHeight;
+    return node;
   }
 
   var greeted = false;
@@ -107,9 +129,7 @@
     input.value = "";
     add("user", text);
     history.push({ role: "user", content: text });
-    var typing = document.createElement("div");
-    typing.className = "sw-msg sw-bot";
-    typing.textContent = "…";
+    var typing = botRow("…");
     body.appendChild(typing);
     body.scrollTop = body.scrollHeight;
     try {
