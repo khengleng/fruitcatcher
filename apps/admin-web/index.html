@@ -992,6 +992,11 @@
         <h2>Question Bank</h2>
         <p class="muted">Manage custom quiz questions for all subjects and grade levels.</p>
 
+        <h3 style="margin-top:16px;">🕵️ Review queue <span id="reviewCount" class="muted"></span></h3>
+        <p class="muted" style="font-size:13px;">AI-generated questions await approval before students see them. Approve good ones; reject the rest.</p>
+        <div class="row" style="gap:10px; margin:8px 0;"><button id="loadReviewBtn" class="secondary">Load review queue</button></div>
+        <div id="reviewQueue"></div>
+
         <div class="filter-grid" style="margin-top:14px;">
           <label>
             Subject Filter
@@ -2448,6 +2453,41 @@
     // Question Bank Functions
     let allQuestions = [];
     let editingQuestionId = null;
+
+    async function loadReviewQueue() {
+      const host = document.getElementById("reviewQueue");
+      host.innerHTML = "<p class='muted'>Loading…</p>";
+      try {
+        const data = await api("/admin/questions/pending");
+        const qs = data.questions || [];
+        document.getElementById("reviewCount").textContent = qs.length ? `(${qs.length} pending)` : "(none pending)";
+        if (!qs.length) { host.innerHTML = "<p class='muted'>Nothing to review — all clear. ✅</p>"; return; }
+        host.innerHTML = "";
+        qs.forEach((q) => {
+          const choices = (Array.isArray(q.choices) ? q.choices : []).map((c) =>
+            `<div style="${c.id === q.correct_choice ? "color:#1f8b58;font-weight:700;" : ""}">${escapeForHtml(c.id)}. ${escapeForHtml(c.text)}</div>`).join("");
+          const card = document.createElement("div");
+          card.className = "assignment";
+          card.style.marginTop = "10px";
+          card.innerHTML = `<div class="meta">${escapeForHtml(q.subject)} · Grade ${q.grade_level} · ${escapeForHtml(q.curriculum)} · ${escapeForHtml(q.language)}</div>`
+            + `<div style="font-weight:700;margin:4px 0;">${escapeForHtml(q.prompt)}</div>${choices}`
+            + `<div class="muted" style="font-size:13px;margin-top:6px;">${escapeForHtml(q.short_explanation || "")}</div>`
+            + `<div class="row" style="gap:10px;margin-top:10px;"><button data-approve="${escapeForHtml(q.id)}">Approve</button><button class="secondary" data-reject="${escapeForHtml(q.id)}">Reject</button></div>`;
+          card.querySelector("button[data-approve]").addEventListener("click", (e) => reviewQuestion(e.currentTarget.getAttribute("data-approve"), "approve", card));
+          card.querySelector("button[data-reject]").addEventListener("click", (e) => reviewQuestion(e.currentTarget.getAttribute("data-reject"), "reject", card));
+          host.appendChild(card);
+        });
+      } catch (e) { host.innerHTML = `<p class='muted' style='color:#a33d3d;'>${escapeForHtml(e.message)}</p>`; }
+    }
+    async function reviewQuestion(id, action, card) {
+      try {
+        card.querySelectorAll("button").forEach((b) => b.disabled = true);
+        await api(`/admin/questions/${encodeURIComponent(id)}/review`, { method: "POST", body: JSON.stringify({ action }) });
+        card.remove();
+        loadReviewQueue();
+      } catch (e) { card.querySelectorAll("button").forEach((b) => b.disabled = false); }
+    }
+    document.getElementById("loadReviewBtn").addEventListener("click", loadReviewQueue);
 
     async function loadQuestions() {
       try {

@@ -2400,6 +2400,12 @@ async function initDatabase() {
     )
   `);
 
+  // Human-in-the-loop review for question-bank questions. Existing rows default
+  // to 'approved' (unchanged behaviour); new AI-generated bank questions land as
+  // 'pending' and are only served once a teacher approves.
+  await dbQueryRequired("ALTER TABLE question_bank ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 'approved'");
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_question_bank_review ON question_bank(review_status, subject, grade_level)");
+
   // Teacher-owned classrooms, their roster, and assigned quizzes.
   await dbQueryRequired(`
     CREATE TABLE IF NOT EXISTS classrooms (
@@ -6238,6 +6244,31 @@ app.delete("/parent/tasks/:taskId", requireParent, async (req, res) => {
   }
 });
 
+// Account recovery for young learners: a linked parent can set their child's
+// password (and force-logout their old sessions). No email needed.
+app.post("/parent/children/:studentId/reset-password", requireParent, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    if (!(await parentOwnsChild(req.parentUser.sub, req.params.studentId))) {
+      res.status(403).json({ error: "You're not linked to this child." });
+      return;
+    }
+    const newPassword = String(req.body?.newPassword || "");
+    if (newPassword.length < 6) {
+      res.status(400).json({ error: "Password must be at least 6 characters." });
+      return;
+    }
+    await dbQueryRequired(
+      "UPDATE student_users SET password_hash = $1, token_version = token_version + 1 WHERE id = $2",
+      [hashPassword(newPassword), req.params.studentId]
+    );
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Parent reset child password failed:", error);
+    res.status(500).json({ error: "Could not reset password" });
+  }
+});
+
 // ---- Student side: generate a parent-link code + see parent tasks ----
 app.post("/student/link-code", requireStudent, async (req, res) => {
   if (!requireDatabase(res)) return;
@@ -7364,8 +7395,8 @@ app.post("/admin/questions/bulk", requireAdmin, async (req, res) => {
         await dbQueryRequired(
           `INSERT INTO question_bank (
             id, curriculum, language, subject, grade_level, difficulty_mode,
-            prompt, choices, correct_choice, short_explanation, elaboration, created_by
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12)`,
+            prompt, choices, correct_choice, short_explanation, elaboration, created_by, review_status
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, 'pending')`,
           [questionId, question.curriculum, question.language, question.subject, question.gradeLevel, question.difficultyMode, question.prompt, JSON.stringify(question.choices), question.correctChoice, question.shortExplanation, question.elaboration, getAdminUsername(req)]
         );
         saved += 1;
@@ -7379,6 +7410,39 @@ app.post("/admin/questions/bulk", requireAdmin, async (req, res) => {
   } catch (error) {
     console.error("Bulk question save failed:", error);
     res.status(500).json({ error: "Could not save questions" });
+  }
+});
+
+// Review queue: AI-generated bank questions awaiting a teacher's approval.
+app.get("/admin/questions/pending", requireAdmin, async (_req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const r = await dbQueryRequired(
+      `SELECT id, subject, grade_level, curriculum, language, prompt, choices, correct_choice, short_explanation, created_at
+       FROM question_bank WHERE review_status = 'pending' ORDER BY created_at DESC LIMIT 100`
+    );
+    res.json({ ok: true, questions: r.rows });
+  } catch (error) {
+    console.error("List pending failed:", error);
+    res.status(500).json({ error: "Could not load the review queue" });
+  }
+});
+
+app.post("/admin/questions/:id/review", requireAdmin, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const action = req.body?.action === "approve" ? "approve" : (req.body?.action === "reject" ? "reject" : null);
+    if (!action) { res.status(400).json({ error: "action must be 'approve' or 'reject'" }); return; }
+    if (action === "approve") {
+      await dbQueryRequired("UPDATE question_bank SET review_status = 'approved' WHERE id = $1", [req.params.id]);
+    } else {
+      await dbQueryRequired("UPDATE question_bank SET review_status = 'rejected', is_active = FALSE WHERE id = $1", [req.params.id]);
+    }
+    await logAuditAction("question.review", "question_bank", req.params.id, { action }, req);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Review question failed:", error);
+    res.status(500).json({ error: "Could not update the question" });
   }
 });
 
@@ -8429,6 +8493,7 @@ async function getQuestionBankQuestion(room) {
     `SELECT id, prompt, choices, correct_choice, short_explanation, elaboration, subject
      FROM question_bank
      WHERE is_active = TRUE
+       AND review_status = 'approved'
        AND curriculum = $1
        AND language = $2
        AND subject = $3

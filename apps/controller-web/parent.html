@@ -153,6 +153,14 @@
 
         <h3 style="margin:20px 0 0; font-size:15px; color:var(--accent);" data-i18n="parent.assignedTasks">Assigned tasks</h3>
         <div id="childTasks"></div>
+
+        <h3 style="margin:20px 0 0; font-size:15px; color:var(--accent);">Reset password</h3>
+        <p class="muted" style="font-size:13px; margin:2px 0 6px;">If your child forgot their password, set a new one and tell it to them (it also signs them out everywhere).</p>
+        <div class="row">
+          <input id="resetPass" type="text" placeholder="New password (min 6)" style="flex:1;">
+          <button id="resetBtn" class="secondary">Reset</button>
+        </div>
+        <div class="status" id="resetStatus"></div>
       </div>
     </section>
   </main>
@@ -160,6 +168,7 @@
   <script src="./config.js"></script>
   <script src="./i18n.js"></script>
   <script src="./support-widget.js"></script>
+  <script>if ("serviceWorker" in navigator) { navigator.serviceWorker.register("/sw.js").catch(function () {}); }</script>
   <script>
     const config = window.FRUIT_CATCHER_CONFIG || {};
     const gatewayUrl = config.gatewayHttpUrl || "http://localhost:3000";
@@ -440,6 +449,21 @@
       } catch (e) {
         if (/sign in/i.test(e.message)) { localStorage.removeItem(TOKEN_KEY); showSignedOut(); return; }
         setStatus($("assignStatus"), e.message, "#ff9b7d");
+      }
+    });
+
+    $("resetBtn").addEventListener("click", async () => {
+      if (!selectedChild) return;
+      const pw = $("resetPass").value;
+      if (!pw || pw.length < 6) { setStatus($("resetStatus"), "Password must be at least 6 characters.", "#ff9b7d"); return; }
+      try {
+        setStatus($("resetStatus"), "Resetting…", "var(--accent)");
+        await apiPost("/parent/children/" + encodeURIComponent(selectedChild.studentUserId) + "/reset-password", { newPassword: pw }, true);
+        $("resetPass").value = "";
+        setStatus($("resetStatus"), "Done ✓ Tell " + selectedChild.displayName + " their new password.", "var(--accent2)");
+      } catch (e) {
+        if (/sign in/i.test(e.message)) { localStorage.removeItem(TOKEN_KEY); showSignedOut(); return; }
+        setStatus($("resetStatus"), e.message, "#ff9b7d");
       }
     });
 

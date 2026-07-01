@@ -153,6 +153,7 @@
   <script src="./config.js"></script>
   <script src="./i18n.js"></script>
   <script src="./support-widget.js"></script>
+  <script>if ("serviceWorker" in navigator) { navigator.serviceWorker.register("/sw.js").catch(function () {}); }</script>
   <script>
     const config = window.FRUIT_CATCHER_CONFIG || {};
     const gatewayUrl = config.gatewayHttpUrl || "http://localhost:3000";
