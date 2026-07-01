@@ -3496,7 +3496,11 @@ async function persistSoloAnswer(session, result) {
         session.studentId,
         session.config.curriculum,
         session.config.language,
-        session.currentQuestion?.subject || session.config.subject,
+        // Key on the subject the student SELECTED (matches solo_sessions.subject
+        // and the recent-trend join in getSubjectProgress). Using the model's
+        // echoed subject here could split a subject across two progress rows and
+        // silently break the trend.
+        session.config.subject,
         session.config.gradeLevel,
         result.isCorrect ? 1 : 0
       ]
@@ -7182,6 +7186,13 @@ function courseDetailIsComplete(detail) {
   );
 }
 
+// Usable = structurally complete AND free of notation that won't render cleanly.
+// Bank/fallback lessons are generated after the question's own notation check, so
+// this applies the same UNRENDERABLE_NOTATION guardrail to them before display.
+function courseDetailUsable(detail) {
+  return courseDetailIsComplete(detail) && notationRenders({ courseDetail: detail });
+}
+
 // Relevance guardrail for the course lesson — the counterpart to the video
 // relevance judge. Confirms the lesson teaches THIS question, is correct, on
 // grade level, and in the right language before it is shown.
@@ -7274,10 +7285,10 @@ async function ensureCourseDetail(question, config) {
   if (!question) return null;
 
   async function candidate() {
-    if (courseDetailIsComplete(question.courseDetail)) return question.courseDetail;
+    if (courseDetailUsable(question.courseDetail)) return question.courseDetail;
     try {
       const detail = await generateCourseDetail(question, config);
-      return courseDetailIsComplete(detail) ? detail : null;
+      return courseDetailUsable(detail) ? detail : null;
     } catch (error) {
       console.error("Course detail generation failed:", error.message);
       return null;
@@ -7296,7 +7307,7 @@ async function ensureCourseDetail(question, config) {
     } catch (error) {
       console.error("Course detail regeneration failed:", error.message);
     }
-    const retryOk = courseDetailIsComplete(retry) &&
+    const retryOk = courseDetailUsable(retry) &&
       (await judgeCourseDetail(question, retry, config)) !== false;
     if (!retryOk) { question.courseDetail = null; return null; }
     detail = retry;
