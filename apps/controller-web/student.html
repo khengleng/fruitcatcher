@@ -59,6 +59,19 @@
     .mastery-bar > span { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--accent2), var(--accent)); }
     .mastery-next { margin-top: 6px; font-size: 12px; color: var(--muted); }
     .mastery-maxed { margin-top: 6px; font-size: 12px; color: var(--accent2); font-weight: 700; }
+    .engage { display: flex; gap: 10px; flex-wrap: wrap; }
+    .engage .stat { flex: 1; min-width: 92px; text-align: center; border: 1px solid var(--line); border-radius: 14px; padding: 12px 8px; background: rgba(255,255,255,0.04); }
+    .engage .big { font-size: 22px; font-weight: 800; }
+    .engage .lbl { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .engage .streak .big { color: #ff9b57; }
+    .engage .xp .big { color: var(--accent); }
+    .engage .goal .big { color: var(--accent2); }
+    .goalbar { margin-top: 6px; height: 6px; border-radius: 5px; background: rgba(255,255,255,0.12); overflow: hidden; }
+    .goalbar > span { display: block; height: 100%; background: var(--accent2); }
+    .mistake-card { border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin-top: 10px; background: rgba(152,68,80,0.10); }
+    .mistake-card .q { font-weight: 700; }
+    .mistake-card .ans { font-size: 13px; color: var(--muted); margin-top: 6px; }
+    .mistake-card .ok { color: var(--accent2); font-weight: 700; }
   </style>
 </head>
 <body>
@@ -108,8 +121,13 @@
       <div id="tasks"></div>
 
       <h2 style="font-size:18px; margin:22px 0 6px;">My progress</h2>
-      <p class="muted" style="font-size:13px; margin:0 0 4px;">Your mastery grows as you practise. Keep answering to level up each subject.</p>
+      <div id="engagement"></div>
+      <div class="row" id="practiceRow" style="margin:10px 0 4px;"></div>
       <div id="progress"></div>
+
+      <h2 style="font-size:18px; margin:22px 0 6px;">Review your mistakes</h2>
+      <div class="row"><button id="mistakesBtn" class="secondary">Show my recent mistakes</button></div>
+      <div id="mistakes" style="margin-top:6px;"></div>
 
       <h2 style="font-size:18px; margin:22px 0 0;">Your quizzes</h2>
       <div id="assignments"></div>
@@ -346,17 +364,76 @@
         + `</div>`;
     }
 
+    function engagementHTML(e) {
+      if (!e) return "";
+      const pct = Math.min(100, Math.round((e.today.questions / Math.max(1, e.today.goal)) * 100));
+      return `<div class="engage">
+        <div class="stat streak"><div class="big">🔥 ${e.streakDays}</div><div class="lbl">day streak</div></div>
+        <div class="stat xp"><div class="big">⭐ ${e.level}</div><div class="lbl">Level · ${e.xpTotal} XP</div></div>
+        <div class="stat goal"><div class="big">${e.today.questions}/${e.today.goal}</div><div class="lbl">${e.today.goalMet ? "goal done! ✅" : "today's goal"}</div>
+          <div class="goalbar"><span style="width:${pct}%"></span></div></div>
+      </div>`;
+    }
+
+    // Pick the lowest-accuracy subject with enough practice to be meaningful.
+    function weakestSubject(subjects) {
+      const eligible = (subjects || []).filter((s) => (s.questions || 0) >= 3);
+      if (!eligible.length) return null;
+      return eligible.slice().sort((a, b) => (a.accuracy || 0) - (b.accuracy || 0))[0];
+    }
+
+    function practiceUrl(s) {
+      const p = new URLSearchParams({
+        mode: "solo", source: "smart_practice",
+        curriculum: "cambodia_moeys", language: "khmer",
+        subject: s.subject, grade: "6", count: "10", name: localStorage.getItem(NAME_KEY) || ""
+      });
+      return "/?" + p.toString();
+    }
+
     async function loadProgress() {
       const host = $("progress");
       host.innerHTML = "<p class='muted'>Loading your progress…</p>";
+      $("engagement").innerHTML = "";
+      $("practiceRow").innerHTML = "";
       try {
         const data = await apiGet("/student/progress");
         const subjects = data.subjects || [];
+        $("engagement").innerHTML = engagementHTML(data.engagement);
+        const weak = weakestSubject(subjects);
+        if (weak) {
+          const btn = document.createElement("button");
+          btn.textContent = "🎯 Practise your weakest: " + escapeHtml(weak.subjectLabel || weak.subject) + " (" + (weak.accuracy || 0) + "%)";
+          btn.addEventListener("click", () => { window.location.href = practiceUrl(weak); });
+          $("practiceRow").appendChild(btn);
+        }
         if (!subjects.length) {
           host.innerHTML = "<p class='muted'>No progress yet — take a quiz to start growing your subject mastery. 🌱</p>";
           return;
         }
         host.innerHTML = subjects.map(masteryCardHTML).join("");
+      } catch (e) {
+        if (/sign in/i.test(e.message)) { localStorage.removeItem(TOKEN_KEY); showSignedOut(); return; }
+        host.innerHTML = `<p class='muted' style='color:#ff9b7d;'>${escapeHtml(e.message)}</p>`;
+      }
+    }
+
+    $("mistakesBtn").addEventListener("click", loadMistakes);
+    async function loadMistakes() {
+      const host = $("mistakes");
+      host.innerHTML = "<p class='muted'>Loading…</p>";
+      try {
+        const data = await apiGet("/student/mistakes");
+        const items = data.mistakes || [];
+        if (!items.length) { host.innerHTML = "<p class='muted'>No mistakes to review — great job! 🎉</p>"; return; }
+        host.innerHTML = items.map((m) => {
+          const correct = (m.choices || []).find((c) => c.id === m.correctChoice);
+          return `<div class="mistake-card">
+            <div class="q">${escapeHtml(m.prompt)}</div>
+            <div class="ans">Your answer: ${escapeHtml(m.yourChoice || "—")} · Correct: <span class="ok">${escapeHtml(m.correctChoice)}${correct ? " · " + escapeHtml(correct.text) : ""}</span></div>
+            ${m.shortExplanation ? `<div class="ans">${escapeHtml(m.shortExplanation)}</div>` : ""}
+          </div>`;
+        }).join("");
       } catch (e) {
         if (/sign in/i.test(e.message)) { localStorage.removeItem(TOKEN_KEY); showSignedOut(); return; }
         host.innerHTML = `<p class='muted' style='color:#ff9b7d;'>${escapeHtml(e.message)}</p>`;

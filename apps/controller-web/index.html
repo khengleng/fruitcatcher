@@ -354,6 +354,14 @@
       50% { box-shadow: 0 0 0 4px rgba(255, 211, 79, 0.22); }
     }
     .verify-bar { margin-top: 12px; }
+    .read-aloud {
+      display: inline-flex; align-items: center; gap: 6px;
+      margin: 0 0 10px; padding: 8px 14px;
+      background: rgba(105, 230, 166, 0.14);
+      border: 1px solid rgba(105, 230, 166, 0.4);
+      color: #69e6a6; font-weight: 800; font-size: 14px; border-radius: 999px; cursor: pointer;
+    }
+    .read-aloud.speaking { background: rgba(255, 211, 79, 0.16); border-color: rgba(255,211,79,0.5); color: #ffd34f; }
     @media (prefers-reduced-motion: reduce) {
       .answer-btn.verifying, .answer-btn.verifying::after { animation: none; }
     }
@@ -803,6 +811,7 @@
         <span id="scoreMeta">Score 0</span>
       </div>
       <p id="questionText" class="question">Join a room to begin.</p>
+      <button id="readAloudBtn" class="read-aloud" hidden aria-label="Read aloud">🔊 Read aloud</button>
       <div id="answers" class="answers"></div>
       <div id="hostActions" class="footer-actions" hidden>
         <button id="startButton" disabled>Start Quiz</button>
@@ -859,6 +868,7 @@
     const questionTextEl = document.getElementById("questionText");
     const answersEl = document.getElementById("answers");
     const explanationEl = document.getElementById("explanation");
+    const readAloudBtn = document.getElementById("readAloudBtn");
     const progressEl = document.getElementById("soloProgress");
     const resultsEl = document.getElementById("results");
     const leaderboardEl = document.getElementById("leaderboard");
@@ -1665,6 +1675,44 @@
       return stages[Math.min(loadingPhase, stages.length - 1)];
     }
 
+    // ---- Read aloud (Web Speech API) — accessibility & early readers ----
+    let speaking = false;
+    function speechSupported() { return typeof window !== "undefined" && "speechSynthesis" in window; }
+    function readAloudText() {
+      if (!latestState) return "";
+      const parts = [];
+      if (latestState.question && latestState.question.prompt) parts.push(latestState.question.prompt);
+      if (latestState.status === "REVIEWING") {
+        if (latestState.shortExplanation) parts.push(latestState.shortExplanation);
+        if (latestState.elaboration) parts.push(latestState.elaboration);
+      } else if (latestState.question && Array.isArray(latestState.question.choices)) {
+        latestState.question.choices.forEach((c) => parts.push(c.id + ". " + c.text));
+      }
+      return parts.join(". ").replace(/[*_#`^~]/g, "").slice(0, 2000);
+    }
+    function resetReadAloud() {
+      if (speechSupported()) window.speechSynthesis.cancel();
+      speaking = false;
+      if (readAloudBtn) { readAloudBtn.classList.remove("speaking"); readAloudBtn.textContent = "🔊 Read aloud"; }
+    }
+    function readAloud() {
+      if (!speechSupported()) return;
+      if (speaking) { resetReadAloud(); return; }
+      const text = readAloudText();
+      if (!text) return;
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = (latestState && latestState.config && latestState.config.language === "khmer") ? "km-KH" : "en-US";
+      u.rate = 0.95;
+      u.onend = resetReadAloud;
+      u.onerror = resetReadAloud;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(u);
+      speaking = true;
+      readAloudBtn.classList.add("speaking");
+      readAloudBtn.textContent = "⏹ Stop";
+    }
+    if (readAloudBtn) readAloudBtn.addEventListener("click", readAloud);
+
     // ---- Progress by subject (mastery levels + growth) ----
     function escapeHtmlText(v) {
       return String(v == null ? "" : v)
@@ -1698,10 +1746,26 @@
         + `</div>`;
     }
 
-    function renderMasteryCards(host, subjects, title) {
+    function engagementBanner(e) {
+      if (!e) return "";
+      const pct = Math.min(100, Math.round((e.today.questions / Math.max(1, e.today.goal)) * 100));
+      const cell = (big, lbl, color) => `<div style="flex:1;min-width:92px;text-align:center;border:1px solid var(--line);border-radius:14px;padding:12px 8px;background:rgba(255,255,255,0.04);">`
+        + `<div style="font-size:22px;font-weight:800;color:${color};">${big}</div><div style="font-size:12px;color:var(--muted);margin-top:2px;">${lbl}</div></div>`;
+      return `<div style="display:flex;gap:10px;flex-wrap:wrap;margin:2px 0 12px;">`
+        + cell("🔥 " + e.streakDays, "day streak", "#ff9b57")
+        + cell("⭐ " + e.level, e.xpTotal + " XP", "var(--accent)")
+        + cell(e.today.questions + "/" + e.today.goal, e.today.goalMet ? "goal done! ✅" : "today's goal", "var(--accent2)")
+        + `</div><div class="mastery-bar" style="margin:-6px 0 12px;"><span style="width:${pct}%"></span></div>`;
+    }
+
+    function renderMasteryCards(host, subjects, title, engagement) {
       if (!host) return;
-      if (!subjects || !subjects.length) { host.innerHTML = ""; return; }
-      host.innerHTML = `<div class="progress-title">${escapeHtmlText(title || "Your progress by subject")}</div>`
+      const eng = engagement ? engagementBanner(engagement) : "";
+      if (!subjects || !subjects.length) {
+        host.innerHTML = eng ? `<div class="progress-title">${escapeHtmlText(title || "Your progress")}</div>${eng}` : "";
+        return;
+      }
+      host.innerHTML = `<div class="progress-title">${escapeHtmlText(title || "Your progress by subject")}</div>${eng}`
         + subjects.map(masteryCardHTML).join("");
     }
 
@@ -1719,7 +1783,7 @@
       const opts = studentTok ? { headers: { "x-student-token": studentTok } } : {};
       try {
         const data = await soloRequest(`/solo/sessions/${encodeURIComponent(soloSessionId)}/progress`, opts);
-        renderMasteryCards(progressEl, data.subjects || [], "Your progress by subject");
+        renderMasteryCards(progressEl, data.subjects || [], "Your progress by subject", data.engagement);
       } catch (e) {
         progressEl.innerHTML = e.status === 403
           ? '<p class="mastery-next" style="margin-top:8px;">Sign in to the Student Portal to see your progress by subject.</p>'
@@ -1762,6 +1826,14 @@
       // Progress-by-subject only shows on the solo "quiz complete" screen.
       if (progressEl && !(isSoloMode && latestState.status === "FINISHED")) {
         progressEl.innerHTML = "";
+      }
+
+      // Read-aloud is available while a question or its review is on screen.
+      if (readAloudBtn) {
+        const canRead = speechSupported() && latestState.question &&
+          (latestState.status === "ANSWERING" || latestState.status === "REVIEWING");
+        readAloudBtn.hidden = !canRead;
+        if (!canRead) resetReadAloud();
       }
 
       if (latestState.status === "LOADING") {

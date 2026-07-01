@@ -2349,6 +2349,19 @@ async function initDatabase() {
   await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_parent_tasks_student ON parent_tasks(student_user_id, status, created_at DESC)");
   await dbQueryRequired("ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS parent_task_id TEXT");
 
+  // Daily activity per learner identity — powers streaks, XP, and daily goals.
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS student_daily_activity (
+      student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      day DATE NOT NULL,
+      questions INTEGER NOT NULL DEFAULT 0,
+      correct INTEGER NOT NULL DEFAULT 0,
+      xp INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (student_id, day)
+    )
+  `);
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_daily_activity_student ON student_daily_activity(student_id, day DESC)");
+
   // Teacher-owned classrooms, their roster, and assigned quizzes.
   await dbQueryRequired(`
     CREATE TABLE IF NOT EXISTS classrooms (
@@ -3693,9 +3706,69 @@ async function persistSoloAnswer(session, result) {
         result.isCorrect ? 1 : 0
       ]
     );
+
+    // Daily activity for streaks/XP/daily goal (+10 XP correct, +3 for trying).
+    // Keyed to Cambodia local day so streaks roll over at local midnight.
+    await dbQuery(
+      `INSERT INTO student_daily_activity (student_id, day, questions, correct, xp)
+       VALUES ($1, (NOW() AT TIME ZONE 'Asia/Phnom_Penh')::date, 1, $2, $3)
+       ON CONFLICT (student_id, day) DO UPDATE
+         SET questions = student_daily_activity.questions + 1,
+             correct = student_daily_activity.correct + EXCLUDED.correct,
+             xp = student_daily_activity.xp + EXCLUDED.xp`,
+      [session.studentId, result.isCorrect ? 1 : 0, result.isCorrect ? 10 : 3]
+    );
   }
 
   await persistSoloSessionStatus(session);
+}
+
+// XP → level curve: 100 XP per level, so it never plateaus.
+const DAILY_GOAL_QUESTIONS = Number(process.env.DAILY_GOAL_QUESTIONS || 20);
+function xpLevel(xp) {
+  return Math.floor((Number(xp) || 0) / 100) + 1;
+}
+
+// Streak = consecutive local days (ending today or yesterday) with activity, plus
+// today's totals and lifetime XP/level. Read from the recent daily rows.
+async function getEngagement(studentDbId) {
+  const empty = { xpTotal: 0, level: 1, streakDays: 0, today: { questions: 0, correct: 0, xp: 0, goal: DAILY_GOAL_QUESTIONS, goalMet: false } };
+  if (!db || !studentDbId) return empty;
+  const res = await dbQuery(
+    `SELECT to_char(day, 'YYYY-MM-DD') AS day, questions, correct, xp
+     FROM student_daily_activity WHERE student_id = $1 ORDER BY day DESC LIMIT 400`,
+    [studentDbId]
+  );
+  const rows = res?.rows || [];
+  if (!rows.length) return empty;
+  const totRes = await dbQuery("SELECT COALESCE(SUM(xp),0)::int AS xp FROM student_daily_activity WHERE student_id = $1", [studentDbId]);
+  const xpTotal = Number(totRes?.rows?.[0]?.xp) || 0;
+  const days = new Set(rows.filter((r) => Number(r.questions) > 0).map((r) => r.day));
+  // Local "today" in Cambodia, derived without Date.now (server may be UTC).
+  const nowRes = await dbQuery("SELECT to_char((NOW() AT TIME ZONE 'Asia/Phnom_Penh')::date, 'YYYY-MM-DD') AS today");
+  const todayStr = nowRes?.rows?.[0]?.today || rows[0].day;
+  const todayRow = rows.find((r) => r.day === todayStr) || { questions: 0, correct: 0, xp: 0 };
+  // Count back from today (or yesterday if nothing today yet) day by day.
+  let streak = 0;
+  const cursor = new Date(todayStr + "T00:00:00Z");
+  if (!days.has(todayStr)) cursor.setUTCDate(cursor.getUTCDate() - 1); // grace: streak intact until end of today
+  for (let i = 0; i < 400; i += 1) {
+    const key = cursor.toISOString().slice(0, 10);
+    if (days.has(key)) { streak += 1; cursor.setUTCDate(cursor.getUTCDate() - 1); } else break;
+  }
+  const qToday = Number(todayRow.questions) || 0;
+  return {
+    xpTotal,
+    level: xpLevel(xpTotal),
+    streakDays: streak,
+    today: {
+      questions: qToday,
+      correct: Number(todayRow.correct) || 0,
+      xp: Number(todayRow.xp) || 0,
+      goal: DAILY_GOAL_QUESTIONS,
+      goalMet: qToday >= DAILY_GOAL_QUESTIONS
+    }
+  };
 }
 
 // ===== Progress by subject: mastery levels + growth trend =====
@@ -4030,8 +4103,11 @@ app.get("/solo/sessions/:id/progress", async (req, res) => {
   }
   session.lastActivityAt = Date.now();
   try {
-    const subjects = await getSubjectProgress(session.studentId);
-    res.json({ ok: true, subjects });
+    const [subjects, engagement] = await Promise.all([
+      getSubjectProgress(session.studentId),
+      getEngagement(session.studentId)
+    ]);
+    res.json({ ok: true, subjects, engagement });
   } catch (error) {
     console.error("Solo progress failed:", error);
     res.status(500).json({ error: "Could not load your progress." });
@@ -5755,11 +5831,48 @@ app.get("/student/progress", requireStudent, async (req, res) => {
   try {
     const row = await dbQuery("SELECT id FROM students WHERE client_id = $1", [`solo:student:${req.studentUser.sub}`]);
     const studentDbId = row?.rows?.[0]?.id || null;
-    const subjects = studentDbId ? await getSubjectProgress(studentDbId) : [];
-    res.json({ ok: true, subjects });
+    const [subjects, engagement] = await Promise.all([
+      studentDbId ? getSubjectProgress(studentDbId) : [],
+      studentDbId ? getEngagement(studentDbId) : null
+    ]);
+    res.json({ ok: true, subjects, engagement });
   } catch (error) {
     console.error("Student progress failed:", error);
     res.status(500).json({ error: "Could not load your progress" });
+  }
+});
+
+// Recent wrong answers so a student can review and learn from mistakes.
+app.get("/student/mistakes", requireStudent, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const row = await dbQuery("SELECT id FROM students WHERE client_id = $1", [`solo:student:${req.studentUser.sub}`]);
+    const studentDbId = row?.rows?.[0]?.id || null;
+    if (!studentDbId) { res.json({ ok: true, mistakes: [] }); return; }
+    const r = await dbQueryRequired(
+      `SELECT sa.prompt, sa.choices, sa.correct_choice, sa.choice, sa.short_explanation, sa.elaboration, ss.subject, sa.answered_at
+       FROM solo_answers sa JOIN solo_sessions ss ON ss.id = sa.solo_session_id
+       WHERE sa.student_id = $1 AND sa.is_correct = FALSE
+       ORDER BY sa.answered_at DESC LIMIT 20`,
+      [studentDbId]
+    );
+    res.json({
+      ok: true,
+      mistakes: r.rows.map((m) => ({
+        prompt: m.prompt,
+        choices: m.choices,
+        correctChoice: m.correct_choice,
+        yourChoice: m.choice,
+        shortExplanation: m.short_explanation,
+        elaboration: m.elaboration,
+        subject: m.subject,
+        subjectLabel: m.subject ? getSubjectLabel(m.subject) : null,
+        answeredAt: m.answered_at
+      }))
+    });
+  } catch (error) {
+    console.error("Student mistakes failed:", error);
+    res.status(500).json({ error: "Could not load your mistakes" });
   }
 });
 
@@ -5917,8 +6030,11 @@ app.get("/parent/children/:studentId/progress", requireParent, async (req, res) 
     }
     const row = await dbQuery("SELECT id FROM students WHERE client_id = $1", [`solo:student:${req.params.studentId}`]);
     const studentDbId = row?.rows?.[0]?.id || null;
-    const subjects = studentDbId ? await getSubjectProgress(studentDbId) : [];
-    res.json({ ok: true, subjects });
+    const [subjects, engagement] = await Promise.all([
+      studentDbId ? getSubjectProgress(studentDbId) : [],
+      studentDbId ? getEngagement(studentDbId) : null
+    ]);
+    res.json({ ok: true, subjects, engagement });
   } catch (error) {
     console.error("Parent child progress failed:", error);
     res.status(500).json({ error: "Could not load progress" });

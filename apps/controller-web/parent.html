@@ -313,13 +313,25 @@
         + `<div class="mastery-meta"><span><b>${s.accuracy||0}%</b> accuracy</span><span>${s.questions||0} questions</span>${trend}</div>${nextLine}</div>`;
     }
 
+    function engagementBanner(e) {
+      if (!e) return "";
+      const cell = (big, lbl, color) => `<div style="flex:1;min-width:92px;text-align:center;border:1px solid var(--line);border-radius:14px;padding:12px 8px;background:rgba(255,255,255,0.04);">`
+        + `<div style="font-size:22px;font-weight:800;color:${color};">${big}</div><div style="font-size:12px;color:var(--muted);margin-top:2px;">${lbl}</div></div>`;
+      return `<div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 4px;">`
+        + cell("🔥 " + e.streakDays, "day streak", "#ff9b57")
+        + cell("⭐ " + e.level, e.xpTotal + " XP", "var(--accent)")
+        + cell(e.today.questions + "/" + e.today.goal, e.today.goalMet ? "goal done! ✅" : "today's goal", "var(--accent2)")
+        + `</div>`;
+    }
+
     async function loadChildProgress() {
       const host = $("childProgress");
       host.innerHTML = "<p class='muted'>Loading…</p>";
       try {
         const data = await apiGet("/parent/children/" + encodeURIComponent(selectedChild.studentUserId) + "/progress");
         const subjects = data.subjects || [];
-        host.innerHTML = subjects.length ? subjects.map(masteryCardHTML).join("") : "<p class='muted'>No practice yet. Assign a quiz task to get started. 🌱</p>";
+        const eng = engagementBanner(data.engagement);
+        host.innerHTML = eng + (subjects.length ? subjects.map(masteryCardHTML).join("") : "<p class='muted'>No practice yet. Assign a quiz task to get started. 🌱</p>");
       } catch (e) {
         if (/sign in/i.test(e.message)) { localStorage.removeItem(TOKEN_KEY); showSignedOut(); return; }
         host.innerHTML = `<p class='muted' style='color:#ff9b7d;'>${escapeHtml(e.message)}</p>`;
