@@ -1425,11 +1425,15 @@ function questionMatchesLanguage(question, language) {
 const UNRENDERABLE_NOTATION = /\\(begin|end|int|iint|oint|sum|prod|coprod|lim|partial|nabla|matrix|pmatrix|bmatrix|vmatrix|array|cases|align|text|mbox|mathbb|mathrm|mathcal|mathbf|mathit|overline|underline|overrightarrow|overbrace|underbrace|vec|hat|tilde|bar|dot|ddot|binom|substack|left|right|big|Big)(?![a-zA-Z])|\\sqrt\s*\[|\\\\|\^\{[^}]*\^|\\frac\{[^}]*\\frac/;
 
 function notationRenders(question) {
+  const course = question?.courseDetail || {};
   const blob = [
     question?.question,
     ...((question?.choices || []).map((c) => c?.text)),
     question?.shortExplanation,
-    question?.elaboration
+    question?.elaboration,
+    course?.title,
+    course?.lesson,
+    ...((Array.isArray(course?.keyPoints) ? course.keyPoints : []))
   ].join(" ");
   return !UNRENDERABLE_NOTATION.test(String(blob));
 }
@@ -2895,6 +2899,11 @@ let videoEmbedEnabled = process.env.YOUTUBE_EMBED_ENABLED !== "false";
 // small daily quota (a search costs 100 of ~10,000 units/day).
 const videoCache = new Map();
 
+// Master switch for the whole subscription feature (bot Subscribe button + the
+// solo-quiz paywall). Default OFF so quizzes are free unless an admin turns it
+// on. Persisted in app_settings and managed from the admin portal; the bot
+// reads it via GET /bot/config. Set env SUBSCRIPTIONS_ENABLED=true to default on.
+let subscriptionsEnabled = process.env.SUBSCRIPTIONS_ENABLED === "true";
 // Subscription gate: when on, self-serve solo quizzes require an active
 // subscriber. Default on (solo is subscription-only). Both persisted in
 // app_settings and managed from the admin portal.
@@ -2913,6 +2922,7 @@ async function loadAppSettings() {
     const result = await dbQuery("SELECT key, value FROM app_settings");
     for (const row of result?.rows || []) {
       if (row.key === "video_embed_enabled") videoEmbedEnabled = row.value === "true";
+      if (row.key === "subscriptions_enabled") subscriptionsEnabled = row.value === "true";
       if (row.key === "solo_subscription_required") soloSubscriptionRequired = row.value === "true";
       if (row.key === "free_trial_enabled") freeTrialEnabled = row.value === "true";
       if (row.key === "free_trial_days") freeTrialDays = Number(row.value) || 0;
@@ -3356,6 +3366,7 @@ function buildSoloState(session) {
     correctChoice: session.status === "REVIEWING" ? session.currentQuestion?.correctChoice || null : null,
     shortExplanation: session.status === "REVIEWING" ? session.currentQuestion?.shortExplanation || "" : "",
     elaboration: session.status === "REVIEWING" ? session.currentQuestion?.elaboration || "" : "",
+    courseDetail: session.status === "REVIEWING" ? session.currentQuestion?.courseDetail || null : null,
     videoUrl: session.status === "REVIEWING" ? (session.currentQuestion?.resolvedVideo?.url || buildVideoUrl(session.currentQuestion, session.config)) : null,
     videoEmbedUrl: session.status === "REVIEWING" ? (session.currentQuestion?.resolvedVideo?.embedUrl || null) : null,
     videoCaptionLanguage: session.status === "REVIEWING" ? (session.currentQuestion?.resolvedVideo?.captionLanguage || null) : null,
@@ -3551,7 +3562,7 @@ app.post("/solo/sessions", async (req, res) => {
     // Teacher-shared quizzes and classroom assignments stay free (institutional).
     const isInstitutional = Boolean(share) || Boolean(classroomId);
     let subscriberId = null;
-    if (soloSubscriptionRequired && !isInstitutional) {
+    if (subscriptionsEnabled && soloSubscriptionRequired && !isInstitutional) {
       const subClaim = verifySubscriberToken(req.body?.subscriberToken || req.body?.subscriber_token || "");
       const subscriber = subClaim ? await getSubscriberById(subClaim.sub) : null;
       if (!subscriber || !subscriberIsActive(subscriber)) {
@@ -3654,7 +3665,13 @@ app.post("/solo/sessions/:id/answer", async (req, res) => {
       session.score += 1;
     }
     session.currentAnswer = choice;
-    const video = await resolveVideo(session.currentQuestion, session.config);
+    // Resolve the video and ensure a course lesson in parallel. The lesson only
+    // triggers an LLM call for bank/fallback questions (OpenAI ones already
+    // carry one), so this adds no cost for the common OpenAI path.
+    const [video] = await Promise.all([
+      resolveVideo(session.currentQuestion, session.config),
+      ensureCourseDetail(session.currentQuestion, session.config)
+    ]);
     session.currentQuestion.resolvedVideo = video;
     const result = {
       questionIndex: session.questionIndex,
@@ -3665,6 +3682,7 @@ app.post("/solo/sessions/:id/answer", async (req, res) => {
       isCorrect,
       shortExplanation: session.currentQuestion.shortExplanation || "",
       elaboration: session.currentQuestion.elaboration || "",
+      courseDetail: session.currentQuestion.courseDetail || null,
       videoUrl: video.url,
       videoEmbedUrl: video.embedUrl,
       videoCaptionLanguage: video.captionLanguage || null,
@@ -3694,6 +3712,11 @@ app.post("/solo/sessions/:id/answer", async (req, res) => {
 // Full admins only. Defined here (requireRole is a hoisted function) so the
 // admin subscription routes below can reference it.
 const requireAdmin = requireRole("admin");
+
+// Runtime config the bot polls to decide whether to show subscription UI.
+app.get("/bot/config", requireBot, (_req, res) => {
+  res.json({ subscriptionsEnabled });
+});
 
 // Active price tiers the subscriber can choose from.
 app.get("/bot/subscription/tiers", requireBot, async (_req, res) => {
@@ -3856,6 +3879,7 @@ app.get("/solo/subscription", async (req, res) => {
 
 app.get("/admin/subscription/settings", requireAdmin, (_req, res) => {
   res.json({
+    enabled: subscriptionsEnabled,
     required: soloSubscriptionRequired,
     paymentInfo: subscriptionPaymentInfo,
     paymentQrUrl: subscriptionPaymentQrUrl,
@@ -3866,6 +3890,10 @@ app.get("/admin/subscription/settings", requireAdmin, (_req, res) => {
 
 app.put("/admin/subscription/settings", requireAdmin, async (req, res) => {
   await runAdminAction(res, async () => {
+    if (typeof req.body?.enabled === "boolean") {
+      subscriptionsEnabled = req.body.enabled;
+      await setAppSetting("subscriptions_enabled", subscriptionsEnabled ? "true" : "false");
+    }
     if (typeof req.body?.required === "boolean") {
       soloSubscriptionRequired = req.body.required;
       await setAppSetting("solo_subscription_required", soloSubscriptionRequired ? "true" : "false");
@@ -3886,8 +3914,8 @@ app.put("/admin/subscription/settings", requireAdmin, async (req, res) => {
       subscriptionPaymentQrUrl = req.body.paymentQrUrl.trim().slice(0, 500);
       await setAppSetting("subscription_payment_qr_url", subscriptionPaymentQrUrl);
     }
-    await logAuditAction("subscription.settings", "app_settings", "subscription", { required: soloSubscriptionRequired }, req);
-    res.json({ ok: true, required: soloSubscriptionRequired, paymentInfo: subscriptionPaymentInfo, paymentQrUrl: subscriptionPaymentQrUrl, freeTrialEnabled, freeTrialDays });
+    await logAuditAction("subscription.settings", "app_settings", "subscription", { enabled: subscriptionsEnabled, required: soloSubscriptionRequired }, req);
+    res.json({ ok: true, enabled: subscriptionsEnabled, required: soloSubscriptionRequired, paymentInfo: subscriptionPaymentInfo, paymentQrUrl: subscriptionPaymentQrUrl, freeTrialEnabled, freeTrialDays });
   });
 });
 
@@ -5698,6 +5726,7 @@ function buildRoomState(roomCode, viewerWs = null) {
     correctChoice: room.revealAnswer ? room.currentQuestion?.correctChoice || null : null,
     shortExplanation: room.revealAnswer ? room.currentQuestion?.shortExplanation || "" : "",
     elaboration: room.revealAnswer ? room.currentQuestion?.elaboration || "" : "",
+    courseDetail: room.revealAnswer ? room.currentQuestion?.courseDetail || null : null,
     videoUrl: room.revealAnswer ? (room.currentQuestion?.resolvedVideo?.url || buildVideoUrl(room.currentQuestion, getSessionConfig(room))) : null,
     videoEmbedUrl: room.revealAnswer ? (room.currentQuestion?.resolvedVideo?.embedUrl || null) : null,
     videoCaptionLanguage: room.revealAnswer ? (room.currentQuestion?.resolvedVideo?.captionLanguage || null) : null,
@@ -6943,11 +6972,21 @@ async function fetchWithTimeout(url, options, timeoutMs) {
 const QUIZ_QUESTION_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["workedSolution", "question", "choices", "correctChoice", "shortExplanation", "elaboration", "videoQuery", "videoQueryLocal", "subject"],
+  required: ["workedSolution", "question", "choices", "correctChoice", "shortExplanation", "elaboration", "courseDetail", "videoQuery", "videoQueryLocal", "subject"],
   properties: {
     workedSolution: { type: "string" },
     videoQuery: { type: "string" },
     videoQueryLocal: { type: "string" },
+    courseDetail: {
+      type: "object",
+      additionalProperties: false,
+      required: ["title", "lesson", "keyPoints"],
+      properties: {
+        title: { type: "string" },
+        lesson: { type: "string" },
+        keyPoints: { type: "array", minItems: 3, maxItems: 5, items: { type: "string" } }
+      }
+    },
     question: { type: "string" },
     choices: {
       type: "array",
@@ -6980,6 +7019,70 @@ const QUIZ_VERIFY_SCHEMA = {
     alignmentNote: { type: "string" }
   }
 };
+// Stand-alone schema for the review-screen mini-lesson, so it can be generated
+// on demand for question-bank / fallback questions that were saved without one.
+const COURSE_DETAIL_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["title", "lesson", "keyPoints"],
+  properties: {
+    title: { type: "string" },
+    lesson: { type: "string" },
+    keyPoints: { type: "array", minItems: 3, maxItems: 5, items: { type: "string" } }
+  }
+};
+
+function courseDetailIsComplete(detail) {
+  return Boolean(
+    detail &&
+    typeof detail.lesson === "string" && detail.lesson.trim() &&
+    Array.isArray(detail.keyPoints) && detail.keyPoints.length
+  );
+}
+
+// Ask the LLM for just the review-screen mini-lesson for an existing question.
+async function generateCourseDetail(question, config) {
+  if (!llmConfigured()) return null;
+  const correct = (question?.choices || []).find((c) => c.id === question?.correctChoice);
+  const prompt = `A Grade ${config.gradeLevel} student has just answered this ${getSubjectLabel(config.subject)} quiz question and is now on the review screen.
+Curriculum: ${getCurriculumLabel(config.curriculum)}
+Language mode: ${getLanguageLabel(config.language)}
+Question: ${question?.question || ""}
+Correct answer: ${correct ? correct.text : (question?.correctChoice || "")}
+Existing explanation: ${question?.shortExplanation || ""} ${question?.elaboration || ""}
+
+Write a short mini-lesson that teaches the underlying concept this question tests, so the student truly understands the topic and can answer similar questions with ease next time. Write it like a caring senior teacher giving a focused lesson, in the quiz's language (${getLanguageLabel(config.language)}${(config.language === "khmer" || config.language === "bilingual") ? ", using Khmer script (ភាសាខ្មែរ)" : ""}). It must contain: "title" — a short lesson heading naming the concept (under 10 words); "lesson" — a clear 60-110 word explanation of the concept, the method to solve this type of problem, and one brief worked example, matched to Grade ${config.gradeLevel}; "keyPoints" — 3 to 5 concise takeaways or rules the student should memorize. Keep it strictly on the topic of this question and appropriate for the grade.
+NOTATION: write all math and science notation so it displays cleanly without a full LaTeX renderer. Use ^ for exponents (x^2), sqrt() for square roots, plain symbols (×, ÷, ±, °, ≤, ≥, π), ion charges like Na^+ or SO4^2-, and chemical formulas like H2O. Do NOT use LaTeX environments, matrices, integrals, \\text{}, \\vec{}, or multi-line LaTeX.`;
+
+  const { text } = await llmJson({
+    input: prompt,
+    jsonSchema: { name: "lyhuor_course_detail", schema: COURSE_DETAIL_SCHEMA },
+    model: OPENAI_MODEL,
+    usageContext: { usageSource: "solo" },
+    operation: "generate"
+  });
+  return text ? parseJsonLoose(text) : null;
+}
+
+// Guarantee the question carries a review-screen mini-lesson. OpenAI-generated
+// questions already have one (returned as-is); bank/fallback questions get one
+// generated lazily and cached onto the question object. Best-effort: on any
+// failure the review screen simply omits the card.
+async function ensureCourseDetail(question, config) {
+  if (!question) return null;
+  if (courseDetailIsComplete(question.courseDetail)) {
+    return question.courseDetail;
+  }
+  try {
+    const detail = await generateCourseDetail(question, config);
+    if (courseDetailIsComplete(detail)) {
+      question.courseDetail = detail;
+    }
+  } catch (error) {
+    console.error("Course detail generation failed:", error.message);
+  }
+  return courseDetailIsComplete(question.courseDetail) ? question.courseDetail : null;
+}
 
 // Strip markdown fences / prose and parse the first JSON object found.
 function parseJsonLoose(text) {
@@ -7110,6 +7213,7 @@ Requirements:
 - Match the reading level and background knowledge of Grade ${config.gradeLevel}
 - A short explanation under 30 words
 - A more detailed elaboration under 90 words
+- In "courseDetail", a short mini-lesson that teaches the underlying concept this question tests, so the student truly understands the topic and can answer similar questions with ease next time. Write it like a caring senior teacher giving a focused lesson, in the quiz's language (${getLanguageLabel(config.language)}${(config.language === "khmer" || config.language === "bilingual") ? ", using Khmer script (ភាសាខ្មែរ)" : ""}). It must contain: "title" — a short lesson heading naming the concept (under 10 words); "lesson" — a clear 60-110 word explanation of the concept, the method to solve this type of problem, and one brief worked example, matched to Grade ${config.gradeLevel}; "keyPoints" — 3 to 5 concise takeaways or rules the student should memorize. Use the same clean notation rules described above. Keep it strictly on the topic of this question and appropriate for the grade.
 - NOTATION: write all math and science notation so it displays cleanly without a full LaTeX renderer. Use ^ for exponents (x^2, 10^3), a slash or \\frac{a}{b} for fractions, sqrt() for square roots, and plain symbols (×, ÷, ±, °, ≤, ≥, π) and chemical formulas like H2O, CO2, with charges written like Na^+ or SO4^2-. Do NOT use LaTeX environments, matrices, integrals/summations, indexed roots like \\sqrt[3]{}, \\text{}, \\vec{}, or multi-line LaTeX (\\\\).
 - In "videoQuery", a precise ENGLISH YouTube search query (6-12 words) for a tutorial that teaches the exact method or concept needed to SOLVE this question at this grade level. Phrase it the way a learner searches for a lesson and include the grade/level when helpful. Examples: how to find the area of a rectangle grade 4; balancing chemical equations step by step grade 10; subtracting fractions with different denominators explained.
 - In "videoQueryLocal", the SAME search query written in the quiz's language (${getLanguageLabel(config.language)}). ${(config.language === "khmer" || config.language === "bilingual") ? "Write it in Khmer script (ភាសាខ្មែរ), e.g. របៀបគណនាផ្ទៃក្រឡាចតុកោណកែង ថ្នាក់ទី៤." : "For English this can be identical to videoQuery."}
@@ -7557,9 +7661,14 @@ async function loadNextQuestion(roomCode) {
   broadcastRoomState(roomCode);
 
   room.currentQuestion = await generateQuestion(room);
-  // Resolve the explanation video now so it's ready to show (as a QR) at reveal.
+  // Resolve the explanation video and course lesson now so they're ready to show
+  // at reveal. The lesson only calls the LLM for bank/fallback questions.
   try {
-    room.currentQuestion.resolvedVideo = await resolveVideo(room.currentQuestion, getSessionConfig(room));
+    const [video] = await Promise.all([
+      resolveVideo(room.currentQuestion, getSessionConfig(room)),
+      ensureCourseDetail(room.currentQuestion, getSessionConfig(room))
+    ]);
+    room.currentQuestion.resolvedVideo = video;
   } catch (error) {
     room.currentQuestion.resolvedVideo = null;
   }

@@ -41,7 +41,15 @@ function buildQuizUrl(options = {}) {
 }
 
 // ===== Gateway (subscription) API =====
-const subscriptionsEnabled = Boolean(GATEWAY_HTTP_URL && BOT_API_SECRET);
+// Subscriptions require the gateway link/secret AND the admin master switch.
+// `subscriptionsConfigured` is fixed at boot; `subscriptionsAdminEnabled` is
+// polled from the gateway so an admin can turn the feature on/off at runtime.
+// Default off until the first successful poll (fail-safe: no paywall shown).
+const subscriptionsConfigured = Boolean(GATEWAY_HTTP_URL && BOT_API_SECRET);
+let subscriptionsAdminEnabled = false;
+function subscriptionsOn() {
+  return subscriptionsConfigured && subscriptionsAdminEnabled;
+}
 
 async function gatewayApi(path, { method = "GET", body } = {}) {
   const res = await fetch(`${GATEWAY_HTTP_URL}${path}`, {
@@ -98,24 +106,33 @@ function formatDate(iso) {
   }
 }
 
-const mainMenu = {
-  inline_keyboard: [
-    [{ text: "💳 Subscribe", callback_data: "menu:subscribe" }],
-    [{ text: "📊 My status", callback_data: "menu:status" }],
-    [{ text: "▶️ Take a quiz", callback_data: "menu:quiz" }]
-  ]
-};
-
-// Persistent buttons that stay docked above the text box — no typing needed.
+// Menus are built on demand so the Subscribe / My-status buttons only appear
+// while subscriptions are enabled. When disabled, only "Take a quiz" shows.
 const SUBSCRIBE_BTN = "💳 Subscribe";
 const STATUS_BTN = "📊 My status";
 const QUIZ_BTN = "▶️ Take a quiz";
-const replyKeyboard = {
-  keyboard: [[{ text: SUBSCRIBE_BTN }], [{ text: STATUS_BTN }, { text: QUIZ_BTN }]],
-  resize_keyboard: true,
-  is_persistent: true,
-  input_field_placeholder: "Tap a button below 👇"
-};
+function mainMenu() {
+  const rows = [];
+  if (subscriptionsOn()) {
+    rows.push([{ text: SUBSCRIBE_BTN, callback_data: "menu:subscribe" }]);
+    rows.push([{ text: STATUS_BTN, callback_data: "menu:status" }]);
+  }
+  rows.push([{ text: QUIZ_BTN, callback_data: "menu:quiz" }]);
+  return { inline_keyboard: rows };
+}
+
+// Persistent buttons that stay docked above the text box — no typing needed.
+function replyKeyboard() {
+  const rows = subscriptionsOn()
+    ? [[{ text: SUBSCRIBE_BTN }], [{ text: STATUS_BTN }, { text: QUIZ_BTN }]]
+    : [[{ text: QUIZ_BTN }]];
+  return {
+    keyboard: rows,
+    resize_keyboard: true,
+    is_persistent: true,
+    input_field_placeholder: "Tap a button below 👇"
+  };
+}
 
 // Map a typed command, a reply-keyboard tap, or a slash command to an action.
 function matchMenuCommand(text) {
@@ -130,13 +147,14 @@ function matchMenuCommand(text) {
 
 // Register the bot's command list (powers the "Menu" button by the text box).
 async function setupBotMenu() {
-  await tg("setMyCommands", {
-    commands: [
+  const commands = [{ command: "quiz", description: "▶️ Take a quiz" }];
+  if (subscriptionsOn()) {
+    commands.unshift(
       { command: "subscribe", description: "💳 Subscribe / see plans" },
-      { command: "status", description: "📊 My subscription status" },
-      { command: "quiz", description: "▶️ Take a quiz" }
-    ]
-  });
+      { command: "status", description: "📊 My subscription status" }
+    );
+  }
+  await tg("setMyCommands", { commands });
   await tg("setChatMenuButton", { menu_button: { type: "commands" } });
 }
 
@@ -146,7 +164,7 @@ const pendingTier = new Map();
 async function showWelcome(chatId, from) {
   let extra = "";
   // First contact creates the subscriber, which may grant a one-time free trial.
-  if (subscriptionsEnabled) {
+  if (subscriptionsOn()) {
     try {
       const data = await gatewayApi("/bot/subscription/subscriber", {
         method: "POST",
@@ -164,15 +182,14 @@ async function showWelcome(chatId, from) {
       }
     } catch (e) { /* non-fatal */ }
   }
-  await sendText(
-    chatId,
-    "👋 Welcome to <b>LyHuor Learning</b>!\n\nSolo quizzes are for subscribers. Use the buttons below 👇\n\n💳 <b>Subscribe</b> — choose a plan and pay\n📊 <b>My status</b> — check your access\n▶️ <b>Take a quiz</b> — start learning" + extra,
-    replyKeyboard
-  );
+  const welcome = subscriptionsOn()
+    ? "👋 Welcome to <b>LyHuor Learning</b>!\n\nSolo quizzes are for subscribers. Use the buttons below 👇\n\n💳 <b>Subscribe</b> — choose a plan and pay\n📊 <b>My status</b> — check your access\n▶️ <b>Take a quiz</b> — start learning"
+    : "👋 Welcome to <b>LyHuor Learning</b>!\n\nTap ▶️ <b>Take a quiz</b> below to start learning 👇";
+  await sendText(chatId, welcome + extra, replyKeyboard());
 }
 
 async function showTiers(chatId) {
-  if (!subscriptionsEnabled) {
+  if (!subscriptionsOn()) {
     await sendText(chatId, "Subscriptions are not available right now. Please try again later.");
     return;
   }
@@ -193,7 +210,7 @@ async function chooseTier(chatId, tierId, from) {
   const data = await gatewayApi("/bot/subscription/tiers");
   const tier = (data.tiers || []).find((t) => t.id === tierId);
   if (!tier) {
-    await sendText(chatId, "That plan is no longer available. Tap Subscribe to see current plans.", mainMenu);
+    await sendText(chatId, "That plan is no longer available. Tap Subscribe to see current plans.", mainMenu());
     return;
   }
   pendingTier.set(String(chatId), { tierId: tier.id, name: tier.name, priceUsd: tier.priceUsd, durationDays: tier.durationDays });
@@ -238,7 +255,7 @@ async function submitProof(chatId, from, { proofText, proofFileId }) {
       chatId,
       `✅ Thank you! Your payment for <b>${pending.name}</b> ($${pending.priceUsd}) is <b>pending approval</b>. ` +
       `You'll get access as soon as an admin confirms it.`,
-      mainMenu
+      mainMenu()
     );
     if (ADMIN_CHAT_ID) {
       const who = from?.username ? `@${from.username}` : cleanText([from?.first_name, from?.last_name].filter(Boolean).join(" "), 48) || String(chatId);
@@ -259,7 +276,7 @@ async function submitProof(chatId, from, { proofText, proofFileId }) {
 // Forward a subscriber's incoming message to the gateway so it appears in the
 // admin chat thread.
 async function forwardInbound(chatId, from, message) {
-  if (!subscriptionsEnabled) return;
+  if (!subscriptionsOn()) return;
   let kind = "text";
   let body = message.text || "";
   let fileId = null, fileName = null, latitude, longitude;
@@ -288,13 +305,13 @@ async function forwardInbound(chatId, from, message) {
 }
 
 async function showStatus(chatId) {
-  if (!subscriptionsEnabled) {
+  if (!subscriptionsOn()) {
     await sendText(chatId, "Subscriptions are not available right now.");
     return;
   }
   const data = await gatewayApi(`/bot/subscription/status?telegramId=${encodeURIComponent(chatId)}`);
   if (!data.exists || !data.subscriber) {
-    await sendText(chatId, "You don't have a subscription yet. Tap <b>Subscribe</b> to choose a plan.", mainMenu);
+    await sendText(chatId, "You don't have a subscription yet. Tap <b>Subscribe</b> to choose a plan.", mainMenu());
     return;
   }
   const s = data.subscriber;
@@ -311,14 +328,19 @@ async function showStatus(chatId) {
       pending
         ? "⏳ Your latest payment is <b>pending approval</b>. We'll notify you once it's active."
         : "❌ You don't have an active subscription right now. Tap <b>Subscribe</b> to renew.",
-      mainMenu
+      mainMenu()
     );
   }
 }
 
 async function startQuiz(chatId) {
-  if (!subscriptionsEnabled) {
-    await sendText(chatId, "Quizzes are not available right now.");
+  // With subscriptions off, quizzes are free — send the link straight away.
+  if (!subscriptionsOn()) {
+    await sendText(
+      chatId,
+      "Great — tap below to start. You can pick your grade, subject, language, and curriculum on the quiz page.",
+      { inline_keyboard: [[{ text: "▶️ Start Quiz", url: buildQuizUrl({ source: "telegram", sourceUserId: chatId }) }]] }
+    );
     return;
   }
   const data = await gatewayApi(`/bot/subscription/status?telegramId=${encodeURIComponent(chatId)}`);
@@ -329,7 +351,7 @@ async function startQuiz(chatId) {
       { inline_keyboard: [[{ text: "▶️ Start Quiz", url: buildQuizUrl({ source: "telegram", sourceUserId: chatId, sub: data.subscriber.token }) }]] }
     );
   } else {
-    await sendText(chatId, "You need an active subscription to take solo quizzes. Tap <b>Subscribe</b> to get started.", mainMenu);
+    await sendText(chatId, "You need an active subscription to take solo quizzes. Tap <b>Subscribe</b> to get started.", mainMenu());
   }
 }
 
@@ -365,7 +387,7 @@ async function handleTelegramUpdate(update) {
   await forwardInbound(chatId, from, message);
 
   // If mid-purchase, also treat a photo / text as the payment proof.
-  if (subscriptionsEnabled && pendingTier.has(String(chatId))) {
+  if (subscriptionsOn() && pendingTier.has(String(chatId))) {
     if (Array.isArray(message.photo) && message.photo.length) {
       const fileId = message.photo[message.photo.length - 1].file_id;
       if (await submitProof(chatId, from, { proofFileId: fileId, proofText: cleanText(message.caption, 200) })) return;
@@ -375,7 +397,7 @@ async function handleTelegramUpdate(update) {
   }
 
   // Otherwise acknowledge — their message is now in the admin inbox.
-  await sendText(chatId, "✅ Got your message — our team will reply soon. Use the buttons below anytime 👇", replyKeyboard);
+  await sendText(chatId, "✅ Got your message — our team will reply soon. Use the buttons below anytime 👇", replyKeyboard());
 }
 
 async function sendMessengerMessage(recipientId, text, quizUrl) {
@@ -413,7 +435,8 @@ app.get("/health", (_req, res) => {
     uptimeSec: Math.round(process.uptime()),
     controllerUrl: CONTROLLER_URL,
     telegramConfigured: Boolean(TELEGRAM_BOT_TOKEN),
-    subscriptionsEnabled,
+    subscriptionsConfigured,
+    subscriptionsEnabled: subscriptionsOn(),
     adminNotify: Boolean(ADMIN_CHAT_ID),
     messengerConfigured: Boolean(MESSENGER_PAGE_ACCESS_TOKEN && MESSENGER_VERIFY_TOKEN)
   });
@@ -487,9 +510,33 @@ app.post("/messenger/webhook", async (req, res) => {
   }
 });
 
+// Poll the gateway for the admin master switch. When it flips, re-register the
+// bot's slash commands so the Subscribe/Status entries appear or disappear.
+async function refreshBotConfig() {
+  if (!subscriptionsConfigured) return;
+  try {
+    const data = await gatewayApi("/bot/config");
+    const next = Boolean(data.subscriptionsEnabled);
+    if (next !== subscriptionsAdminEnabled) {
+      subscriptionsAdminEnabled = next;
+      console.log(`Subscriptions ${next ? "enabled" : "disabled"} by admin.`);
+      if (TELEGRAM_BOT_TOKEN) await setupBotMenu().catch((e) => console.error("Bot menu refresh failed:", e.message));
+    }
+  } catch (e) {
+    // Keep the last known value if the gateway is briefly unreachable.
+  }
+}
+
 app.listen(PORT, () => {
-  console.log(`Bot gateway listening on ${PORT} (subscriptions ${subscriptionsEnabled ? "on" : "off"})`);
-  if (TELEGRAM_BOT_TOKEN) {
+  console.log(`Bot gateway listening on ${PORT} (subscriptions ${subscriptionsConfigured ? "configured" : "off"})`);
+  if (subscriptionsConfigured) {
+    refreshBotConfig().finally(() => {
+      if (TELEGRAM_BOT_TOKEN) {
+        setupBotMenu().then(() => console.log("Telegram bot menu/commands registered.")).catch((e) => console.error("Bot menu setup failed:", e.message));
+      }
+    });
+    setInterval(refreshBotConfig, 60_000);
+  } else if (TELEGRAM_BOT_TOKEN) {
     setupBotMenu().then(() => console.log("Telegram bot menu/commands registered.")).catch((e) => console.error("Bot menu setup failed:", e.message));
   }
 });

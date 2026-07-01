@@ -382,6 +382,31 @@
       text-decoration: none;
     }
 
+    .course-card {
+      margin-top: 12px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: rgba(105, 230, 166, 0.08);
+      border: 1px solid rgba(105, 230, 166, 0.35);
+    }
+    .course-head {
+      font-size: 13px;
+      font-weight: 800;
+      color: #69e6a6;
+      margin-bottom: 8px;
+      letter-spacing: 0.2px;
+    }
+    .course-lesson { font-size: 14px; line-height: 1.55; }
+    .course-points {
+      margin: 8px 0 0;
+      padding-left: 20px;
+    }
+    .course-points li {
+      font-size: 14px;
+      line-height: 1.5;
+      margin-bottom: 4px;
+    }
+
     .leaderboard {
       margin-top: 16px;
       display: grid;
@@ -679,20 +704,20 @@
       <div>
         <div class="eyebrow">Why students can trust this</div>
         <h2>Practice With Clear Explanations</h2>
-        <p class="lead">This portal is designed for independent learning. It records progress, gives immediate feedback, and keeps every quiz matched to the selected grade and subject.</p>
+        <p class="lead">This portal is designed for independent learning. It records progress, gives immediate feedback, and adapts every question and explanation to the curriculum, grade, subject, and language you choose.</p>
       </div>
       <div class="trust-list">
         <div class="trust-item">
           <div class="trust-icon">1</div>
-          <div><b>Choose your learning path</b><span>Select Cambodia MoEYS or international style, then choose grade, subject, and language.</span></div>
+          <div><b>Choose your learning path</b><span>Pick your curriculum (Cambodia MoEYS, Cambridge IGCSE, or international), then your grade, subject, and language — Khmer, English, or bilingual. Every question follows your choices.</span></div>
         </div>
         <div class="trust-item">
           <div class="trust-icon">2</div>
-          <div><b>Answer one question at a time</b><span>Questions are generated from the configured quiz engine and fallback bank, with safety controls on the server.</span></div>
+          <div><b>Answer one question at a time</b><span>Each question is generated fresh to match your grade, subject, curriculum, and language, and checked for accuracy and grade level before you see it.</span></div>
         </div>
         <div class="trust-item">
           <div class="trust-icon">3</div>
-          <div><b>Review your result</b><span>After each answer, the app shows the correct answer and a short explanation so students can learn from mistakes.</span></div>
+          <div><b>Review and learn</b><span>After each answer you get the correct choice, a clear explanation, a tutorial video in your language, and a short course lesson on the topic — so you truly understand it and can answer similar questions with ease.</span></div>
         </div>
       </div>
     </section>
@@ -1344,9 +1369,10 @@
         // Superscripts and subscripts.
         .replace(/\^\{([^}]+)\}/g, '<sup>$1</sup>')
         .replace(/\^\(([^)]+)\)/g, '<sup>$1</sup>')
-        .replace(/\^\+(\b|$)/g, '<sup>+</sup>')
-        .replace(/\^-(\b|$)/g, '<sup>-</sup>')
         .replace(/\^(\d+[+-])/g, '<sup>$1</sup>')
+        .replace(/\^-(\d+)/g, '<sup>-$1</sup>')
+        .replace(/\^\+/g, '<sup>+</sup>')
+        .replace(/\^-/g, '<sup>-</sup>')
         .replace(/\^(\d+)/g, '<sup>$1</sup>')
         .replace(/\^([a-zA-Z])/g, '<sup>$1</sup>')
         .replace(/\_\{([^}]+)\}/g, '<sub>$1</sub>')
@@ -1390,16 +1416,18 @@
         .replace(/\balpha\b/gi, 'α')
         .replace(/\bbeta\b/gi, 'β')
         .replace(/\bgamma\b/gi, 'γ')
-        .replace(/\bdelta\b/gi, 'δ')
         .replace(/\bDelta\b/g, 'Δ')
+        .replace(/\bdelta\b/g, 'δ')
         .replace(/\bsigma\b/gi, 'σ')
         .replace(/\blambda\b/gi, 'λ')
         .replace(/\bmu\b/gi, 'μ')
         .replace(/\bepsilon\b/gi, 'ε')
-        .replace(/\bomega\b/gi, 'ω')
         .replace(/\bOmega\b/g, 'Ω')
-        .replace(/\bphi\b/gi, 'φ')
+        .replace(/\bomega\b/g, 'ω')
+        .replace(/\bPhi\b/g, 'Φ')
+        .replace(/\bphi\b/g, 'φ')
         // Special symbols
+        .replace(/(\d)\s*degrees?\b/gi, '$1°')
         .replace(/\bdegrees?\b/gi, '°')
         .replace(/\binf(?:inity)?\b/gi, '∞')
         .replace(/\bapprox\b/gi, '≈')
@@ -1496,6 +1524,15 @@
             exp += `<div class="yt-wrap">${vidLabel}<div class="yt-embed"><iframe src="${latestState.videoEmbedUrl}" title="Explanation video" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe></div></div>`;
           } else if (latestState.videoUrl) {
             exp += `<div class="yt-wrap"><a class="yt-link" href="${latestState.videoUrl}" target="_blank" rel="noopener">▶ Watch an explanation on YouTube</a></div>`;
+          }
+          const course = latestState.courseDetail;
+          if (course && (course.lesson || (course.keyPoints && course.keyPoints.length))) {
+            const title = formatMathHTML(course.title || "Learn more");
+            const lesson = course.lesson ? `<div class="course-lesson">${formatMathHTML(course.lesson)}</div>` : "";
+            const points = Array.isArray(course.keyPoints) && course.keyPoints.length
+              ? `<ul class="course-points">${course.keyPoints.map((p) => `<li>${formatMathHTML(p)}</li>`).join("")}</ul>`
+              : "";
+            exp += `<div class="course-card"><div class="course-head">📘 Course detail · ${title}</div>${lesson}${points}</div>`;
           }
           explanationEl.innerHTML = exp;
         } else {

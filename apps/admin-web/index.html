@@ -1570,6 +1570,10 @@
 
         <h3 style="margin-top:22px;">Settings</h3>
         <div class="row" style="display:flex; gap:14px; flex-wrap:wrap; align-items:flex-start;">
+          <label style="display:flex; gap:8px; align-items:center; min-width:100%;">
+            <input id="subEnabled" type="checkbox" style="width:auto;">
+            <b>Enable subscriptions</b> — show the Subscribe button in the Telegram bot and gate solo quizzes. When off, the bot shows only “Take a quiz” and all solo quizzes are free.
+          </label>
           <label style="display:flex; gap:8px; align-items:center; min-width:260px;">
             <input id="subRequired" type="checkbox" style="width:auto;">
             Require an active subscription for solo quizzes
@@ -4276,6 +4280,7 @@
     async function loadSubSettings() {
       try {
         const data = await api("/admin/subscription/settings");
+        document.getElementById("subEnabled").checked = Boolean(data.enabled);
         document.getElementById("subRequired").checked = Boolean(data.required);
         document.getElementById("subFreeTrialEnabled").checked = Boolean(data.freeTrialEnabled);
         document.getElementById("subFreeTrialDays").value = data.freeTrialDays != null ? data.freeTrialDays : 1;
@@ -4293,6 +4298,7 @@
         await api("/admin/subscription/settings", {
           method: "PUT",
           body: JSON.stringify({
+            enabled: document.getElementById("subEnabled").checked,
             required: document.getElementById("subRequired").checked,
             freeTrialEnabled: document.getElementById("subFreeTrialEnabled").checked,
             freeTrialDays: Number(document.getElementById("subFreeTrialDays").value),
