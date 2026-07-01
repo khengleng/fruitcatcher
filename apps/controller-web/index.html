@@ -426,6 +426,47 @@
       margin-bottom: 4px;
     }
 
+    /* Friendly "working on it" indicator shown while the server generates the
+       question, resolves the video, and writes the mini-lesson. */
+    @keyframes lc-spin { to { transform: rotate(360deg); } }
+    @keyframes lc-dot { 0%, 80%, 100% { opacity: 0.25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+    .loading-wrap {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      padding: 15px 16px;
+      border-radius: 14px;
+      background: rgba(255, 211, 79, 0.10);
+      border: 1px solid rgba(255, 211, 79, 0.30);
+    }
+    .loading-spinner {
+      width: 24px;
+      height: 24px;
+      flex: none;
+      border: 3px solid rgba(255, 255, 255, 0.16);
+      border-top-color: var(--accent, #ffd34f);
+      border-radius: 50%;
+      animation: lc-spin 0.8s linear infinite;
+    }
+    .loading-text { font-size: 15px; line-height: 1.5; }
+    .loading-title { font-weight: 800; color: var(--accent, #ffd34f); }
+    .loading-sub { display: block; margin-top: 3px; font-size: 13px; color: #9fb2c9; }
+    .loading-dots { display: inline-block; margin-left: 3px; letter-spacing: 1px; }
+    .loading-dots i {
+      display: inline-block;
+      width: 5px;
+      height: 5px;
+      margin-left: 3px;
+      border-radius: 50%;
+      background: var(--accent, #ffd34f);
+      animation: lc-dot 1.2s infinite ease-in-out both;
+    }
+    .loading-dots i:nth-child(2) { animation-delay: 0.16s; }
+    .loading-dots i:nth-child(3) { animation-delay: 0.32s; }
+    @media (prefers-reduced-motion: reduce) {
+      .loading-spinner, .loading-dots i { animation: none; }
+    }
+
     .leaderboard {
       margin-top: 16px;
       display: grid;
@@ -1496,6 +1537,15 @@
       }
     }
 
+    // Friendly "we're working on it" indicator (spinner + a reassuring line).
+    function loadingBlock(title, sub) {
+      const dots = `<span class="loading-dots"><i></i><i></i><i></i></span>`;
+      return `<div class="loading-wrap"><div class="loading-spinner"></div>`
+        + `<div class="loading-text"><span class="loading-title">${title}</span>${dots}`
+        + (sub ? `<span class="loading-sub">${sub}</span>` : "")
+        + `</div></div>`;
+    }
+
     function renderState() {
       if (!latestState) {
         leadTextEl.textContent = isSoloMode
@@ -1529,7 +1579,14 @@
       }
 
       if (latestState.status === "LOADING") {
-        questionTextEl.textContent = isSoloMode ? "Preparing your next learning question..." : "Loading next question...";
+        if (isSoloMode) {
+          questionTextEl.innerHTML = loadingBlock(
+            "Creating your next question",
+            "Our AI is preparing a fresh question just for you — this usually takes a few seconds. 🧠✨"
+          );
+        } else {
+          questionTextEl.textContent = "Loading next question...";
+        }
         explanationEl.textContent = "";
         answersEl.innerHTML = "";
       } else if (latestState.question) {
@@ -1559,6 +1616,13 @@
             exp += `<div class="course-card"><div class="course-head">📘 Course detail · ${title}</div>${lesson}${steps}${points}</div>`;
           }
           explanationEl.innerHTML = exp;
+        } else if (isSoloMode && latestState.player?.answered) {
+          // Answer submitted; the server is resolving the explanation video and
+          // writing the step-by-step mini-lesson before it comes back.
+          explanationEl.innerHTML = loadingBlock(
+            "Great — marking your answer",
+            "Finding a helpful video and writing your step-by-step mini-lesson. Hang tight! 📹📘"
+          );
         } else {
           explanationEl.textContent = latestState.player?.answered
             ? "Answer sent. Waiting for other students or the timer."
