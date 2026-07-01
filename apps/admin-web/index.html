@@ -986,6 +986,10 @@
         <p class="muted" style="font-size:13px;">Accuracy across all learners, by subject. Lowest-accuracy subjects (with enough practice) are the class's weak spots.</p>
         <div id="masteryWeakest" style="margin:10px 0;"></div>
         <div class="table-wrap"><table><thead><tr><th>Subject</th><th>Students</th><th>Questions</th><th>Accuracy</th></tr></thead><tbody id="masteryBody"></tbody></table></div>
+
+        <h3 style="margin-top:24px;">Recent errors <span id="errCount" class="muted"></span></h3>
+        <p class="muted" style="font-size:13px;">Server-side failures captured for observability.</p>
+        <div class="table-wrap"><table><thead><tr><th>Time</th><th>Context</th><th>Message</th></tr></thead><tbody id="errorsBody"></tbody></table></div>
       </section>
 
       <section id="questionsPanel" class="panel" hidden>
@@ -2443,6 +2447,16 @@
           document.getElementById("masteryWeakest").innerHTML = weak.length
             ? "⚠️ Weakest subjects: " + weak.map((w) => `<b>${escapeForHtml(w.subjectLabel)}</b> (${w.accuracy}%)`).join(" · ")
             : "";
+        } catch (e) { /* non-fatal */ }
+
+        // Recent server errors.
+        try {
+          const er = await api("/admin/errors");
+          const errs = er.errors || [];
+          document.getElementById("errCount").textContent = errs.length ? `(${errs.length})` : "(none 🎉)";
+          document.getElementById("errorsBody").innerHTML = errs.map((e) =>
+            `<tr><td style="white-space:nowrap;">${escapeForHtml(new Date(e.created_at).toLocaleString())}</td><td>${escapeForHtml(e.context)}</td><td>${escapeForHtml(String(e.message).slice(0, 160))}</td></tr>`
+          ).join("") || `<tr><td colspan="3" class="muted">No errors recorded.</td></tr>`;
         } catch (e) { /* non-fatal */ }
 
       } catch (error) {

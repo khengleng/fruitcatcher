@@ -2071,6 +2071,23 @@ async function dbQueryRequired(text, params = []) {
   return db.query(text, params);
 }
 
+// Record an error to the console AND the queryable error_log table (best-effort;
+// logging itself must never throw).
+async function logError(context, err, meta) {
+  const message = String(err && err.message ? err.message : (err || "")).slice(0, 2000);
+  const stack = err && err.stack ? String(err.stack).slice(0, 6000) : null;
+  console.error(`[${context}]`, message);
+  if (!db) return;
+  try {
+    await db.query(
+      "INSERT INTO error_log (id, context, message, stack, meta, created_at) VALUES ($1,$2,$3,$4,$5::jsonb,NOW())",
+      [createId(), String(context).slice(0, 120), message, stack, meta ? JSON.stringify(meta) : null]
+    );
+  } catch (e) {
+    // swallow — never let error logging cause a failure
+  }
+}
+
 async function initDatabase() {
   if (!db) {
     return false;
@@ -2405,6 +2422,19 @@ async function initDatabase() {
   // 'pending' and are only served once a teacher approves.
   await dbQueryRequired("ALTER TABLE question_bank ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 'approved'");
   await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_question_bank_review ON question_bank(review_status, subject, grade_level)");
+
+  // Queryable error log for observability (admins can see failures without SSH).
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS error_log (
+      id TEXT PRIMARY KEY,
+      context TEXT NOT NULL,
+      message TEXT NOT NULL,
+      stack TEXT,
+      meta JSONB,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_error_log_created ON error_log(created_at DESC)");
 
   // Teacher-owned classrooms, their roster, and assigned quizzes.
   await dbQueryRequired(`
@@ -3767,11 +3797,9 @@ async function persistSoloAnswer(session, result) {
   await persistSoloSessionStatus(session);
 }
 
-// XP → level curve: 100 XP per level, so it never plateaus.
 const DAILY_GOAL_QUESTIONS = Number(process.env.DAILY_GOAL_QUESTIONS || 20);
-function xpLevel(xp) {
-  return Math.floor((Number(xp) || 0) / 100) + 1;
-}
+// Pure scoring logic lives in a unit-tested module.
+const { MASTERY_TIERS, computeMastery, xpLevel } = require("./lib/learning");
 
 // Streak = consecutive local days (ending today or yesterday) with activity, plus
 // today's totals and lifetime XP/level. Read from the recent daily rows.
@@ -3840,42 +3868,7 @@ async function getEngagement(studentDbId) {
 }
 
 // ===== Progress by subject: mastery levels + growth trend =====
-// Levels are reached by BOTH accuracy and practice volume, so a student can't
-// "master" a subject from one lucky answer — they grow the level by practising.
-const MASTERY_TIERS = [
-  { name: "Starter", badge: "🌱", minQuestions: 0, minAccuracy: 0 },
-  { name: "Bronze", badge: "🥉", minQuestions: 5, minAccuracy: 50 },
-  { name: "Silver", badge: "🥈", minQuestions: 12, minAccuracy: 68 },
-  { name: "Gold", badge: "🥇", minQuestions: 22, minAccuracy: 82 },
-  { name: "Master", badge: "🏆", minQuestions: 35, minAccuracy: 92 }
-];
-
-function computeMastery(questions, accuracy) {
-  let index = 0;
-  for (let i = 1; i < MASTERY_TIERS.length; i += 1) {
-    const t = MASTERY_TIERS[i];
-    if (questions >= t.minQuestions && accuracy >= t.minAccuracy) index = i;
-    else break;
-  }
-  const tier = MASTERY_TIERS[index];
-  const next = MASTERY_TIERS[index + 1] || null;
-  let progressPct = 100;
-  if (next) {
-    // Progress toward the next level is limited by whichever requirement (more
-    // practice or higher accuracy) is furthest away.
-    const qRatio = next.minQuestions ? Math.min(1, questions / next.minQuestions) : 1;
-    const aRatio = next.minAccuracy ? Math.min(1, accuracy / next.minAccuracy) : 1;
-    progressPct = Math.max(0, Math.min(99, Math.round(Math.min(qRatio, aRatio) * 100)));
-  }
-  return {
-    index,
-    name: tier.name,
-    badge: tier.badge,
-    isMax: !next,
-    next: next ? { name: next.name, badge: next.badge, minQuestions: next.minQuestions, minAccuracy: next.minAccuracy } : null,
-    progressPct
-  };
-}
+// (MASTERY_TIERS / computeMastery are imported from ./lib/learning above.)
 
 // Per-subject progress for one student (by students.id). Combines pre-aggregated
 // cumulative totals with a recent-window accuracy so growth is visible.
@@ -6945,6 +6938,20 @@ app.get("/admin/reports/ai-usage", requireAdmin, async (req, res) => {
   }
 });
 
+// Recent server errors, for observability without shell access.
+app.get("/admin/errors", requireAdmin, async (_req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const r = await dbQueryRequired(
+      "SELECT id, context, message, meta, created_at FROM error_log ORDER BY created_at DESC LIMIT 100"
+    );
+    res.json({ ok: true, errors: r.rows });
+  } catch (error) {
+    console.error("List errors failed:", error);
+    res.status(500).json({ error: "Could not load errors" });
+  }
+});
+
 // Platform-wide subject mastery for teachers: where are students strong/weak?
 app.get("/admin/analytics/mastery", requireAdmin, async (_req, res) => {
   if (!requireDatabase(res)) return;
@@ -9198,6 +9205,21 @@ process.on("uncaughtException", (error) => {
 
 process.on("unhandledRejection", (error) => {
   console.error("Unhandled rejection:", error);
+});
+
+// Global error handler (catches errors a route didn't handle) — registered after
+// all routes so it's the last middleware.
+app.use((err, req, res, _next) => {
+  logError("express", err, { path: req.path, method: req.method });
+  if (!res.headersSent) res.status(500).json({ error: "Something went wrong. Please try again." });
+});
+
+// Process-level safety nets: log rather than crash the whole gateway.
+process.on("unhandledRejection", (reason) => {
+  logError("unhandledRejection", reason instanceof Error ? reason : new Error(String(reason)));
+});
+process.on("uncaughtException", (err) => {
+  logError("uncaughtException", err);
 });
 
 async function startServer() {
