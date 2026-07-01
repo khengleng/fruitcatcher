@@ -397,8 +397,27 @@
       letter-spacing: 0.2px;
     }
     .course-lesson { font-size: 14px; line-height: 1.55; }
+    .course-subhead {
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      color: #9fe6c2;
+      margin: 12px 0 6px;
+    }
+    .course-steps {
+      margin: 0;
+      padding-left: 22px;
+    }
+    .course-steps li {
+      font-size: 14px;
+      line-height: 1.55;
+      margin-bottom: 7px;
+      padding-left: 4px;
+    }
+    .course-steps li::marker { color: #69e6a6; font-weight: 800; }
     .course-points {
-      margin: 8px 0 0;
+      margin: 0;
       padding-left: 20px;
     }
     .course-points li {
@@ -1526,13 +1545,18 @@
             exp += `<div class="yt-wrap"><a class="yt-link" href="${latestState.videoUrl}" target="_blank" rel="noopener">▶ Watch an explanation on YouTube</a></div>`;
           }
           const course = latestState.courseDetail;
-          if (course && (course.lesson || (course.keyPoints && course.keyPoints.length))) {
+          const hasSteps = course && Array.isArray(course.steps) && course.steps.length;
+          const hasPoints = course && Array.isArray(course.keyPoints) && course.keyPoints.length;
+          if (course && (course.lesson || hasSteps || hasPoints)) {
             const title = formatMathHTML(course.title || "Learn more");
             const lesson = course.lesson ? `<div class="course-lesson">${formatMathHTML(course.lesson)}</div>` : "";
-            const points = Array.isArray(course.keyPoints) && course.keyPoints.length
-              ? `<ul class="course-points">${course.keyPoints.map((p) => `<li>${formatMathHTML(p)}</li>`).join("")}</ul>`
+            const steps = hasSteps
+              ? `<div class="course-subhead">Step by step</div><ol class="course-steps">${course.steps.map((s) => `<li>${formatMathHTML(s)}</li>`).join("")}</ol>`
               : "";
-            exp += `<div class="course-card"><div class="course-head">📘 Course detail · ${title}</div>${lesson}${points}</div>`;
+            const points = hasPoints
+              ? `<div class="course-subhead">Key points to remember</div><ul class="course-points">${course.keyPoints.map((p) => `<li>${formatMathHTML(p)}</li>`).join("")}</ul>`
+              : "";
+            exp += `<div class="course-card"><div class="course-head">📘 Course detail · ${title}</div>${lesson}${steps}${points}</div>`;
           }
           explanationEl.innerHTML = exp;
         } else {

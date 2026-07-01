@@ -1433,6 +1433,7 @@ function notationRenders(question) {
     question?.elaboration,
     course?.title,
     course?.lesson,
+    ...((Array.isArray(course?.steps) ? course.steps : [])),
     ...((Array.isArray(course?.keyPoints) ? course.keyPoints : []))
   ].join(" ");
   return !UNRENDERABLE_NOTATION.test(String(blob));
@@ -6980,10 +6981,11 @@ const QUIZ_QUESTION_SCHEMA = {
     courseDetail: {
       type: "object",
       additionalProperties: false,
-      required: ["title", "lesson", "keyPoints"],
+      required: ["title", "lesson", "steps", "keyPoints"],
       properties: {
         title: { type: "string" },
         lesson: { type: "string" },
+        steps: { type: "array", minItems: 3, maxItems: 6, items: { type: "string" } },
         keyPoints: { type: "array", minItems: 3, maxItems: 5, items: { type: "string" } }
       }
     },
@@ -7024,10 +7026,11 @@ const QUIZ_VERIFY_SCHEMA = {
 const COURSE_DETAIL_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["title", "lesson", "keyPoints"],
+  required: ["title", "lesson", "steps", "keyPoints"],
   properties: {
     title: { type: "string" },
     lesson: { type: "string" },
+    steps: { type: "array", minItems: 3, maxItems: 6, items: { type: "string" } },
     keyPoints: { type: "array", minItems: 3, maxItems: 5, items: { type: "string" } }
   }
 };
@@ -7036,7 +7039,8 @@ function courseDetailIsComplete(detail) {
   return Boolean(
     detail &&
     typeof detail.lesson === "string" && detail.lesson.trim() &&
-    Array.isArray(detail.keyPoints) && detail.keyPoints.length
+    ((Array.isArray(detail.steps) && detail.steps.length) ||
+      (Array.isArray(detail.keyPoints) && detail.keyPoints.length))
   );
 }
 
@@ -7051,7 +7055,7 @@ Question: ${question?.question || ""}
 Correct answer: ${correct ? correct.text : (question?.correctChoice || "")}
 Existing explanation: ${question?.shortExplanation || ""} ${question?.elaboration || ""}
 
-Write a short mini-lesson that teaches the underlying concept this question tests, so the student truly understands the topic and can answer similar questions with ease next time. Write it like a caring senior teacher giving a focused lesson, in the quiz's language (${getLanguageLabel(config.language)}${(config.language === "khmer" || config.language === "bilingual") ? ", using Khmer script (ភាសាខ្មែរ)" : ""}). It must contain: "title" — a short lesson heading naming the concept (under 10 words); "lesson" — a clear 60-110 word explanation of the concept, the method to solve this type of problem, and one brief worked example, matched to Grade ${config.gradeLevel}; "keyPoints" — 3 to 5 concise takeaways or rules the student should memorize. Keep it strictly on the topic of this question and appropriate for the grade.
+Write a clear, step-by-step mini-lesson that teaches the underlying concept this question tests, so the student truly understands the topic and can answer similar questions with ease next time. Write it like a caring senior teacher walking a student through it slowly, in the quiz's language (${getLanguageLabel(config.language)}${(config.language === "khmer" || config.language === "bilingual") ? ", using Khmer script (ភាសាខ្មែរ)" : ""}). It must contain: "title" — a short lesson heading naming the concept (under 10 words); "lesson" — a 40-80 word explanation of the core concept and when to use it, matched to Grade ${config.gradeLevel}; "steps" — an ordered list of 4 to 6 short, sequential steps that show EXACTLY how to solve this type of problem, worked on a concrete example (use this question's own numbers where you can). Each step is one clear instruction that shows the actual operation or calculation for that step, so a student can follow along and reproduce it. Do not skip steps or combine two moves into one; "keyPoints" — 3 to 5 concise takeaways or rules the student should memorize. Keep it strictly on the topic of this question and appropriate for the grade.
 NOTATION: write all math and science notation so it displays cleanly without a full LaTeX renderer. Use ^ for exponents (x^2), sqrt() for square roots, plain symbols (×, ÷, ±, °, ≤, ≥, π), ion charges like Na^+ or SO4^2-, and chemical formulas like H2O. Do NOT use LaTeX environments, matrices, integrals, \\text{}, \\vec{}, or multi-line LaTeX.`;
 
   const { text } = await llmJson({
@@ -7213,7 +7217,7 @@ Requirements:
 - Match the reading level and background knowledge of Grade ${config.gradeLevel}
 - A short explanation under 30 words
 - A more detailed elaboration under 90 words
-- In "courseDetail", a short mini-lesson that teaches the underlying concept this question tests, so the student truly understands the topic and can answer similar questions with ease next time. Write it like a caring senior teacher giving a focused lesson, in the quiz's language (${getLanguageLabel(config.language)}${(config.language === "khmer" || config.language === "bilingual") ? ", using Khmer script (ភាសាខ្មែរ)" : ""}). It must contain: "title" — a short lesson heading naming the concept (under 10 words); "lesson" — a clear 60-110 word explanation of the concept, the method to solve this type of problem, and one brief worked example, matched to Grade ${config.gradeLevel}; "keyPoints" — 3 to 5 concise takeaways or rules the student should memorize. Use the same clean notation rules described above. Keep it strictly on the topic of this question and appropriate for the grade.
+- In "courseDetail", a clear step-by-step mini-lesson that teaches the underlying concept this question tests, so the student truly understands the topic and can answer similar questions with ease next time. Write it like a caring senior teacher walking a student through it slowly, in the quiz's language (${getLanguageLabel(config.language)}${(config.language === "khmer" || config.language === "bilingual") ? ", using Khmer script (ភាសាខ្មែរ)" : ""}). It must contain: "title" — a short lesson heading naming the concept (under 10 words); "lesson" — a 40-80 word explanation of the core concept and when to use it, matched to Grade ${config.gradeLevel}; "steps" — an ordered list of 4 to 6 short, sequential steps that show EXACTLY how to solve this type of problem, worked on a concrete example (use this question's own numbers where you can). Each step is one clear instruction that shows the actual operation or calculation for that step, so a student can follow along and reproduce it. Do not skip steps or combine two moves into one; "keyPoints" — 3 to 5 concise takeaways or rules the student should memorize. Use the same clean notation rules described above. Keep it strictly on the topic of this question and appropriate for the grade.
 - NOTATION: write all math and science notation so it displays cleanly without a full LaTeX renderer. Use ^ for exponents (x^2, 10^3), a slash or \\frac{a}{b} for fractions, sqrt() for square roots, and plain symbols (×, ÷, ±, °, ≤, ≥, π) and chemical formulas like H2O, CO2, with charges written like Na^+ or SO4^2-. Do NOT use LaTeX environments, matrices, integrals/summations, indexed roots like \\sqrt[3]{}, \\text{}, \\vec{}, or multi-line LaTeX (\\\\).
 - In "videoQuery", a precise ENGLISH YouTube search query (6-12 words) for a tutorial that teaches the exact method or concept needed to SOLVE this question at this grade level. Phrase it the way a learner searches for a lesson and include the grade/level when helpful. Examples: how to find the area of a rectangle grade 4; balancing chemical equations step by step grade 10; subtracting fractions with different denominators explained.
 - In "videoQueryLocal", the SAME search query written in the quiz's language (${getLanguageLabel(config.language)}). ${(config.language === "khmer" || config.language === "bilingual") ? "Write it in Khmer script (ភាសាខ្មែរ), e.g. របៀបគណនាផ្ទៃក្រឡាចតុកោណកែង ថ្នាក់ទី៤." : "For English this can be identical to videoQuery."}
