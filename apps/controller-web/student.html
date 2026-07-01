@@ -375,6 +375,46 @@
       </div>`;
     }
 
+    function weeklyCard(w) {
+      if (!w) return "";
+      const max = Math.max(1, ...w.days.map((d) => d.questions));
+      const bars = w.days.map((d) => {
+        const h = Math.round((d.questions / max) * 34);
+        const dow = new Date(d.day + "T00:00:00Z").toLocaleDateString(undefined, { weekday: "narrow" });
+        return `<div style="flex:1;text-align:center;"><div style="height:36px;display:flex;align-items:flex-end;justify-content:center;"><div style="width:60%;height:${Math.max(3,h)}px;border-radius:4px;background:${d.questions?"var(--accent2)":"rgba(255,255,255,0.12)"};"></div></div><div style="font-size:10px;color:var(--muted);margin-top:3px;">${dow}</div></div>`;
+      }).join("");
+      return `<div class="mastery-card"><div style="font-weight:800;margin-bottom:2px;">This week</div>`
+        + `<div class="mastery-meta"><span><b>${w.questions}</b> questions</span><span><b>${w.accuracy}%</b> accuracy</span><span>active <b>${w.activeDays}</b>/7 days</span><span>+${w.xp} XP</span></div>`
+        + `<div style="display:flex;gap:4px;margin-top:8px;">${bars}</div></div>`;
+    }
+
+    function openCertificate(name, subjectLabel, levelName, badge) {
+      const w = window.open("", "_blank");
+      if (!w) return;
+      const date = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+      const esc = (s) => String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+      w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Certificate</title><style>
+        body{font-family:Georgia,'Times New Roman',serif;margin:0;background:#f4efe2;color:#20303f;}
+        .cert{max-width:800px;margin:24px auto;padding:48px 56px;background:#fff;border:10px solid #ffd34f;border-radius:14px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.15);}
+        .cert h1{font-size:34px;margin:0 0 6px;letter-spacing:1px;} .badge{font-size:64px;margin:8px 0;}
+        .name{font-size:30px;font-weight:bold;margin:14px 0 6px;color:#0b3a67;} .sub{font-size:20px;margin:6px 0;}
+        .level{display:inline-block;margin:10px 0;padding:6px 18px;border-radius:999px;background:#fff6d8;font-weight:bold;font-size:18px;}
+        .meta{color:#6b7a89;margin-top:18px;} .brand{margin-top:26px;font-weight:bold;color:#0b3a67;}
+        @media print{body{background:#fff;} .cert{box-shadow:none;margin:0;}}
+      </style></head><body><div class="cert">
+        <h1>Certificate of Achievement</h1>
+        <div class="badge">${esc(badge)}</div>
+        <div>This certifies that</div>
+        <div class="name">${esc(name)}</div>
+        <div class="sub">has reached <b>${esc(levelName)}</b> level in</div>
+        <div class="sub"><b>${esc(subjectLabel)}</b></div>
+        <div class="level">${esc(badge)} ${esc(levelName)}</div>
+        <div class="meta">Awarded ${esc(date)}</div>
+        <div class="brand">LyHuor Learning · Learning Center with AI</div>
+      </div><script>setTimeout(function(){window.print();},250);<\/script></body></html>`);
+      w.document.close();
+    }
+
     // Pick the lowest-accuracy subject with enough practice to be meaningful.
     function weakestSubject(subjects) {
       const eligible = (subjects || []).filter((s) => (s.questions || 0) >= 3);
@@ -399,13 +439,21 @@
       try {
         const data = await apiGet("/student/progress");
         const subjects = data.subjects || [];
-        $("engagement").innerHTML = engagementHTML(data.engagement);
+        $("engagement").innerHTML = engagementHTML(data.engagement) + (data.engagement ? weeklyCard(data.engagement.weekly) : "");
         const weak = weakestSubject(subjects);
         if (weak) {
           const btn = document.createElement("button");
           btn.textContent = "🎯 Practise your weakest: " + escapeHtml(weak.subjectLabel || weak.subject) + " (" + (weak.accuracy || 0) + "%)";
           btn.addEventListener("click", () => { window.location.href = practiceUrl(weak); });
           $("practiceRow").appendChild(btn);
+        }
+        const best = subjects.filter((s) => (s.mastery || {}).index >= 2).sort((a, b) => (b.mastery.index - a.mastery.index) || (b.accuracy - a.accuracy))[0];
+        if (best) {
+          const cbtn = document.createElement("button");
+          cbtn.className = "secondary";
+          cbtn.textContent = "🏅 Certificate: " + escapeHtml(best.subjectLabel || best.subject);
+          cbtn.addEventListener("click", () => openCertificate(localStorage.getItem(NAME_KEY) || "Student", best.subjectLabel || best.subject, best.mastery.name, best.mastery.badge));
+          $("practiceRow").appendChild(cbtn);
         }
         if (!subjects.length) {
           host.innerHTML = "<p class='muted'>No progress yet — take a quiz to start growing your subject mastery. 🌱</p>";

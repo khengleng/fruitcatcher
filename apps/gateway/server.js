@@ -3732,7 +3732,8 @@ function xpLevel(xp) {
 // Streak = consecutive local days (ending today or yesterday) with activity, plus
 // today's totals and lifetime XP/level. Read from the recent daily rows.
 async function getEngagement(studentDbId) {
-  const empty = { xpTotal: 0, level: 1, streakDays: 0, today: { questions: 0, correct: 0, xp: 0, goal: DAILY_GOAL_QUESTIONS, goalMet: false } };
+  const emptyWeek = { questions: 0, correct: 0, accuracy: 0, xp: 0, activeDays: 0, days: [] };
+  const empty = { xpTotal: 0, level: 1, streakDays: 0, today: { questions: 0, correct: 0, xp: 0, goal: DAILY_GOAL_QUESTIONS, goalMet: false }, weekly: emptyWeek };
   if (!db || !studentDbId) return empty;
   const res = await dbQuery(
     `SELECT to_char(day, 'YYYY-MM-DD') AS day, questions, correct, xp
@@ -3757,6 +3758,21 @@ async function getEngagement(studentDbId) {
     if (days.has(key)) { streak += 1; cursor.setUTCDate(cursor.getUTCDate() - 1); } else break;
   }
   const qToday = Number(todayRow.questions) || 0;
+  // Weekly digest (last 7 local days) from the same rows.
+  const byKey = new Map(rows.map((r) => [r.day, r]));
+  const weekDays = [];
+  const wc = new Date(todayStr + "T00:00:00Z");
+  wc.setUTCDate(wc.getUTCDate() - 6);
+  let wq = 0, wcorr = 0, wxp = 0, wactive = 0;
+  for (let i = 0; i < 7; i += 1) {
+    const key = wc.toISOString().slice(0, 10);
+    const row = byKey.get(key);
+    const q = row ? Number(row.questions) || 0 : 0;
+    weekDays.push({ day: key, questions: q, correct: row ? Number(row.correct) || 0 : 0 });
+    wq += q; wcorr += row ? Number(row.correct) || 0 : 0; wxp += row ? Number(row.xp) || 0 : 0;
+    if (q > 0) wactive += 1;
+    wc.setUTCDate(wc.getUTCDate() + 1);
+  }
   return {
     xpTotal,
     level: xpLevel(xpTotal),
@@ -3767,6 +3783,14 @@ async function getEngagement(studentDbId) {
       xp: Number(todayRow.xp) || 0,
       goal: DAILY_GOAL_QUESTIONS,
       goalMet: qToday >= DAILY_GOAL_QUESTIONS
+    },
+    weekly: {
+      questions: wq,
+      correct: wcorr,
+      accuracy: wq ? Math.round((wcorr / wq) * 100) : 0,
+      xp: wxp,
+      activeDays: wactive,
+      days: weekDays
     }
   };
 }
@@ -6760,6 +6784,40 @@ app.get("/admin/reports/ai-usage", requireAdmin, async (req, res) => {
   } catch (error) {
     console.error("AI usage report failed:", error);
     res.status(500).json({ error: "Could not load AI usage report" });
+  }
+});
+
+// Platform-wide subject mastery for teachers: where are students strong/weak?
+app.get("/admin/analytics/mastery", requireAdmin, async (_req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const r = await dbQueryRequired(
+      `SELECT subject,
+              SUM(total_questions)::int AS questions,
+              SUM(correct_answers)::int AS correct,
+              COUNT(DISTINCT student_id)::int AS students
+       FROM student_progress
+       GROUP BY subject
+       HAVING SUM(total_questions) > 0
+       ORDER BY SUM(total_questions) DESC`
+    );
+    const subjects = r.rows.map((row) => {
+      const q = Number(row.questions) || 0;
+      const c = Number(row.correct) || 0;
+      return {
+        subject: row.subject,
+        subjectLabel: getSubjectLabel(row.subject),
+        questions: q,
+        correct: c,
+        accuracy: q ? Math.round((c / q) * 100) : 0,
+        students: Number(row.students) || 0
+      };
+    });
+    const weakest = subjects.filter((s) => s.questions >= 10).slice().sort((a, b) => a.accuracy - b.accuracy).slice(0, 3);
+    res.json({ ok: true, subjects, weakest });
+  } catch (error) {
+    console.error("Admin mastery analytics failed:", error);
+    res.status(500).json({ error: "Could not load analytics" });
   }
 });
 

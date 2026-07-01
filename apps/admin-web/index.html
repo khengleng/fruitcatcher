@@ -981,6 +981,11 @@
         <div class="chart-container">
           <canvas id="activityChart"></canvas>
         </div>
+
+        <h3 style="margin-top:24px;">Subject Mastery — where students struggle</h3>
+        <p class="muted" style="font-size:13px;">Accuracy across all learners, by subject. Lowest-accuracy subjects (with enough practice) are the class's weak spots.</p>
+        <div id="masteryWeakest" style="margin:10px 0;"></div>
+        <div class="table-wrap"><table><thead><tr><th>Subject</th><th>Students</th><th>Questions</th><th>Accuracy</th></tr></thead><tbody id="masteryBody"></tbody></table></div>
       </section>
 
       <section id="questionsPanel" class="panel" hidden>
@@ -2418,6 +2423,22 @@
             }
           }
         });
+
+        // Subject mastery table + weak-spot highlights.
+        try {
+          const m = await api("/admin/analytics/mastery");
+          const rows = m.subjects || [];
+          const body = document.getElementById("masteryBody");
+          body.innerHTML = rows.map((s) => {
+            const color = s.accuracy >= 80 ? "#1f8b58" : s.accuracy >= 60 ? "#c99a1f" : "#a33d3d";
+            return `<tr><td>${escapeForHtml(s.subjectLabel)}</td><td>${s.students}</td><td>${s.questions}</td>`
+              + `<td style="color:${color};font-weight:700;">${s.accuracy}%</td></tr>`;
+          }).join("") || `<tr><td colspan="4" class="muted">No data yet.</td></tr>`;
+          const weak = m.weakest || [];
+          document.getElementById("masteryWeakest").innerHTML = weak.length
+            ? "⚠️ Weakest subjects: " + weak.map((w) => `<b>${escapeForHtml(w.subjectLabel)}</b> (${w.accuracy}%)`).join(" · ")
+            : "";
+        } catch (e) { /* non-fatal */ }
 
       } catch (error) {
         console.error("Failed to load analytics:", error);
