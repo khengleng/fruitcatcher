@@ -1639,11 +1639,20 @@ function verifyAdminSession(token) {
 }
 
 const STUDENT_SESSION_TTL_MS = Number(process.env.STUDENT_SESSION_TTL_MS || 30 * 24 * 60 * 60 * 1000);
+// Session-signing key. Derived from ADMIN_TOKEN so existing tokens stay valid,
+// but NEVER falls back to a public constant: with no ADMIN_TOKEN we return ""
+// and every sign/verify below fails closed (like verifyAdminSession), instead of
+// signing with a guessable value that would make student/subscriber tokens
+// forgeable.
 function studentSecret() {
-  return `${ADMIN_TOKEN || APP_VERSION}:student`;
+  return ADMIN_TOKEN ? `${ADMIN_TOKEN}:student` : "";
 }
 
 function signStudentSession(user) {
+  const secret = studentSecret();
+  if (!secret) {
+    throw new Error("Session signing secret is not configured (set ADMIN_TOKEN)");
+  }
   const payload = Buffer.from(JSON.stringify({
     sub: user.id,
     username: user.username,
@@ -1651,16 +1660,20 @@ function signStudentSession(user) {
     role: "student",
     exp: Date.now() + STUDENT_SESSION_TTL_MS
   })).toString("base64url");
-  const signature = crypto.createHmac("sha256", studentSecret()).update(payload).digest("base64url");
+  const signature = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
   return `${payload}.${signature}`;
 }
 
 function verifyStudentSession(token) {
+  const secret = studentSecret();
+  if (!secret) {
+    return null;
+  }
   const [payload, signature] = String(token || "").split(".");
   if (!payload || !signature) {
     return null;
   }
-  const expected = crypto.createHmac("sha256", studentSecret()).update(payload).digest("base64url");
+  const expected = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
   if (signature.length !== expected.length) {
     return null;
   }
@@ -1690,26 +1703,36 @@ function requireStudent(req, res, next) {
 // The token proves which subscriber a solo session belongs to; the actual
 // access check always re-reads active_until from the database at play time.
 const SUBSCRIBER_TOKEN_TTL_MS = Number(process.env.SUBSCRIBER_TOKEN_TTL_MS || 180 * 24 * 60 * 60 * 1000);
+// Same fail-closed policy as studentSecret(): never sign/verify with a public
+// fallback (that would let anyone forge a subscriber identity).
 function subscriberSecret() {
-  return `${ADMIN_TOKEN || APP_VERSION}:subscriber`;
+  return ADMIN_TOKEN ? `${ADMIN_TOKEN}:subscriber` : "";
 }
 
 function signSubscriberToken(subscriber) {
+  const secret = subscriberSecret();
+  if (!secret) {
+    throw new Error("Session signing secret is not configured (set ADMIN_TOKEN)");
+  }
   const payload = Buffer.from(JSON.stringify({
     sub: subscriber.id,
     role: "subscriber",
     exp: Date.now() + SUBSCRIBER_TOKEN_TTL_MS
   })).toString("base64url");
-  const signature = crypto.createHmac("sha256", subscriberSecret()).update(payload).digest("base64url");
+  const signature = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
   return `${payload}.${signature}`;
 }
 
 function verifySubscriberToken(token) {
+  const secret = subscriberSecret();
+  if (!secret) {
+    return null;
+  }
   const [payload, signature] = String(token || "").split(".");
   if (!payload || !signature) {
     return null;
   }
-  const expected = crypto.createHmac("sha256", subscriberSecret()).update(payload).digest("base64url");
+  const expected = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
   if (signature.length !== expected.length) {
     return null;
   }
@@ -4484,7 +4507,10 @@ async function isAuthorized(req) {
     return false;
   }
 
-  if (token === ADMIN_TOKEN) {
+  // Constant-time compare of the bootstrap admin token (avoids leaking its
+  // length/prefix via timing, matching how every other secret is checked).
+  if (token.length === ADMIN_TOKEN.length &&
+      crypto.timingSafeEqual(Buffer.from(token), Buffer.from(ADMIN_TOKEN))) {
     req.adminUser = { username: "token-admin", role: "admin" };
     return true;
   }
@@ -7985,6 +8011,13 @@ async function handleAction(roomCode, action, payload = {}) {
   }
 
   if (action === "start" || action === "next") {
+    // Only the TV screen or the host player may advance/reveal — otherwise any
+    // joined student could skip questions or force-reveal answers for the room.
+    const actor = payload.playerId ? room.players.get(payload.playerId) : null;
+    const isHostControl = Boolean(payload.fromTv) || Boolean(actor && actor.isHost);
+    if (!isHostControl) {
+      return;
+    }
     if (room.status === "ANSWERING") {
       revealQuestion(roomCode);
       return;

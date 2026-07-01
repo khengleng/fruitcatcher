@@ -16,6 +16,29 @@ const pageLimiter = rateLimit({
 
 app.use(pageLimiter);
 
+// Baseline security headers for the admin portal. Stricter than the public app:
+// the admin UI must never be framed (clickjacking), and CSP limits scripts to
+// self + the Chart.js CDN it loads. 'unsafe-inline' is required by the current
+// inline scripts/styles; frame-ancestors 'none' + X-Frame-Options: DENY block
+// framing regardless.
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'self'; " +
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
+    "style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data: https:; " +
+    "font-src 'self' data:; " +
+    "connect-src 'self' https: http://localhost:*; " +
+    "base-uri 'self'; object-src 'none'; frame-ancestors 'none'"
+  );
+  next();
+});
+
 function inferGatewayHttpUrl(req) {
   if (process.env.GATEWAY_HTTP_URL) {
     return process.env.GATEWAY_HTTP_URL;

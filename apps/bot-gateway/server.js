@@ -1,9 +1,15 @@
 const express = require("express");
+const crypto = require("crypto");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3003);
 const CONTROLLER_URL = process.env.CONTROLLER_URL || "https://mytv.cambobia.com";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+// Optional shared secret set via Telegram setWebhook(secret_token=…); when set,
+// Telegram echoes it in the X-Telegram-Bot-Api-Secret-Token header and we reject
+// any update that doesn't match (blocks forged webhook calls). Leave unset to
+// keep the current behaviour; set it AND re-register the webhook to enforce.
+const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || "";
 const MESSENGER_VERIFY_TOKEN = process.env.MESSENGER_VERIFY_TOKEN || "";
 const MESSENGER_PAGE_ACCESS_TOKEN = process.env.MESSENGER_PAGE_ACCESS_TOKEN || "";
 // Subscriptions: the bot talks to the gateway with a shared secret.
@@ -11,6 +17,13 @@ const GATEWAY_HTTP_URL = (process.env.GATEWAY_HTTP_URL || "").replace(/\/$/, "")
 const BOT_API_SECRET = process.env.BOT_API_SECRET || "";
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || "";
 const startedAt = new Date().toISOString();
+
+// Constant-time string compare (equal-length guard first).
+function safeEqual(a, b) {
+  const ab = Buffer.from(String(a || ""));
+  const bb = Buffer.from(String(b || ""));
+  return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
+}
 
 app.use(express.json({ limit: "1mb" }));
 
@@ -457,6 +470,11 @@ app.get("/quiz-link", (req, res) => {
 });
 
 app.post("/telegram/webhook", async (req, res) => {
+  // Reject forged updates: only Telegram knows the secret_token we registered.
+  if (TELEGRAM_WEBHOOK_SECRET && !safeEqual(req.get("x-telegram-bot-api-secret-token"), TELEGRAM_WEBHOOK_SECRET)) {
+    res.sendStatus(401);
+    return;
+  }
   res.sendStatus(200);
   try {
     await handleTelegramUpdate(req.body || {});
