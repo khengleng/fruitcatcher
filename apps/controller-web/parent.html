@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Parent Portal — LyHuor Learning</title>
+  <link rel="icon" type="image/svg+xml" href="./icon.svg">
+  <meta name="theme-color" content="#08111d">
+  <style>
+    :root {
+      --bg: #07101c; --panel: #112033; --panel2: #1b3151; --ink: #f6f8fb;
+      --muted: #9fb2c9; --accent: #ffd34f; --accent2: #69e6a6; --line: rgba(255,255,255,0.1);
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      margin: 0; min-height: 100vh; color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at 20% 0%, rgba(246,196,95,0.18), transparent 28%), linear-gradient(160deg, #07101c, #0f2238 48%, #07111c);
+    }
+    main { width: min(100%, 620px); margin: 0 auto; padding: 22px 16px 40px; }
+    h1 { font-size: 28px; margin: 0 0 4px; }
+    h2 { font-size: 18px; }
+    .muted { color: var(--muted); line-height: 1.5; }
+    .panel { background: linear-gradient(180deg, rgba(17,31,52,0.98), rgba(10,18,30,0.96)); border: 1px solid var(--line); border-radius: 20px; padding: 18px; margin-top: 16px; }
+    label { display: block; font-size: 13px; font-weight: 700; color: var(--muted); margin: 12px 0 6px; }
+    input, select, textarea { width: 100%; border: 0; outline: none; border-radius: 14px; padding: 13px; background: var(--panel2); color: var(--ink); font-size: 16px; }
+    textarea { resize: vertical; }
+    button { border: 0; border-radius: 14px; padding: 13px 18px; font-size: 16px; font-weight: 800; color: #08111d; background: var(--accent); cursor: pointer; }
+    button.secondary { background: #304c72; color: #fff; }
+    button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+    button:disabled { opacity: 0.5; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 6px; }
+    .tab { flex: 1; background: var(--panel2); color: var(--ink); }
+    .tab.active { background: var(--accent); color: #08111d; }
+    .status { margin-top: 10px; font-size: 14px; min-height: 18px; }
+    .hidden { display: none; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; }
+    .child-chip { background: var(--panel2); color: var(--ink); padding: 9px 14px; border-radius: 999px; font-weight: 800; }
+    .child-chip.active { background: var(--accent); color: #08111d; }
+    .assignment { border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin-top: 12px; background: rgba(255,255,255,0.04); }
+    .assignment h3 { margin: 0 0 4px; font-size: 16px; }
+    .assignment .meta { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+    .pill { display: inline-block; font-size: 12px; font-weight: 800; padding: 3px 10px; border-radius: 999px; }
+    .pill.done { background: rgba(105,230,166,0.18); color: var(--accent2); }
+    .pill.todo { background: rgba(255,211,79,0.16); color: var(--accent); }
+    .mastery-card { border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin-top: 12px; background: rgba(255,255,255,0.04); }
+    .mastery-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .mastery-subject { font-weight: 800; font-size: 16px; }
+    .mastery-badge { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; font-size: 14px; white-space: nowrap; }
+    .mastery-badge .ico { font-size: 22px; }
+    .mastery-meta { margin-top: 6px; font-size: 13px; color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .trend-up { color: var(--accent2); font-weight: 800; }
+    .trend-down { color: #ff9b7d; font-weight: 800; }
+    .trend-steady { color: var(--muted); font-weight: 700; }
+    .mastery-bar { margin-top: 9px; height: 8px; border-radius: 6px; background: rgba(255,255,255,0.10); overflow: hidden; }
+    .mastery-bar > span { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--accent2), var(--accent)); }
+    .mastery-next { margin-top: 6px; font-size: 12px; color: var(--muted); }
+    .mastery-maxed { margin-top: 6px; font-size: 12px; color: var(--accent2); font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="topbar">
+      <div>
+        <h1>👪 Parent Portal</h1>
+        <p class="muted" id="subtitle">Follow your child's learning and set them tasks.</p>
+      </div>
+      <button id="logoutBtn" class="secondary hidden" style="padding:10px 14px;">Log out</button>
+    </div>
+
+    <section id="authPanel" class="panel">
+      <div class="tabs">
+        <button class="tab active" id="tabLogin">Log in</button>
+        <button class="tab" id="tabRegister">Create account</button>
+      </div>
+      <div id="loginForm">
+        <label>Username<input id="loginUser" autocomplete="username" autocapitalize="none"></label>
+        <label>Password<input id="loginPass" type="password" autocomplete="current-password"></label>
+        <div class="row" style="margin-top:14px;"><button id="loginBtn">Log in</button></div>
+      </div>
+      <div id="registerForm" class="hidden">
+        <label>Your name<input id="regName" placeholder="e.g. Sophea's mum" autocomplete="name"></label>
+        <label>Username<input id="regUser" autocomplete="username" autocapitalize="none"></label>
+        <label>Password (min 8)<input id="regPass" type="password" autocomplete="new-password"></label>
+        <div class="row" style="margin-top:14px;"><button id="registerBtn">Create account</button></div>
+      </div>
+      <div class="status" id="authStatus"></div>
+    </section>
+
+    <section id="appPanel" class="panel hidden">
+      <div class="row" style="justify-content:space-between;"><strong id="welcome"></strong></div>
+
+      <h2>Link a child</h2>
+      <p class="muted" style="font-size:13px; margin:0 0 8px;">Ask your child to open their Student Portal → "Link a parent" → generate a code, then enter it here with their username.</p>
+      <div class="grid2">
+        <input id="childUser" placeholder="Child's username" autocapitalize="none">
+        <input id="linkCode" placeholder="Link code" autocapitalize="characters">
+      </div>
+      <div class="row" style="margin-top:10px;"><button id="linkBtn">Link child</button></div>
+      <div class="status" id="linkStatus"></div>
+
+      <h2 style="margin-top:20px;">Your children</h2>
+      <div class="row" id="children" style="margin-top:6px;"></div>
+
+      <div id="childView" class="hidden" style="margin-top:8px;">
+        <h2 id="childTitle" style="margin-top:20px;"></h2>
+
+        <h3 style="margin:14px 0 0; font-size:15px; color:var(--accent);">Progress by subject</h3>
+        <div id="childProgress"></div>
+
+        <h3 style="margin:20px 0 0; font-size:15px; color:var(--accent);">Assign a task</h3>
+        <label>Type</label>
+        <select id="taskKind">
+          <option value="quiz">Practice quiz</option>
+          <option value="todo">To-do / goal</option>
+        </select>
+        <label>Title<input id="taskTitle" placeholder="e.g. Practise multiplication"></label>
+        <label>Note (optional)<textarea id="taskNote" rows="2" maxlength="500" placeholder="A short message for your child"></textarea></label>
+        <div id="quizFields">
+          <div class="grid2">
+            <div><label>Subject</label><select id="taskSubject"></select></div>
+            <div><label>Grade</label><select id="taskGrade"></select></div>
+          </div>
+          <div class="grid2">
+            <div><label>Curriculum</label><select id="taskCurriculum">
+              <option value="cambodia_moeys">Cambodia MoEYS</option>
+              <option value="cambridge_igcse">Cambridge IGCSE</option>
+              <option value="international">International</option>
+            </select></div>
+            <div><label>Language</label><select id="taskLanguage">
+              <option value="khmer">Khmer</option>
+              <option value="english">English</option>
+              <option value="bilingual">Bilingual</option>
+            </select></div>
+          </div>
+          <div class="grid2">
+            <div><label>Questions</label><select id="taskCount"></select></div>
+            <div><label>Due (optional)</label><input id="taskDue" type="date"></div>
+          </div>
+        </div>
+        <div class="row" style="margin-top:12px;"><button id="assignBtn">Assign task</button></div>
+        <div class="status" id="assignStatus"></div>
+
+        <h3 style="margin:20px 0 0; font-size:15px; color:var(--accent);">Assigned tasks</h3>
+        <div id="childTasks"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="./config.js"></script>
+  <script src="./support-widget.js"></script>
+  <script>
+    const config = window.FRUIT_CATCHER_CONFIG || {};
+    const gatewayUrl = config.gatewayHttpUrl || "http://localhost:3000";
+    const TOKEN_KEY = "fruitcatcher_parent_token";
+    const NAME_KEY = "fruitcatcher_parent_name";
+    const SUBJECTS = [
+      ["math","Math"],["algebra_1","Algebra 1"],["algebra_2","Algebra 2"],["geometry","Geometry"],
+      ["general_science","General Science"],["biology","Biology"],["chemistry","Chemistry"],["physics","Physics"],
+      ["earth_science","Earth Science"],["computer_science","Computer Science"],["ict","ICT"],
+      ["english","English"],["english_second_language","English (ESL)"],["khmer_language","Khmer"],
+      ["economics","Economics"],["business_studies","Business Studies"],["accounting","Accounting"],
+      ["geography","Geography"],["history","History"],["moral_civics","Moral/Civics"]
+    ];
+
+    const $ = (id) => document.getElementById(id);
+    function token() { try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; } }
+    function setStatus(el, msg, color) { el.textContent = msg || ""; el.style.color = color || "var(--muted)"; }
+    function escapeHtml(v) { return String(v == null ? "" : v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+    function labelSubject(s) { const m = SUBJECTS.find((x)=>x[0]===s); return m ? m[1] : String(s||"").replace(/_/g," "); }
+
+    async function apiPost(path, body, auth) {
+      const headers = { "Content-Type": "application/json" };
+      if (auth) headers["Authorization"] = "Bearer " + token();
+      const res = await fetch(gatewayUrl + path, { method: "POST", headers, body: JSON.stringify(body || {}) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Request failed");
+      return data;
+    }
+    async function apiGet(path) {
+      const res = await fetch(gatewayUrl + path, { headers: { "Authorization": "Bearer " + token() } });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Request failed");
+      return data;
+    }
+    async function apiDelete(path) {
+      const res = await fetch(gatewayUrl + path, { method: "DELETE", headers: { "Authorization": "Bearer " + token() } });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Request failed");
+      return data;
+    }
+
+    let selectedChild = null;
+
+    function showAuthed(name) {
+      $("authPanel").classList.add("hidden");
+      $("appPanel").classList.remove("hidden");
+      $("logoutBtn").classList.remove("hidden");
+      $("subtitle").textContent = "Link your child, review progress, and assign tasks.";
+      $("welcome").textContent = "Hi, " + (name || "parent") + " 👋";
+      populateTaskSelectors();
+      loadChildren();
+    }
+    function showSignedOut() {
+      $("appPanel").classList.add("hidden");
+      $("authPanel").classList.remove("hidden");
+      $("logoutBtn").classList.add("hidden");
+      selectedChild = null;
+    }
+
+    $("tabLogin").addEventListener("click", () => {
+      $("tabLogin").classList.add("active"); $("tabRegister").classList.remove("active");
+      $("loginForm").classList.remove("hidden"); $("registerForm").classList.add("hidden");
+    });
+    $("tabRegister").addEventListener("click", () => {
+      $("tabRegister").classList.add("active"); $("tabLogin").classList.remove("active");
+      $("registerForm").classList.remove("hidden"); $("loginForm").classList.add("hidden");
+    });
+
+    $("loginBtn").addEventListener("click", async () => {
+      try {
+        setStatus($("authStatus"), "Signing in…", "var(--accent)");
+        const data = await apiPost("/parent/login", { username: $("loginUser").value.trim(), password: $("loginPass").value });
+        localStorage.setItem(TOKEN_KEY, data.token);
+        localStorage.setItem(NAME_KEY, data.parent.displayName);
+        setStatus($("authStatus"), "");
+        showAuthed(data.parent.displayName);
+      } catch (e) { setStatus($("authStatus"), e.message, "#ff9b7d"); }
+    });
+
+    $("registerBtn").addEventListener("click", async () => {
+      try {
+        setStatus($("authStatus"), "Creating account…", "var(--accent)");
+        const data = await apiPost("/parent/register", { username: $("regUser").value.trim(), password: $("regPass").value, displayName: $("regName").value.trim() });
+        localStorage.setItem(TOKEN_KEY, data.token);
+        localStorage.setItem(NAME_KEY, data.parent.displayName);
+        setStatus($("authStatus"), "");
+        showAuthed(data.parent.displayName);
+      } catch (e) { setStatus($("authStatus"), e.message, "#ff9b7d"); }
+    });
+
+    $("logoutBtn").addEventListener("click", () => {
+      localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(NAME_KEY); showSignedOut();
+    });
+
+    $("linkBtn").addEventListener("click", async () => {
+      try {
+        setStatus($("linkStatus"), "Linking…", "var(--accent)");
+        const data = await apiPost("/parent/link", { childUsername: $("childUser").value.trim(), code: $("linkCode").value.trim() }, true);
+        $("childUser").value = ""; $("linkCode").value = "";
+        setStatus($("linkStatus"), "Linked to " + data.child.displayName + " ✓", "var(--accent2)");
+        loadChildren();
+      } catch (e) {
+        if (/sign in/i.test(e.message)) { localStorage.removeItem(TOKEN_KEY); showSignedOut(); return; }
+        setStatus($("linkStatus"), e.message, "#ff9b7d");
+      }
+    });
+
+    function populateTaskSelectors() {
+      $("taskSubject").innerHTML = SUBJECTS.map((s) => `<option value="${s[0]}">${escapeHtml(s[1])}</option>`).join("");
+      $("taskGrade").innerHTML = Array.from({length: 11}, (_, i) => i + 2).map((g) => `<option value="${g}">Grade ${g}</option>`).join("");
+      $("taskCount").innerHTML = [3,5,8,10,15,20].map((n) => `<option value="${n}"${n===5?" selected":""}>${n} questions</option>`).join("");
+    }
+
+    $("taskKind").addEventListener("change", () => {
+      $("quizFields").style.display = $("taskKind").value === "quiz" ? "block" : "none";
+    });
+
+    async function loadChildren() {
+      const host = $("children");
+      host.innerHTML = "<span class='muted'>Loading…</span>";
+      try {
+        const data = await apiGet("/parent/children");
+        const kids = data.children || [];
+        if (!kids.length) { host.innerHTML = "<span class='muted'>No children linked yet.</span>"; $("childView").classList.add("hidden"); return; }
+        host.innerHTML = "";
+        kids.forEach((c) => {
+          const chip = document.createElement("button");
+          chip.className = "child-chip" + (selectedChild && selectedChild.studentUserId === c.studentUserId ? " active" : "");
+          chip.textContent = c.displayName;
+          chip.addEventListener("click", () => selectChild(c));
+          host.appendChild(chip);
+        });
+        if (!selectedChild || !kids.find((k) => k.studentUserId === selectedChild.studentUserId)) selectChild(kids[0]);
+      } catch (e) {
+        if (/sign in/i.test(e.message)) { localStorage.removeItem(TOKEN_KEY); showSignedOut(); return; }
+        host.innerHTML = `<span class='muted' style='color:#ff9b7d;'>${escapeHtml(e.message)}</span>`;
+      }
+    }
+
+    function selectChild(c) {
+      selectedChild = c;
+      loadChildren();
+      $("childView").classList.remove("hidden");
+      $("childTitle").textContent = c.displayName + "'s learning";
+      loadChildProgress();
+      loadChildTasks();
+    }
+
+    function masteryCardHTML(s) {
+      const m = s.mastery || {};
+      const trend = s.trend === "up" ? '<span class="trend-up">▲ improving</span>'
+        : s.trend === "down" ? '<span class="trend-down">▼ needs practice</span>'
+        : s.trend === "steady" ? '<span class="trend-steady">→ steady</span>' : "";
+      const nextLine = m.isMax ? '<div class="mastery-maxed">🏆 Top level reached!</div>'
+        : (m.next ? `<div class="mastery-bar"><span style="width:${Math.max(4, Number(m.progressPct)||0)}%"></span></div>`
+            + `<div class="mastery-next">${Number(m.progressPct)||0}% to ${escapeHtml(m.next.badge)} ${escapeHtml(m.next.name)} (needs ${m.next.minQuestions}+ questions at ${m.next.minAccuracy}%+)</div>` : "");
+      return `<div class="mastery-card"><div class="mastery-top">`
+        + `<span class="mastery-subject">${escapeHtml(s.subjectLabel || s.subject)}</span>`
+        + `<span class="mastery-badge"><span class="ico">${escapeHtml(m.badge||"🌱")}</span>${escapeHtml(m.name||"Starter")}</span></div>`
+        + `<div class="mastery-meta"><span><b>${s.accuracy||0}%</b> accuracy</span><span>${s.questions||0} questions</span>${trend}</div>${nextLine}</div>`;
+    }
+
+    async function loadChildProgress() {
+      const host = $("childProgress");
+      host.innerHTML = "<p class='muted'>Loading…</p>";
+      try {
+        const data = await apiGet("/parent/children/" + encodeURIComponent(selectedChild.studentUserId) + "/progress");
+        const subjects = data.subjects || [];
+        host.innerHTML = subjects.length ? subjects.map(masteryCardHTML).join("") : "<p class='muted'>No practice yet. Assign a quiz task to get started. 🌱</p>";
+      } catch (e) {
+        if (/sign in/i.test(e.message)) { localStorage.removeItem(TOKEN_KEY); showSignedOut(); return; }
+        host.innerHTML = `<p class='muted' style='color:#ff9b7d;'>${escapeHtml(e.message)}</p>`;
+      }
+    }
+
+    $("assignBtn").addEventListener("click", async () => {
+      if (!selectedChild) return;
+      const kind = $("taskKind").value;
+      const body = { kind, title: $("taskTitle").value.trim(), note: $("taskNote").value.trim(), dueAt: $("taskDue").value || null };
+      if (kind === "quiz") {
+        body.subject = $("taskSubject").value; body.gradeLevel = Number($("taskGrade").value);
+        body.curriculum = $("taskCurriculum").value; body.language = $("taskLanguage").value;
+        body.questionsPerRound = Number($("taskCount").value);
+      }
+      try {
+        setStatus($("assignStatus"), "Assigning…", "var(--accent)");
+        await apiPost("/parent/children/" + encodeURIComponent(selectedChild.studentUserId) + "/tasks", body, true);
+        $("taskTitle").value = ""; $("taskNote").value = ""; $("taskDue").value = "";
+        setStatus($("assignStatus"), "Task assigned ✓", "var(--accent2)");
+        loadChildTasks();
+      } catch (e) {
+        if (/sign in/i.test(e.message)) { localStorage.removeItem(TOKEN_KEY); showSignedOut(); return; }
+        setStatus($("assignStatus"), e.message, "#ff9b7d");
+      }
+    });
+
+    async function loadChildTasks() {
+      const host = $("childTasks");
+      host.innerHTML = "<p class='muted'>Loading…</p>";
+      try {
+        const data = await apiGet("/parent/children/" + encodeURIComponent(selectedChild.studentUserId) + "/tasks");
+        const tasks = data.tasks || [];
+        if (!tasks.length) { host.innerHTML = "<p class='muted'>No tasks assigned yet.</p>"; return; }
+        host.innerHTML = "";
+        tasks.forEach((t) => {
+          const done = t.status === "done";
+          const meta = t.kind === "quiz" ? `${escapeHtml(labelSubject(t.subject))} · Grade ${t.gradeLevel} · ${t.questionsPerRound} questions` : "To-do";
+          const due = t.dueAt ? ` · due ${new Date(t.dueAt).toLocaleDateString()}` : "";
+          const pill = done
+            ? `<span class="pill done">Done${(t.kind==="quiz" && t.score!=null) ? " · "+t.score+"/"+t.total : ""}</span>`
+            : `<span class="pill todo">Assigned</span>`;
+          const card = document.createElement("div");
+          card.className = "assignment";
+          card.innerHTML = `
+            <h3>${escapeHtml(t.title)}</h3>
+            <div class="meta">${meta}${due}</div>
+            ${t.note ? `<p class="muted" style="margin:0 0 10px;">${escapeHtml(t.note)}</p>` : ""}
+            <div class="row" style="justify-content:space-between;">${pill}<button class="ghost" data-del="${escapeHtml(t.id)}">Remove</button></div>`;
+          card.querySelector("button[data-del]").addEventListener("click", async (ev) => {
+            const btn = ev.currentTarget; btn.disabled = true;
+            try { await apiDelete("/parent/tasks/" + encodeURIComponent(btn.getAttribute("data-del"))); loadChildTasks(); }
+            catch (e) { btn.disabled = false; }
+          });
+          host.appendChild(card);
+        });
+      } catch (e) {
+        if (/sign in/i.test(e.message)) { localStorage.removeItem(TOKEN_KEY); showSignedOut(); return; }
+        host.innerHTML = `<p class='muted' style='color:#ff9b7d;'>${escapeHtml(e.message)}</p>`;
+      }
+    }
+
+    // Boot
+    if (token()) { showAuthed(localStorage.getItem(NAME_KEY) || "parent"); } else { showSignedOut(); }
+  </script>
+</body>
+</html>

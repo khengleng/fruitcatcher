@@ -10,8 +10,13 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 // any update that doesn't match (blocks forged webhook calls). Leave unset to
 // keep the current behaviour; set it AND re-register the webhook to enforce.
 const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || "";
+// Public HTTPS URL of this bot's /telegram/webhook. If set together with the
+// secret, the bot self-registers the webhook with secret_token at startup.
+const TELEGRAM_WEBHOOK_URL = process.env.TELEGRAM_WEBHOOK_URL || "";
 const MESSENGER_VERIFY_TOKEN = process.env.MESSENGER_VERIFY_TOKEN || "";
 const MESSENGER_PAGE_ACCESS_TOKEN = process.env.MESSENGER_PAGE_ACCESS_TOKEN || "";
+// App secret for verifying Messenger's X-Hub-Signature-256 (rejects forged events).
+const MESSENGER_APP_SECRET = process.env.MESSENGER_APP_SECRET || "";
 // Subscriptions: the bot talks to the gateway with a shared secret.
 const GATEWAY_HTTP_URL = (process.env.GATEWAY_HTTP_URL || "").replace(/\/$/, "");
 const BOT_API_SECRET = process.env.BOT_API_SECRET || "";
@@ -25,7 +30,8 @@ function safeEqual(a, b) {
   return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
 }
 
-app.use(express.json({ limit: "1mb" }));
+// Capture the raw body so we can verify the Messenger HMAC signature.
+app.use(express.json({ limit: "1mb", verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 function cleanText(value, maxLength = 80) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxLength);
@@ -497,6 +503,16 @@ app.get("/messenger/webhook", (req, res) => {
 });
 
 app.post("/messenger/webhook", async (req, res) => {
+  // Verify Facebook's HMAC signature over the raw body when the app secret is set.
+  if (MESSENGER_APP_SECRET) {
+    const sig = String(req.get("x-hub-signature-256") || "");
+    const expected = "sha256=" + crypto.createHmac("sha256", MESSENGER_APP_SECRET)
+      .update(req.rawBody || Buffer.from("")).digest("hex");
+    if (!safeEqual(sig, expected)) {
+      res.sendStatus(401);
+      return;
+    }
+  }
   res.sendStatus(200);
 
   try {
@@ -545,8 +561,21 @@ async function refreshBotConfig() {
   }
 }
 
+// Register the webhook WITH the secret so Telegram echoes it back for us to
+// verify. Only runs when both the URL and secret are configured.
+async function registerTelegramWebhook() {
+  if (!(TELEGRAM_BOT_TOKEN && TELEGRAM_WEBHOOK_URL && TELEGRAM_WEBHOOK_SECRET)) return;
+  const ok = await tg("setWebhook", {
+    url: TELEGRAM_WEBHOOK_URL,
+    secret_token: TELEGRAM_WEBHOOK_SECRET,
+    allowed_updates: ["message", "edited_message", "callback_query"]
+  });
+  console.log(ok ? "Telegram webhook registered with secret." : "Telegram setWebhook failed.");
+}
+
 app.listen(PORT, () => {
   console.log(`Bot gateway listening on ${PORT} (subscriptions ${subscriptionsConfigured ? "configured" : "off"})`);
+  registerTelegramWebhook().catch((e) => console.error("Webhook registration failed:", e.message));
   if (subscriptionsConfigured) {
     refreshBotConfig().finally(() => {
       if (TELEGRAM_BOT_TOKEN) {

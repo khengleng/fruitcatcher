@@ -1236,13 +1236,14 @@
             studentName: normalizedPlayerName || "Student",
             clientId: savedSession.clientId,
             shareId: params.get("shareId") || "",
-            // Only attach the logged-in student identity for classroom assignments.
-            // For self-serve / Telegram solo quizzes, use the name typed here.
-            studentToken: (params.get("classroomId")
+            // Attach the logged-in student identity for classroom assignments AND
+            // for parent-assigned tasks (so the task completes under their account).
+            studentToken: ((params.get("classroomId") || params.get("parentTaskId"))
               ? (function () { try { return localStorage.getItem("fruitcatcher_student_token") || ""; } catch (e) { return ""; } })()
               : ""),
             subscriberToken: getSubscriberToken(),
             classroomId: params.get("classroomId") || "",
+            parentTaskId: params.get("parentTaskId") || "",
             source: params.get("source") || "web",
             sourceUserId: params.get("sourceUserId") || params.get("uid") || "",
             curriculum: soloCurriculumEl.value,

@@ -16,6 +16,15 @@ const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 const ADMIN_SESSION_TTL_MS = Number(process.env.ADMIN_SESSION_TTL_MS || 12 * 60 * 60 * 1000);
+// Root secret for signing student/subscriber/parent session tokens. Prefer a
+// dedicated SESSION_SIGNING_SECRET so a leak of ADMIN_TOKEN (the admin bearer)
+// can't forge those tokens; falls back to ADMIN_TOKEN so existing tokens keep
+// working until a dedicated key is set. Never falls back to a public constant.
+const SIGNING_ROOT = process.env.SESSION_SIGNING_SECRET || ADMIN_TOKEN;
+// The raw ADMIN_TOKEN doubles as a passwordless admin bearer (bootstrap). Once
+// real admin accounts exist, set ADMIN_TOKEN_BEARER_ENABLED=false to disable
+// that unrevocable path and require account login. Default on (non-breaking).
+const ADMIN_TOKEN_BEARER_ENABLED = process.env.ADMIN_TOKEN_BEARER_ENABLED !== "false";
 const ADMIN_ALLOWED_ORIGINS = (process.env.ADMIN_ALLOWED_ORIGINS || "https://admintv.cambobia.com,http://localhost:3002,http://127.0.0.1:3002")
   .split(",")
   .map((origin) => origin.trim())
@@ -1645,7 +1654,7 @@ const STUDENT_SESSION_TTL_MS = Number(process.env.STUDENT_SESSION_TTL_MS || 30 *
 // signing with a guessable value that would make student/subscriber tokens
 // forgeable.
 function studentSecret() {
-  return ADMIN_TOKEN ? `${ADMIN_TOKEN}:student` : "";
+  return SIGNING_ROOT ? `${SIGNING_ROOT}:student` : "";
 }
 
 function signStudentSession(user) {
@@ -1658,6 +1667,7 @@ function signStudentSession(user) {
     username: user.username,
     name: user.display_name,
     role: "student",
+    tv: Number(user.token_version || 0),
     exp: Date.now() + STUDENT_SESSION_TTL_MS
   })).toString("base64url");
   const signature = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
@@ -1688,25 +1698,118 @@ function verifyStudentSession(token) {
   }
 }
 
-function requireStudent(req, res, next) {
+async function requireStudent(req, res, next) {
   const token = req.get("authorization")?.replace(/^Bearer\s+/i, "") || req.get("x-student-token") || "";
   const session = verifyStudentSession(token);
   if (!session) {
     res.status(401).json({ error: "Please sign in." });
     return;
   }
+  // Live revocation: reject if the account was disabled or its sessions were
+  // bumped (force-logout) since the token was issued.
+  if (db && session.sub) {
+    const live = await dbQuery("SELECT is_active, token_version FROM student_users WHERE id = $1", [session.sub]);
+    const acct = live?.rows?.[0];
+    if (!acct || acct.is_active === false || Number(acct.token_version || 0) !== Number(session.tv || 0)) {
+      res.status(401).json({ error: "Please sign in." });
+      return;
+    }
+  }
   req.studentUser = session;
   next();
+}
+
+// ===== Parent accounts (review a linked child's progress, assign tasks) =====
+const PARENT_SESSION_TTL_MS = Number(process.env.PARENT_SESSION_TTL_MS || 30 * 24 * 60 * 60 * 1000);
+function parentSecret() {
+  return SIGNING_ROOT ? `${SIGNING_ROOT}:parent` : "";
+}
+
+function signParentSession(user) {
+  const secret = parentSecret();
+  if (!secret) {
+    throw new Error("Session signing secret is not configured (set ADMIN_TOKEN)");
+  }
+  const payload = Buffer.from(JSON.stringify({
+    sub: user.id,
+    username: user.username,
+    name: user.display_name,
+    role: "parent",
+    tv: Number(user.token_version || 0),
+    exp: Date.now() + PARENT_SESSION_TTL_MS
+  })).toString("base64url");
+  const signature = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+function verifyParentSession(token) {
+  const secret = parentSecret();
+  if (!secret) {
+    return null;
+  }
+  const [payload, signature] = String(token || "").split(".");
+  if (!payload || !signature) {
+    return null;
+  }
+  const expected = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
+  if (signature.length !== expected.length) {
+    return null;
+  }
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    return null;
+  }
+  try {
+    const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return session.exp > Date.now() && session.role === "parent" ? session : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+async function requireParent(req, res, next) {
+  const token = req.get("authorization")?.replace(/^Bearer\s+/i, "") || req.get("x-parent-token") || "";
+  const session = verifyParentSession(token);
+  if (!session) {
+    res.status(401).json({ error: "Please sign in." });
+    return;
+  }
+  if (db && session.sub) {
+    const live = await dbQuery("SELECT is_active, token_version FROM parent_users WHERE id = $1", [session.sub]);
+    const acct = live?.rows?.[0];
+    if (!acct || acct.is_active === false || Number(acct.token_version || 0) !== Number(session.tv || 0)) {
+      res.status(401).json({ error: "Please sign in." });
+      return;
+    }
+  }
+  req.parentUser = session;
+  next();
+}
+
+function parentProfile(user, token) {
+  return { token, parent: { id: user.id, username: user.username, displayName: user.display_name } };
+}
+
+// Authorization for any child-scoped parent route: the parent must be linked to
+// this child (the link was created only via the child's consent code).
+async function parentOwnsChild(parentId, studentUserId) {
+  const r = await dbQuery(
+    "SELECT 1 FROM parent_child_links WHERE parent_user_id = $1 AND student_user_id = $2",
+    [parentId, String(studentUserId || "")]
+  );
+  return Boolean(r?.rows?.[0]);
 }
 
 // ===== Subscriber tokens (carried in solo-quiz links handed out by the bot) =====
 // The token proves which subscriber a solo session belongs to; the actual
 // access check always re-reads active_until from the database at play time.
-const SUBSCRIBER_TOKEN_TTL_MS = Number(process.env.SUBSCRIBER_TOKEN_TTL_MS || 180 * 24 * 60 * 60 * 1000);
+// Shorter default TTL (was 180d): the bot re-mints a fresh token every time it
+// builds a quiz link, so a short-lived token limits the blast radius of a leaked
+// link without hurting UX.
+const SUBSCRIBER_TOKEN_TTL_MS = Number(process.env.SUBSCRIBER_TOKEN_TTL_MS || 30 * 24 * 60 * 60 * 1000);
 // Same fail-closed policy as studentSecret(): never sign/verify with a public
 // fallback (that would let anyone forge a subscriber identity).
 function subscriberSecret() {
-  return ADMIN_TOKEN ? `${ADMIN_TOKEN}:subscriber` : "";
+  return SIGNING_ROOT ? `${SIGNING_ROOT}:subscriber` : "";
 }
 
 function signSubscriberToken(subscriber) {
@@ -2186,6 +2289,65 @@ async function initDatabase() {
       last_login_at TIMESTAMPTZ
     )
   `);
+  // Force-logout / disable support for students (bump to invalidate live tokens).
+  await dbQueryRequired("ALTER TABLE student_users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0");
+
+  // ===== Parents: accounts that link to their children and assign tasks =====
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS parent_users (
+      id TEXT PRIMARY KEY,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      token_version INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_login_at TIMESTAMPTZ
+    )
+  `);
+  // A child generates a short code in their portal; the parent enters it to link
+  // (consent-based, no password sharing). One active code per child.
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS student_link_codes (
+      student_user_id TEXT PRIMARY KEY REFERENCES student_users(id) ON DELETE CASCADE,
+      code TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS parent_child_links (
+      id TEXT PRIMARY KEY,
+      parent_user_id TEXT NOT NULL REFERENCES parent_users(id) ON DELETE CASCADE,
+      student_user_id TEXT NOT NULL REFERENCES student_users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (parent_user_id, student_user_id)
+    )
+  `);
+  await dbQueryRequired(`
+    CREATE TABLE IF NOT EXISTS parent_tasks (
+      id TEXT PRIMARY KEY,
+      parent_user_id TEXT NOT NULL REFERENCES parent_users(id) ON DELETE CASCADE,
+      student_user_id TEXT NOT NULL REFERENCES student_users(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      note TEXT,
+      curriculum TEXT,
+      language TEXT,
+      subject TEXT,
+      grade_level INTEGER,
+      questions_per_round INTEGER,
+      due_at TIMESTAMPTZ,
+      status TEXT NOT NULL DEFAULT 'assigned',
+      score INTEGER,
+      total INTEGER,
+      completed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_parent_child_parent ON parent_child_links(parent_user_id)");
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_parent_tasks_student ON parent_tasks(student_user_id, status, created_at DESC)");
+  await dbQueryRequired("ALTER TABLE solo_sessions ADD COLUMN IF NOT EXISTS parent_task_id TEXT");
 
   // Teacher-owned classrooms, their roster, and assigned quizzes.
   await dbQueryRequired(`
@@ -3020,13 +3182,16 @@ function subscriberIsActive(row) {
   return Boolean(row && row.active_until && new Date(row.active_until).getTime() > Date.now());
 }
 
-function publicSubscriber(row) {
+// includePhone defaults false so the bot-facing endpoints (gated only by the
+// shared bot secret) don't hand out subscriber phone numbers; admin views that
+// legitimately manage subscribers pass true.
+function publicSubscriber(row, includePhone = false) {
   return {
     id: row.id,
     telegramId: row.telegram_id,
     telegramUsername: row.telegram_username,
     displayName: row.display_name,
-    phone: row.phone,
+    ...(includePhone ? { phone: row.phone } : {}),
     activeUntil: row.active_until,
     active: subscriberIsActive(row),
     token: signSubscriberToken(row)
@@ -3728,7 +3893,10 @@ app.post("/solo/sessions", async (req, res) => {
       shareId: share ? share.id : null,
       studentUserId: studentSession ? studentSession.sub : null,
       classroomId,
-      subscriberId
+      subscriberId,
+      // Set when a child launches a parent-assigned quiz task; used to mark that
+      // task done (with the score) when the quiz finishes.
+      parentTaskId: studentSession ? (String(req.body?.parentTaskId || "").trim() || null) : null
     };
 
     soloSessions.set(session.id, session);
@@ -3829,6 +3997,7 @@ app.post("/solo/sessions/:id/answer", async (req, res) => {
     if (session.status === "FINISHED") {
       session.currentQuestion = null;
       session.currentAnswer = null;
+      await completeParentQuizTask(session);
     }
 
     await persistSoloAnswer(session, result);
@@ -4199,7 +4368,7 @@ app.post("/admin/subscription/payments/:id/approve", requireAdmin, async (req, r
       sendTelegramMessage(subscriber.telegram_id,
         `✅ Your subscription is now active until ${until}.\n\nOpen the bot and tap "Take a quiz" to start. Enjoy!`).catch(() => {});
     }
-    res.json({ ok: true, subscriber: subscriber ? publicSubscriber(subscriber) : null });
+    res.json({ ok: true, subscriber: subscriber ? publicSubscriber(subscriber, true) : null });
   });
 });
 
@@ -4317,7 +4486,7 @@ app.post("/admin/subscription/subscribers/:id/extend", requireAdmin, async (req,
     const subscriber = await extendSubscriber(id, days);
     if (!subscriber) { res.status(404).json({ error: "Subscriber not found" }); return; }
     await logAuditAction("subscription.subscriber.extend", "subscribers", id, { days, activeUntil: subscriber.active_until }, req);
-    res.json({ ok: true, subscriber: publicSubscriber(subscriber) });
+    res.json({ ok: true, subscriber: publicSubscriber(subscriber, true) });
   });
 });
 
@@ -4508,8 +4677,9 @@ async function isAuthorized(req) {
   }
 
   // Constant-time compare of the bootstrap admin token (avoids leaking its
-  // length/prefix via timing, matching how every other secret is checked).
-  if (token.length === ADMIN_TOKEN.length &&
+  // length/prefix via timing). Can be disabled once real admin accounts exist.
+  if (ADMIN_TOKEN_BEARER_ENABLED &&
+      token.length === ADMIN_TOKEN.length &&
       crypto.timingSafeEqual(Buffer.from(token), Buffer.from(ADMIN_TOKEN))) {
     req.adminUser = { username: "token-admin", role: "admin" };
     return true;
@@ -5592,6 +5762,307 @@ app.get("/student/progress", requireStudent, async (req, res) => {
     res.status(500).json({ error: "Could not load your progress" });
   }
 });
+
+// ============================================================================
+// Parents — accounts that link to a child and review progress / assign tasks
+// ============================================================================
+const PARENT_TASK_CURRICULA = ["cambodia_moeys", "cambridge_igcse", "international"];
+const PARENT_TASK_LANGUAGES = ["khmer", "english", "bilingual"];
+
+function publicParentTask(row) {
+  return {
+    id: row.id,
+    kind: row.kind,
+    title: row.title,
+    note: row.note || "",
+    curriculum: row.curriculum,
+    language: row.language,
+    subject: row.subject,
+    subjectLabel: row.subject ? getSubjectLabel(row.subject) : null,
+    gradeLevel: row.grade_level,
+    questionsPerRound: row.questions_per_round,
+    dueAt: row.due_at,
+    status: row.status,
+    score: row.score,
+    total: row.total,
+    completedAt: row.completed_at,
+    createdAt: row.created_at
+  };
+}
+
+// Short, human-friendly, unambiguous code (no 0/O/1/I) for parent linking.
+function generateLinkCode() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = crypto.randomBytes(6);
+  let out = "";
+  for (let i = 0; i < 6; i += 1) out += alphabet[bytes[i] % alphabet.length];
+  return out;
+}
+
+app.post("/parent/register", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const username = String(req.body?.username || "").trim().toLowerCase();
+    const password = String(req.body?.password || "");
+    const displayName = sanitizeStudentName(req.body?.displayName || req.body?.name || username);
+    if (!/^[a-z0-9._-]{3,40}$/.test(username)) {
+      res.status(400).json({ error: "Username must be 3-40 characters (letters, numbers, . _ -)." });
+      return;
+    }
+    if (password.length < 8) {
+      res.status(400).json({ error: "Password must be at least 8 characters." });
+      return;
+    }
+    const existing = await dbQueryRequired("SELECT id FROM parent_users WHERE username = $1", [username]);
+    if (existing.rows[0]) {
+      res.status(409).json({ error: "That username is taken." });
+      return;
+    }
+    const id = createId();
+    await dbQueryRequired(
+      "INSERT INTO parent_users (id, username, password_hash, display_name, is_active, created_at) VALUES ($1,$2,$3,$4,TRUE,NOW())",
+      [id, username, hashPassword(password), displayName]
+    );
+    const user = { id, username, display_name: displayName };
+    res.status(201).json({ ok: true, ...parentProfile(user, signParentSession(user)) });
+  } catch (error) {
+    console.error("Parent register failed:", error);
+    res.status(500).json({ error: "Could not create account" });
+  }
+});
+
+app.post("/parent/login", async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const username = String(req.body?.username || "").trim().toLowerCase();
+    const password = String(req.body?.password || "");
+    const result = await dbQueryRequired("SELECT * FROM parent_users WHERE username = $1 AND is_active = TRUE", [username]);
+    const user = result.rows[0];
+    if (!user || !verifyPassword(password, user.password_hash)) {
+      res.status(401).json({ error: "Invalid username or password." });
+      return;
+    }
+    await dbQuery("UPDATE parent_users SET last_login_at = NOW() WHERE id = $1", [user.id]);
+    res.json({ ok: true, ...parentProfile(user, signParentSession(user)) });
+  } catch (error) {
+    console.error("Parent login failed:", error);
+    res.status(500).json({ error: "Login failed" });
+  }
+});
+
+// Link to a child with the child's username + the code the child generated.
+app.post("/parent/link", requireParent, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const childUsername = String(req.body?.childUsername || "").trim().toLowerCase();
+    const code = String(req.body?.code || "").trim().toUpperCase();
+    if (!childUsername || !code) {
+      res.status(400).json({ error: "Enter your child's username and their link code." });
+      return;
+    }
+    const stu = await dbQueryRequired("SELECT id, display_name FROM student_users WHERE username = $1 AND is_active = TRUE", [childUsername]);
+    const child = stu.rows[0];
+    const codeRow = child ? await dbQueryRequired("SELECT code, expires_at FROM student_link_codes WHERE student_user_id = $1", [child.id]) : null;
+    const rec = codeRow?.rows?.[0];
+    // Same generic error whether the username or the code is wrong (don't reveal which).
+    if (!child || !rec || String(rec.code).toUpperCase() !== code || new Date(rec.expires_at).getTime() < Date.now()) {
+      res.status(403).json({ error: "That username and link code don't match, or the code has expired. Ask your child to generate a new code." });
+      return;
+    }
+    await dbQueryRequired(
+      "INSERT INTO parent_child_links (id, parent_user_id, student_user_id, created_at) VALUES ($1,$2,$3,NOW()) ON CONFLICT (parent_user_id, student_user_id) DO NOTHING",
+      [createId(), req.parentUser.sub, child.id]
+    );
+    await dbQuery("DELETE FROM student_link_codes WHERE student_user_id = $1", [child.id]);
+    res.json({ ok: true, child: { studentUserId: child.id, displayName: child.display_name, username: childUsername } });
+  } catch (error) {
+    console.error("Parent link failed:", error);
+    res.status(500).json({ error: "Could not link to your child" });
+  }
+});
+
+app.get("/parent/children", requireParent, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const r = await dbQueryRequired(
+      `SELECT s.id AS student_user_id, s.username, s.display_name
+       FROM parent_child_links l JOIN student_users s ON s.id = l.student_user_id
+       WHERE l.parent_user_id = $1 ORDER BY s.display_name`,
+      [req.parentUser.sub]
+    );
+    res.json({ ok: true, children: r.rows.map((x) => ({ studentUserId: x.student_user_id, username: x.username, displayName: x.display_name })) });
+  } catch (error) {
+    console.error("Parent children failed:", error);
+    res.status(500).json({ error: "Could not load your children" });
+  }
+});
+
+app.delete("/parent/children/:studentId", requireParent, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    await dbQueryRequired("DELETE FROM parent_child_links WHERE parent_user_id = $1 AND student_user_id = $2", [req.parentUser.sub, req.params.studentId]);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Parent unlink failed:", error);
+    res.status(500).json({ error: "Could not unlink" });
+  }
+});
+
+app.get("/parent/children/:studentId/progress", requireParent, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    if (!(await parentOwnsChild(req.parentUser.sub, req.params.studentId))) {
+      res.status(403).json({ error: "You're not linked to this child." });
+      return;
+    }
+    const row = await dbQuery("SELECT id FROM students WHERE client_id = $1", [`solo:student:${req.params.studentId}`]);
+    const studentDbId = row?.rows?.[0]?.id || null;
+    const subjects = studentDbId ? await getSubjectProgress(studentDbId) : [];
+    res.json({ ok: true, subjects });
+  } catch (error) {
+    console.error("Parent child progress failed:", error);
+    res.status(500).json({ error: "Could not load progress" });
+  }
+});
+
+app.get("/parent/children/:studentId/tasks", requireParent, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    if (!(await parentOwnsChild(req.parentUser.sub, req.params.studentId))) {
+      res.status(403).json({ error: "You're not linked to this child." });
+      return;
+    }
+    const r = await dbQueryRequired(
+      "SELECT * FROM parent_tasks WHERE parent_user_id = $1 AND student_user_id = $2 ORDER BY created_at DESC LIMIT 100",
+      [req.parentUser.sub, req.params.studentId]
+    );
+    res.json({ ok: true, tasks: r.rows.map(publicParentTask) });
+  } catch (error) {
+    console.error("Parent list tasks failed:", error);
+    res.status(500).json({ error: "Could not load tasks" });
+  }
+});
+
+app.post("/parent/children/:studentId/tasks", requireParent, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    if (!(await parentOwnsChild(req.parentUser.sub, req.params.studentId))) {
+      res.status(403).json({ error: "You're not linked to this child." });
+      return;
+    }
+    const kind = req.body?.kind === "quiz" ? "quiz" : "todo";
+    const title = String(req.body?.title || "").trim().slice(0, 140);
+    const note = String(req.body?.note || "").trim().slice(0, 500) || null;
+    const dueRaw = req.body?.dueAt ? new Date(req.body.dueAt) : null;
+    const dueValid = dueRaw && !Number.isNaN(dueRaw.getTime()) ? dueRaw.toISOString() : null;
+    if (!title) {
+      res.status(400).json({ error: "Give the task a title." });
+      return;
+    }
+    let curriculum = null, language = null, subject = null, grade = null, qpr = null;
+    if (kind === "quiz") {
+      curriculum = String(req.body?.curriculum || "cambodia_moeys");
+      language = String(req.body?.language || "khmer");
+      subject = String(req.body?.subject || "math");
+      grade = Math.min(12, Math.max(2, Math.round(Number(req.body?.gradeLevel || 6))));
+      qpr = Math.min(20, Math.max(1, Math.round(Number(req.body?.questionsPerRound || 5))));
+      if (!PARENT_TASK_CURRICULA.includes(curriculum) || !PARENT_TASK_LANGUAGES.includes(language) || !SUPPORTED_SUBJECTS.includes(subject)) {
+        res.status(400).json({ error: "Invalid quiz settings." });
+        return;
+      }
+    }
+    const id = createId();
+    await dbQueryRequired(
+      `INSERT INTO parent_tasks (id, parent_user_id, student_user_id, kind, title, note, curriculum, language, subject, grade_level, questions_per_round, due_at, status, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'assigned',NOW())`,
+      [id, req.parentUser.sub, req.params.studentId, kind, title, note, curriculum, language, subject, grade, qpr, dueValid]
+    );
+    const r = await dbQueryRequired("SELECT * FROM parent_tasks WHERE id = $1", [id]);
+    res.status(201).json({ ok: true, task: publicParentTask(r.rows[0]) });
+  } catch (error) {
+    console.error("Parent create task failed:", error);
+    res.status(500).json({ error: "Could not create task" });
+  }
+});
+
+app.delete("/parent/tasks/:taskId", requireParent, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    await dbQueryRequired("DELETE FROM parent_tasks WHERE id = $1 AND parent_user_id = $2", [req.params.taskId, req.parentUser.sub]);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Parent delete task failed:", error);
+    res.status(500).json({ error: "Could not delete task" });
+  }
+});
+
+// ---- Student side: generate a parent-link code + see parent tasks ----
+app.post("/student/link-code", requireStudent, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const code = generateLinkCode();
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    await dbQueryRequired(
+      `INSERT INTO student_link_codes (student_user_id, code, expires_at, created_at) VALUES ($1,$2,$3,NOW())
+       ON CONFLICT (student_user_id) DO UPDATE SET code = EXCLUDED.code, expires_at = EXCLUDED.expires_at, created_at = NOW()`,
+      [req.studentUser.sub, code, expiresAt]
+    );
+    res.json({ ok: true, code, expiresAt });
+  } catch (error) {
+    console.error("Student link-code failed:", error);
+    res.status(500).json({ error: "Could not create a link code" });
+  }
+});
+
+app.get("/student/tasks", requireStudent, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const r = await dbQueryRequired(
+      `SELECT t.*, p.display_name AS parent_name FROM parent_tasks t
+       JOIN parent_users p ON p.id = t.parent_user_id
+       WHERE t.student_user_id = $1 ORDER BY (t.status = 'done'), t.created_at DESC LIMIT 100`,
+      [req.studentUser.sub]
+    );
+    res.json({ ok: true, tasks: r.rows.map((row) => ({ ...publicParentTask(row), parentName: row.parent_name })) });
+  } catch (error) {
+    console.error("Student tasks failed:", error);
+    res.status(500).json({ error: "Could not load tasks" });
+  }
+});
+
+app.post("/student/tasks/:id/complete", requireStudent, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    // Only 'todo' tasks are completed here; 'quiz' tasks complete via the quiz.
+    const r = await dbQueryRequired(
+      `UPDATE parent_tasks SET status = 'done', completed_at = NOW()
+       WHERE id = $1 AND student_user_id = $2 AND kind = 'todo' AND status <> 'done' RETURNING id`,
+      [req.params.id, req.studentUser.sub]
+    );
+    if (!r.rows[0]) {
+      res.status(404).json({ error: "Task not found." });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Student complete task failed:", error);
+    res.status(500).json({ error: "Could not update task" });
+  }
+});
+
+// Mark a parent quiz-task done when its solo session finishes.
+async function completeParentQuizTask(session) {
+  if (!db || !session?.parentTaskId || !session?.studentUserId) return;
+  try {
+    await dbQuery(
+      `UPDATE parent_tasks SET status = 'done', score = $1, total = $2, completed_at = NOW()
+       WHERE id = $3 AND student_user_id = $4 AND kind = 'quiz'`,
+      [session.score, session.config.questionsPerRound, session.parentTaskId, session.studentUserId]
+    );
+  } catch (error) {
+    console.error("Complete parent quiz task failed:", error.message);
+  }
+}
 
 // ---- Support chatbot (public) ----
 

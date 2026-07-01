@@ -104,12 +104,23 @@
       </div>
       <div class="status" id="appStatus"></div>
 
-      <h2 style="font-size:18px; margin:18px 0 6px;">My progress</h2>
+      <h2 style="font-size:18px; margin:18px 0 6px;">Tasks from your parent</h2>
+      <div id="tasks"></div>
+
+      <h2 style="font-size:18px; margin:22px 0 6px;">My progress</h2>
       <p class="muted" style="font-size:13px; margin:0 0 4px;">Your mastery grows as you practise. Keep answering to level up each subject.</p>
       <div id="progress"></div>
 
       <h2 style="font-size:18px; margin:22px 0 0;">Your quizzes</h2>
       <div id="assignments"></div>
+
+      <h2 style="font-size:18px; margin:22px 0 6px;">Link a parent</h2>
+      <p class="muted" style="font-size:13px; margin:0 0 8px;">Generate a code and share it with your parent so they can follow your progress and set you tasks. The code lasts 24 hours.</p>
+      <div class="row">
+        <button id="linkCodeBtn" class="secondary">Generate link code</button>
+        <span id="linkCodeBox" style="font-weight:800; font-size:20px; letter-spacing:3px; color:var(--accent);"></span>
+      </div>
+      <div class="status" id="linkStatus"></div>
     </section>
   </main>
 
@@ -146,6 +157,7 @@
       $("logoutBtn").classList.remove("hidden");
       $("subtitle").textContent = "Tap a quiz to start. Your scores go to your teacher.";
       $("welcome").textContent = "Hi, " + (name || "student") + " 👋";
+      loadTasks();
       loadAssignments();
       loadProgress();
     }
@@ -205,6 +217,71 @@
       localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(NAME_KEY);
       showSignedOut();
     });
+
+    $("linkCodeBtn").addEventListener("click", async () => {
+      try {
+        setStatus($("linkStatus"), "Generating…", "var(--accent)");
+        const data = await apiPost("/student/link-code", {}, true);
+        $("linkCodeBox").textContent = data.code;
+        setStatus($("linkStatus"), "Share this code with your parent — it expires in 24 hours.", "var(--accent2)");
+      } catch (e) {
+        if (/sign in/i.test(e.message)) { localStorage.removeItem(TOKEN_KEY); showSignedOut(); return; }
+        setStatus($("linkStatus"), e.message, "#ff9b7d");
+      }
+    });
+
+    function taskQuizUrl(t) {
+      const p = new URLSearchParams({
+        mode: "solo", source: "parent_task", parentTaskId: t.id,
+        curriculum: t.curriculum || "cambodia_moeys", language: t.language || "khmer",
+        subject: t.subject || "math", grade: String(t.gradeLevel || 6),
+        count: String(t.questionsPerRound || 5), name: localStorage.getItem(NAME_KEY) || ""
+      });
+      return "/?" + p.toString();
+    }
+
+    async function loadTasks() {
+      const host = $("tasks");
+      host.innerHTML = "<p class='muted'>Loading…</p>";
+      try {
+        const data = await apiGet("/student/tasks");
+        const tasks = data.tasks || [];
+        if (!tasks.length) { host.innerHTML = "<p class='muted'>No tasks yet. Link a parent below and they can set you tasks.</p>"; return; }
+        host.innerHTML = "";
+        tasks.forEach((t) => {
+          const done = t.status === "done";
+          const meta = t.kind === "quiz"
+            ? `${escapeHtml(labelSubject(t.subject))} · Grade ${t.gradeLevel} · ${t.questionsPerRound} questions`
+            : "To-do";
+          const due = t.dueAt ? ` · due ${new Date(t.dueAt).toLocaleDateString()}` : "";
+          const pill = done
+            ? `<span class="pill done">Done${(t.kind === "quiz" && t.score != null) ? " · " + t.score + "/" + t.total : ""}</span>`
+            : `<span class="pill todo">To do</span>`;
+          let actionHtml = "";
+          if (!done && t.kind === "quiz") actionHtml = `<button data-quiz="${escapeHtml(taskQuizUrl(t))}">Start</button>`;
+          else if (!done && t.kind === "todo") actionHtml = `<button data-done="${escapeHtml(t.id)}">Mark done</button>`;
+          const card = document.createElement("div");
+          card.className = "assignment";
+          card.innerHTML = `
+            <h3>${escapeHtml(t.title)}</h3>
+            <div class="meta">From ${escapeHtml(t.parentName || "your parent")} · ${meta}${due}</div>
+            ${t.note ? `<p class="muted" style="margin:0 0 10px;">${escapeHtml(t.note)}</p>` : ""}
+            <div class="row" style="justify-content:space-between;">${pill}${actionHtml}</div>`;
+          const qbtn = card.querySelector("button[data-quiz]");
+          if (qbtn) qbtn.addEventListener("click", () => { window.location.href = qbtn.getAttribute("data-quiz"); });
+          const dbtn = card.querySelector("button[data-done]");
+          if (dbtn) dbtn.addEventListener("click", async () => {
+            dbtn.disabled = true;
+            try { await apiPost("/student/tasks/" + encodeURIComponent(dbtn.getAttribute("data-done")) + "/complete", {}, true); loadTasks(); }
+            catch (e) { dbtn.disabled = false; }
+          });
+          host.appendChild(card);
+        });
+      } catch (e) {
+        if (/sign in/i.test(e.message)) { localStorage.removeItem(TOKEN_KEY); showSignedOut(); return; }
+        host.innerHTML = `<p class='muted' style='color:#ff9b7d;'>${escapeHtml(e.message)}</p>`;
+      }
+    }
 
     async function loadAssignments() {
       const host = $("assignments");
