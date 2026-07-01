@@ -1230,29 +1230,40 @@
         return;
       }
 
+      const prevState = latestState;
       setStatus("Loading question...", "#ffd166");
       latestState = {
         ...(latestState || {}),
         status: "LOADING"
       };
       renderState();
+      beginLoadingPhases();
 
       try {
         const data = await soloRequest(`/solo/sessions/${encodeURIComponent(soloSessionId)}/next`, {
           method: "POST",
           body: {}
         });
+        clearLoadingPhases();
         latestState = data.state;
         setStatus(latestState.status === "FINISHED" ? "Quiz complete." : "Question ready.", "#69e6a6");
         renderState();
       } catch (error) {
+        clearLoadingPhases();
         if (error.status === 404) {
           resetSoloQuiz();
           setStatus("Your quiz session expired. Tap Start to begin a fresh quiz.", "#ffd166");
         } else {
-          setStatus(error.message || "Could not load question.", "#ff9b7d");
+          // Restore what they were viewing so they can simply tap Next to retry.
+          latestState = prevState;
+          setStatus(
+            error.status
+              ? (error.message || "Could not load question.")
+              : "Slow or lost connection — check your internet and tap Next to try again. 📶",
+            "#ff9b7d"
+          );
+          renderState();
         }
-        renderState();
       }
     }
 
@@ -1261,6 +1272,7 @@
         return;
       }
 
+      const prevState = latestState;
       latestState = {
         ...latestState,
         selectedChoice: choice,
@@ -1270,24 +1282,34 @@
         }
       };
       renderState();
+      beginLoadingPhases();
 
       try {
         const data = await soloRequest(`/solo/sessions/${encodeURIComponent(soloSessionId)}/answer`, {
           method: "POST",
           body: { choice }
         });
+        clearLoadingPhases();
         latestState = data.state;
         setStatus(data.result?.isCorrect ? "Correct. Review the explanation." : "Review the explanation.", data.result?.isCorrect ? "#69e6a6" : "#ff9b7d");
         renderState();
       } catch (error) {
+        clearLoadingPhases();
         if (error.status === 404) {
           // The server restarted (e.g. a deploy) and lost this in-memory session.
           resetSoloQuiz();
           setStatus("Your quiz session expired. Tap Start to begin a fresh quiz.", "#ffd166");
         } else {
-          setStatus(error.message || "Could not submit answer.", "#ff9b7d");
+          // Revert the optimistic "answered" so the buttons are tappable again.
+          latestState = prevState;
+          setStatus(
+            error.status
+              ? (error.message || "Could not submit answer.")
+              : "Slow or lost connection — check your internet and tap your answer again. 📶",
+            "#ff9b7d"
+          );
+          renderState();
         }
-        renderState();
       }
     }
 
@@ -1546,6 +1568,26 @@
         + `</div></div>`;
     }
 
+    // Escalating "please wait" phases so a slow connection feels reassuring, not
+    // frozen: phase 1 acknowledges the wait, phase 2 gently blames the connection
+    // while promising it's still coming. Re-renders on each phase change.
+    let loadingPhase = 0;
+    let loadingPhaseTimers = [];
+    function clearLoadingPhases() {
+      loadingPhaseTimers.forEach((t) => clearTimeout(t));
+      loadingPhaseTimers = [];
+      loadingPhase = 0;
+    }
+    function beginLoadingPhases() {
+      clearLoadingPhases();
+      loadingPhaseTimers.push(setTimeout(() => { loadingPhase = 1; renderState(); }, 6000));
+      loadingPhaseTimers.push(setTimeout(() => { loadingPhase = 2; renderState(); }, 14000));
+    }
+    // Pick the message for the current phase (clamped to the last one).
+    function phaseMsg(stages) {
+      return stages[Math.min(loadingPhase, stages.length - 1)];
+    }
+
     function renderState() {
       if (!latestState) {
         leadTextEl.textContent = isSoloMode
@@ -1580,10 +1622,12 @@
 
       if (latestState.status === "LOADING") {
         if (isSoloMode) {
-          questionTextEl.innerHTML = loadingBlock(
-            "Creating your next question",
-            "Our AI is preparing a fresh question just for you — this usually takes a few seconds. 🧠✨"
-          );
+          const [t, s] = phaseMsg([
+            ["Creating your next question", "Our AI is preparing a fresh question just for you — this usually takes a few seconds. 🧠✨"],
+            ["Still creating your question", "Thanks for waiting — almost there! 🌟"],
+            ["Hang in there 🙏", "A slow connection can take a little longer. We haven't forgotten you — your question is on the way!"]
+          ]);
+          questionTextEl.innerHTML = loadingBlock(t, s);
         } else {
           questionTextEl.textContent = "Loading next question...";
         }
@@ -1619,10 +1663,12 @@
         } else if (isSoloMode && latestState.player?.answered) {
           // Answer submitted; the server is resolving the explanation video and
           // writing the step-by-step mini-lesson before it comes back.
-          explanationEl.innerHTML = loadingBlock(
-            "Great — marking your answer",
-            "Finding a helpful video and writing your step-by-step mini-lesson. Hang tight! 📹📘"
-          );
+          const [t, s] = phaseMsg([
+            ["Great — marking your answer", "Finding a helpful video and writing your step-by-step mini-lesson. Hang tight! 📹📘"],
+            ["Still preparing your explanation", "Thanks for your patience — almost ready! 🌟"],
+            ["Hang in there 🙏", "A slow connection can take a little longer. Your video and mini-lesson are on the way!"]
+          ]);
+          explanationEl.innerHTML = loadingBlock(t, s);
         } else {
           explanationEl.textContent = latestState.player?.answered
             ? "Answer sent. Waiting for other students or the timer."
