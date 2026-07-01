@@ -758,14 +758,15 @@
         <div class="trust-badge">Progress saved for review</div>
       </div>
       <div id="soloCredit" hidden style="margin:10px 0; padding:10px 14px; border-radius:12px; font-weight:700; text-align:center;"></div>
+      <div style="text-align:right; margin-bottom:6px;"><button id="langToggle" style="padding:6px 12px; font-size:13px; border-radius:10px; background:#214066; color:#fff; border:0; cursor:pointer; font-weight:700;">ខ្មែរ</button></div>
       <div class="room-form">
-        <input id="playerNameInput" maxlength="24" placeholder="NAME" autocomplete="off">
+        <input id="playerNameInput" maxlength="24" placeholder="NAME" data-i18n-ph="ctl.name" autocomplete="off">
         <input id="roomCodeInput" maxlength="6" placeholder="ROOM" autocomplete="off">
         <button id="joinButton">Join</button>
       </div>
       <div id="soloOptions" class="solo-options" hidden>
         <div class="solo-field">
-          <label for="soloLanguage">Language</label>
+          <label for="soloLanguage" data-i18n="ctl.language">Language</label>
           <select id="soloLanguage">
             <option value="khmer">Khmer</option>
             <option value="english">English</option>
@@ -773,7 +774,7 @@
           </select>
         </div>
         <div class="solo-field">
-          <label for="soloCurriculum">Curriculum</label>
+          <label for="soloCurriculum" data-i18n="ctl.curriculum">Curriculum</label>
           <select id="soloCurriculum">
             <option value="cambodia_moeys">Cambodia MoEYS</option>
             <option value="international">International</option>
@@ -781,7 +782,7 @@
           </select>
         </div>
         <div class="solo-field">
-          <label for="soloGrade">Grade</label>
+          <label for="soloGrade" data-i18n="ctl.grade">Grade</label>
           <select id="soloGrade">
             <option value="2">Grade 2</option>
             <option value="3">Grade 3</option>
@@ -797,7 +798,7 @@
           </select>
         </div>
         <div class="solo-field">
-          <label for="soloSubject">Subject</label>
+          <label for="soloSubject" data-i18n="ctl.subject">Subject</label>
           <select id="soloSubject"></select>
         </div>
       </div>
@@ -814,7 +815,7 @@
       <button id="readAloudBtn" class="read-aloud" hidden aria-label="Read aloud">🔊 Read aloud</button>
       <div id="answers" class="answers"></div>
       <div id="hostActions" class="footer-actions" hidden>
-        <button id="startButton" disabled>Start Quiz</button>
+        <button id="startButton" data-i18n="ctl.startQuiz" disabled>Start Quiz</button>
         <button id="nextButton" class="secondary" disabled>Next</button>
       </div>
       <div id="explanation" class="explanation"></div>
@@ -847,12 +848,20 @@
   </main>
 
   <script src="./config.js"></script>
+  <script src="./i18n.js"></script>
   <script src="./support-widget.js"></script>
   <script>if ("serviceWorker" in navigator) { navigator.serviceWorker.register("/sw.js").catch(function () {}); }</script>
   <script>
     const config = window.FRUIT_CATCHER_CONFIG || {};
     const gatewayHttpUrl = config.gatewayHttpUrl || "http://localhost:3000";
     const gatewayWsUrl = config.gatewayWsUrl || "ws://localhost:3000";
+    const t = (k) => (window.I18N ? I18N.t(k) : k);
+
+    const langToggleEl = document.getElementById("langToggle");
+    function refreshLangToggle() { if (langToggleEl) langToggleEl.textContent = (window.I18N && I18N.getLang() === "km") ? "English" : "ខ្មែរ"; }
+    if (langToggleEl) langToggleEl.addEventListener("click", () => { if (window.I18N) I18N.setLang(I18N.getLang() === "km" ? "en" : "km"); });
+    if (window.I18N) I18N.onChange(() => { refreshLangToggle(); if (typeof latestState !== "undefined" && latestState) renderState(); });
+    refreshLangToggle();
 
     const playerNameInput = document.getElementById("playerNameInput");
     const roomCodeInput = document.getElementById("roomCodeInput");
@@ -1155,7 +1164,7 @@
       if (isSoloMode) {
         hostActionsEl.hidden = !soloSessionId;
         startButton.hidden = true;
-        nextButton.textContent = status === "FINISHED" ? "New Quiz" : "Next";
+        nextButton.textContent = status === "FINISHED" ? t("ctl.newQuiz") : t("ctl.next");
         nextButton.disabled = !soloSessionId || !["READY", "REVIEWING", "FINISHED"].includes(status);
         joinButton.textContent = soloSessionId ? "Change Quiz" : (joinInFlight ? "Starting..." : "Start");
         joinButton.disabled = joinInFlight;
@@ -1694,7 +1703,7 @@
     function resetReadAloud() {
       if (speechSupported()) window.speechSynthesis.cancel();
       speaking = false;
-      if (readAloudBtn) { readAloudBtn.classList.remove("speaking"); readAloudBtn.textContent = "🔊 Read aloud"; }
+      if (readAloudBtn) { readAloudBtn.classList.remove("speaking"); readAloudBtn.textContent = t("ctl.readAloud"); }
     }
     function readAloud() {
       if (!speechSupported()) return;
@@ -1710,7 +1719,7 @@
       window.speechSynthesis.speak(u);
       speaking = true;
       readAloudBtn.classList.add("speaking");
-      readAloudBtn.textContent = "⏹ Stop";
+      readAloudBtn.textContent = t("ctl.stop");
     }
     if (readAloudBtn) readAloudBtn.addEventListener("click", readAloud);
 
@@ -1872,12 +1881,12 @@
             const title = formatMathHTML(course.title || "Learn more");
             const lesson = course.lesson ? `<div class="course-lesson">${formatMathHTML(course.lesson)}</div>` : "";
             const steps = hasSteps
-              ? `<div class="course-subhead">Step by step</div><ol class="course-steps">${course.steps.map((s) => `<li>${formatMathHTML(s)}</li>`).join("")}</ol>`
+              ? `<div class="course-subhead">${t("ctl.stepByStep")}</div><ol class="course-steps">${course.steps.map((s) => `<li>${formatMathHTML(s)}</li>`).join("")}</ol>`
               : "";
             const points = hasPoints
-              ? `<div class="course-subhead">Key points to remember</div><ul class="course-points">${course.keyPoints.map((p) => `<li>${formatMathHTML(p)}</li>`).join("")}</ul>`
+              ? `<div class="course-subhead">${t("ctl.keyPoints")}</div><ul class="course-points">${course.keyPoints.map((p) => `<li>${formatMathHTML(p)}</li>`).join("")}</ul>`
               : "";
-            exp += `<div class="course-card"><div class="course-head">📘 Course detail · ${title}</div>${lesson}${steps}${points}</div>`;
+            exp += `<div class="course-card"><div class="course-head">📘 ${t("ctl.courseDetail")} · ${title}</div>${lesson}${steps}${points}</div>`;
           }
           exp += video;
           explanationEl.innerHTML = exp;
@@ -1893,7 +1902,7 @@
         renderAnswers();
       } else if (latestState.status === "FINISHED") {
         questionTextEl.textContent = isSoloMode
-          ? `Quiz complete. Your score: ${latestState.player?.score || latestState.score || 0}/${latestState.questionsPerRound}`
+          ? `${t("ctl.quizComplete")} ${latestState.player?.score || latestState.score || 0}/${latestState.questionsPerRound}`
           : `Round complete. Correct answers this round: ${latestState.score}`;
         explanationEl.textContent = isSoloMode
           ? "Here's your progress by subject. Review your recent answers below, or press New Quiz to start again."

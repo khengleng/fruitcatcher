@@ -1940,7 +1940,22 @@ async function deleteTelegramMessage(chatId, messageId) {
 
 // Shared-secret guard for calls coming from the Telegram bot service.
 const BOT_API_SECRET = process.env.BOT_API_SECRET || "";
-const TELEGRAM_BOT_USERNAME = process.env.TELEGRAM_BOT_USERNAME || "";
+// Resolved at startup (from env, or auto-detected via Telegram getMe) so the
+// portal can build one-tap t.me deep-links without manual configuration.
+let telegramBotUsername = process.env.TELEGRAM_BOT_USERNAME || "";
+async function resolveBotUsername() {
+  if (telegramBotUsername || !TELEGRAM_BOT_TOKEN) return;
+  try {
+    const r = await fetchWithTimeout(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe`, { method: "GET" }, 8000);
+    const d = await r.json().catch(() => ({}));
+    if (d && d.ok && d.result && d.result.username) {
+      telegramBotUsername = d.result.username;
+      console.log(`Telegram bot username: @${telegramBotUsername}`);
+    }
+  } catch (error) {
+    console.error("resolveBotUsername failed:", error.message);
+  }
+}
 
 // Best-effort Telegram notification (the gateway holds the bot token and can
 // send directly). Silent no-op if Telegram isn't configured or the recipient
@@ -5955,7 +5970,7 @@ app.post("/student/telegram/code", requireStudent, async (req, res) => {
   try {
     const linked = await dbQuery("SELECT telegram_id FROM student_users WHERE id = $1", [req.studentUser.sub]);
     const code = await createTelegramLinkCode("student", req.studentUser.sub);
-    res.json({ ok: true, code, botUsername: TELEGRAM_BOT_USERNAME || null, linked: Boolean(linked?.rows?.[0]?.telegram_id) });
+    res.json({ ok: true, code, botUsername: telegramBotUsername || null, linked: Boolean(linked?.rows?.[0]?.telegram_id) });
   } catch (error) {
     console.error("student tg code failed:", error);
     res.status(500).json({ error: "Could not create a code" });
@@ -5967,7 +5982,7 @@ app.post("/parent/telegram/code", requireParent, async (req, res) => {
   try {
     const linked = await dbQuery("SELECT telegram_id FROM parent_users WHERE id = $1", [req.parentUser.sub]);
     const code = await createTelegramLinkCode("parent", req.parentUser.sub);
-    res.json({ ok: true, code, botUsername: TELEGRAM_BOT_USERNAME || null, linked: Boolean(linked?.rows?.[0]?.telegram_id) });
+    res.json({ ok: true, code, botUsername: telegramBotUsername || null, linked: Boolean(linked?.rows?.[0]?.telegram_id) });
   } catch (error) {
     console.error("parent tg code failed:", error);
     res.status(500).json({ error: "Could not create a code" });
@@ -9231,6 +9246,8 @@ async function startServer() {
   } else if (databaseReady) {
     await persistDbConfig(gameConfig);
   }
+
+  resolveBotUsername();
 
   const sweepTimer = setInterval(sweepStaleResources, SWEEP_INTERVAL_MS);
   sweepTimer.unref();
