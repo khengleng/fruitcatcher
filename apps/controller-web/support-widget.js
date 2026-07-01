@@ -23,20 +23,41 @@
     + ".sw-foot{display:flex;gap:8px;padding:10px;border-top:1px solid rgba(255,255,255,.1);}"
     + ".sw-foot input{flex:1;border:0;outline:none;border-radius:12px;padding:11px;background:#1b3151;color:#f6f8fb;font-size:14px;}"
     + ".sw-foot button{border:0;border-radius:12px;padding:0 16px;background:#69e6a6;color:#08111d;font-weight:800;cursor:pointer;}"
-    + ".sw-foot button:disabled{opacity:.5;}";
+    + ".sw-foot button:disabled{opacity:.5;}"
+    + ".sw-btn svg{width:32px;height:32px;display:block;margin:0 auto;}"
+    + ".sw-title{display:flex;align-items:center;gap:8px;}"
+    + ".sw-avatar{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#ffd34f;flex:none;}"
+    + ".sw-avatar svg{width:18px;height:18px;display:block;}";
   var style = document.createElement("style");
   style.textContent = css;
   document.head.appendChild(style);
 
+  // Friendly support-bot avatar: a headset robot (AI help). Dark shapes with
+  // yellow eyes/smile so it reads on the yellow button and the yellow header badge.
+  var botIcon = ''
+    + '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">'
+    + '<path d="M4.5 12.5v-.8a7.5 7.5 0 0 1 15 0v.8" fill="none" stroke="#08111d" stroke-width="1.8" stroke-linecap="round"/>'
+    + '<rect x="2.7" y="11.8" width="3.3" height="5" rx="1.4" fill="#08111d"/>'
+    + '<rect x="18" y="11.8" width="3.3" height="5" rx="1.4" fill="#08111d"/>'
+    + '<path d="M19.65 16.8v.5a2.2 2.2 0 0 1-2.2 2.2H13.2" fill="none" stroke="#08111d" stroke-width="1.6" stroke-linecap="round"/>'
+    + '<circle cx="12.3" cy="19.5" r="1.15" fill="#08111d"/>'
+    + '<circle cx="12" cy="3.6" r="1" fill="#08111d"/>'
+    + '<path d="M12 4.6v1.6" stroke="#08111d" stroke-width="1.6" stroke-linecap="round"/>'
+    + '<rect x="5.7" y="6.2" width="12.6" height="9.4" rx="3" fill="#08111d"/>'
+    + '<circle cx="9.7" cy="10.2" r="1.35" fill="#ffd34f"/>'
+    + '<circle cx="14.3" cy="10.2" r="1.35" fill="#ffd34f"/>'
+    + '<path d="M9.5 12.5c1 1 4 1 5 0" fill="none" stroke="#ffd34f" stroke-width="1.4" stroke-linecap="round"/>'
+    + '</svg>';
+
   var btn = document.createElement("button");
   btn.className = "sw-btn";
   btn.setAttribute("aria-label", "Help and support");
-  btn.textContent = "💬";
+  btn.innerHTML = botIcon;
 
   var panel = document.createElement("div");
   panel.className = "sw-panel";
   panel.innerHTML = ""
-    + '<div class="sw-head"><span>💬 Help &amp; Support</span><button aria-label="Close" id="swClose">×</button></div>'
+    + '<div class="sw-head"><span class="sw-title"><span class="sw-avatar">' + botIcon + '</span>Help &amp; Support</span><button aria-label="Close" id="swClose">×</button></div>'
     + '<div class="sw-body" id="swBody"></div>'
     + '<div class="sw-foot"><input id="swInput" placeholder="Ask about the platform…" maxlength="2000"><button id="swSend">Send</button></div>';
 
