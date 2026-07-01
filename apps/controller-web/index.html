@@ -1772,13 +1772,16 @@
         questionTextEl.innerHTML = formatMathHTML(latestState.question.prompt);
         if (latestState.status === "REVIEWING") {
           let exp = formatMathHTML(`${latestState.shortExplanation} ${latestState.elaboration}`);
+          // Build the video block, but append it AFTER the step-by-step course
+          // detail so students read the lesson first, then watch the video.
+          let video = "";
           if (latestState.videoEmbedUrl) {
             const vidLabel = latestState.videoCaptionLanguage === "km"
               ? `<div class="yt-note">🎬 English video · Khmer subtitles (វីដេអូអង់គ្លេស · អក្សររត់ខ្មែរ)</div>`
               : "";
-            exp += `<div class="yt-wrap">${vidLabel}<div class="yt-embed"><iframe src="${latestState.videoEmbedUrl}" title="Explanation video" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe></div></div>`;
+            video = `<div class="yt-wrap">${vidLabel}<div class="yt-embed"><iframe src="${latestState.videoEmbedUrl}" title="Explanation video" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe></div></div>`;
           } else if (latestState.videoUrl) {
-            exp += `<div class="yt-wrap"><a class="yt-link" href="${latestState.videoUrl}" target="_blank" rel="noopener">▶ Watch an explanation on YouTube</a></div>`;
+            video = `<div class="yt-wrap"><a class="yt-link" href="${latestState.videoUrl}" target="_blank" rel="noopener">▶ Watch an explanation on YouTube</a></div>`;
           }
           const course = latestState.courseDetail;
           const hasSteps = course && Array.isArray(course.steps) && course.steps.length;
@@ -1794,6 +1797,7 @@
               : "";
             exp += `<div class="course-card"><div class="course-head">📘 Course detail · ${title}</div>${lesson}${steps}${points}</div>`;
           }
+          exp += video;
           explanationEl.innerHTML = exp;
         } else if (isSoloMode && latestState.player?.answered) {
           // Answer submitted; the "verifying" cue is rendered in the answers area
