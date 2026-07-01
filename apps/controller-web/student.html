@@ -78,30 +78,33 @@
   <main>
     <div class="topbar">
       <div>
-        <h1>📚 Student Portal</h1>
-        <p class="muted" id="subtitle">Sign in to see the quizzes your teacher assigned.</p>
+        <h1 data-i18n="student.title">📚 Student Portal</h1>
+        <p class="muted" id="subtitle" data-i18n="student.subtitle">Sign in to see the quizzes your teacher assigned.</p>
       </div>
-      <button id="logoutBtn" class="secondary hidden" style="padding:10px 14px;">Log out</button>
+      <div style="display:flex; gap:8px; align-items:flex-start;">
+        <button id="langToggle" class="secondary" style="padding:10px 12px;">ខ្មែរ</button>
+        <button id="logoutBtn" class="secondary hidden" style="padding:10px 14px;" data-i18n="common.logout">Log out</button>
+      </div>
     </div>
 
     <section id="authPanel" class="panel">
       <div class="tabs">
-        <button class="tab active" id="tabLogin">Log in</button>
-        <button class="tab" id="tabRegister">Create account</button>
+        <button class="tab active" id="tabLogin" data-i18n="common.login">Log in</button>
+        <button class="tab" id="tabRegister" data-i18n="common.createAccount">Create account</button>
       </div>
 
       <div id="loginForm">
-        <label>Username<input id="loginUser" autocomplete="username" autocapitalize="none"></label>
-        <label>Password<input id="loginPass" type="password" autocomplete="current-password"></label>
-        <div class="row" style="margin-top:14px;"><button id="loginBtn">Log in</button></div>
+        <label><span data-i18n="common.username">Username</span><input id="loginUser" autocomplete="username" autocapitalize="none"></label>
+        <label><span data-i18n="common.password">Password</span><input id="loginPass" type="password" autocomplete="current-password"></label>
+        <div class="row" style="margin-top:14px;"><button id="loginBtn" data-i18n="common.login">Log in</button></div>
       </div>
 
       <div id="registerForm" class="hidden">
-        <label>Your name<input id="regName" placeholder="e.g. Dara" autocomplete="name"></label>
-        <label>Username<input id="regUser" autocomplete="username" autocapitalize="none"></label>
-        <label>Password (min 6)<input id="regPass" type="password" autocomplete="new-password"></label>
-        <label>Class code (optional)<input id="regCode" placeholder="e.g. ABC123" autocapitalize="characters"></label>
-        <div class="row" style="margin-top:14px;"><button id="registerBtn">Create account</button></div>
+        <label><span data-i18n="common.yourName">Your name</span><input id="regName" placeholder="e.g. Dara" autocomplete="name"></label>
+        <label><span data-i18n="common.username">Username</span><input id="regUser" autocomplete="username" autocapitalize="none"></label>
+        <label><span data-i18n="common.password">Password</span><input id="regPass" type="password" autocomplete="new-password"></label>
+        <label><span data-i18n="student.classCodeHint">Class code (optional)</span><input id="regCode" placeholder="e.g. ABC123" autocapitalize="characters"></label>
+        <div class="row" style="margin-top:14px;"><button id="registerBtn" data-i18n="common.createAccount">Create account</button></div>
       </div>
       <div class="status" id="authStatus"></div>
     </section>
@@ -110,32 +113,32 @@
       <div class="row" style="justify-content:space-between;">
         <strong id="welcome"></strong>
       </div>
-      <label>Join a class with a code</label>
+      <label data-i18n="student.joinClass">Join a class with a code</label>
       <div class="row">
-        <input id="joinCode" placeholder="Class code" autocapitalize="characters" style="flex:1;">
-        <button id="joinBtn" class="secondary">Join</button>
+        <input id="joinCode" data-i18n-ph="student.classCode" placeholder="Class code" autocapitalize="characters" style="flex:1;">
+        <button id="joinBtn" class="secondary" data-i18n="student.join">Join</button>
       </div>
       <div class="status" id="appStatus"></div>
 
-      <h2 style="font-size:18px; margin:18px 0 6px;">Tasks from your parent</h2>
+      <h2 style="font-size:18px; margin:18px 0 6px;" data-i18n="student.tasks">Tasks from your parent</h2>
       <div id="tasks"></div>
 
-      <h2 style="font-size:18px; margin:22px 0 6px;">My progress</h2>
+      <h2 style="font-size:18px; margin:22px 0 6px;" data-i18n="student.progress">My progress</h2>
       <div id="engagement"></div>
       <div class="row" id="practiceRow" style="margin:10px 0 4px;"></div>
       <div id="progress"></div>
 
-      <h2 style="font-size:18px; margin:22px 0 6px;">Review your mistakes</h2>
-      <div class="row"><button id="mistakesBtn" class="secondary">Show my recent mistakes</button></div>
+      <h2 style="font-size:18px; margin:22px 0 6px;" data-i18n="student.mistakes">Review your mistakes</h2>
+      <div class="row"><button id="mistakesBtn" class="secondary" data-i18n="student.showMistakes">Show my recent mistakes</button></div>
       <div id="mistakes" style="margin-top:6px;"></div>
 
-      <h2 style="font-size:18px; margin:22px 0 0;">Your quizzes</h2>
+      <h2 style="font-size:18px; margin:22px 0 0;" data-i18n="student.quizzes">Your quizzes</h2>
       <div id="assignments"></div>
 
-      <h2 style="font-size:18px; margin:22px 0 6px;">Link a parent</h2>
-      <p class="muted" style="font-size:13px; margin:0 0 8px;">Generate a code and share it with your parent so they can follow your progress and set you tasks. The code lasts 24 hours.</p>
+      <h2 style="font-size:18px; margin:22px 0 6px;" data-i18n="student.linkParent">Link a parent</h2>
+      <p class="muted" style="font-size:13px; margin:0 0 8px;" data-i18n="student.linkParentHint">Generate a code and share it with your parent so they can follow your progress and set you tasks. The code lasts 24 hours.</p>
       <div class="row">
-        <button id="linkCodeBtn" class="secondary">Generate link code</button>
+        <button id="linkCodeBtn" class="secondary" data-i18n="student.generateCode">Generate link code</button>
         <span id="linkCodeBox" style="font-weight:800; font-size:20px; letter-spacing:3px; color:var(--accent);"></span>
       </div>
       <div class="status" id="linkStatus"></div>
@@ -143,6 +146,7 @@
   </main>
 
   <script src="./config.js"></script>
+  <script src="./i18n.js"></script>
   <script src="./support-widget.js"></script>
   <script>
     const config = window.FRUIT_CATCHER_CONFIG || {};
@@ -151,8 +155,18 @@
     const NAME_KEY = "fruitcatcher_student_name";
 
     const $ = (id) => document.getElementById(id);
+    const t = (k) => (window.I18N ? I18N.t(k) : k);
     function token() { try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; } }
     function setStatus(el, msg, color) { el.textContent = msg || ""; el.style.color = color || "var(--muted)"; }
+
+    function refreshLangToggle() { $("langToggle").textContent = (window.I18N && I18N.getLang() === "km") ? "English" : "ខ្មែរ"; }
+    $("langToggle").addEventListener("click", () => { if (window.I18N) I18N.setLang(I18N.getLang() === "km" ? "en" : "km"); });
+    function rerenderDynamic() {
+      const authed = !$("appPanel").classList.contains("hidden");
+      $("subtitle").textContent = authed ? t("student.subtitleIn") : t("student.subtitle");
+      if (authed) { loadTasks(); loadAssignments(); loadProgress(); }
+    }
+    if (window.I18N) I18N.onChange(() => { refreshLangToggle(); rerenderDynamic(); });
 
     async function apiPost(path, body, auth) {
       const headers = { "Content-Type": "application/json" };
@@ -173,7 +187,7 @@
       $("authPanel").classList.add("hidden");
       $("appPanel").classList.remove("hidden");
       $("logoutBtn").classList.remove("hidden");
-      $("subtitle").textContent = "Tap a quiz to start. Your scores go to your teacher.";
+      $("subtitle").textContent = t("student.subtitleIn");
       $("welcome").textContent = "Hi, " + (name || "student") + " 👋";
       loadTasks();
       loadAssignments();
@@ -264,7 +278,7 @@
       try {
         const data = await apiGet("/student/tasks");
         const tasks = data.tasks || [];
-        if (!tasks.length) { host.innerHTML = "<p class='muted'>No tasks yet. Link a parent below and they can set you tasks.</p>"; return; }
+        if (!tasks.length) { host.innerHTML = `<p class='muted'>${t("student.noTasks")}</p>`; return; }
         host.innerHTML = "";
         tasks.forEach((t) => {
           const done = t.status === "done";
@@ -276,8 +290,8 @@
             ? `<span class="pill done">Done${(t.kind === "quiz" && t.score != null) ? " · " + t.score + "/" + t.total : ""}</span>`
             : `<span class="pill todo">To do</span>`;
           let actionHtml = "";
-          if (!done && t.kind === "quiz") actionHtml = `<button data-quiz="${escapeHtml(taskQuizUrl(t))}">Start</button>`;
-          else if (!done && t.kind === "todo") actionHtml = `<button data-done="${escapeHtml(t.id)}">Mark done</button>`;
+          if (!done && t.kind === "quiz") actionHtml = `<button data-quiz="${escapeHtml(taskQuizUrl(t))}">${window.I18N ? I18N.t("common.start") : "Start"}</button>`;
+          else if (!done && t.kind === "todo") actionHtml = `<button data-done="${escapeHtml(t.id)}">${window.I18N ? I18N.t("common.markDone") : "Mark done"}</button>`;
           const card = document.createElement("div");
           card.className = "assignment";
           card.innerHTML = `
@@ -322,7 +336,7 @@
             <div class="meta">${escapeHtml(a.classroomName)} · ${escapeHtml(labelSubject(a.subject))} · Grade ${a.gradeLevel} · ${a.questionsPerRound} questions</div>
             <div class="row" style="justify-content:space-between;">
               ${status}
-              <button data-link="${encodeURIComponent(a.link)}">${a.completed ? "Retake" : "Start"}</button>
+              <button data-link="${encodeURIComponent(a.link)}">${a.completed ? t("common.retake") : t("common.start")}</button>
             </div>`;
           card.querySelector("button").addEventListener("click", (ev) => {
             window.location.href = decodeURIComponent(ev.currentTarget.getAttribute("data-link"));
@@ -368,9 +382,9 @@
       if (!e) return "";
       const pct = Math.min(100, Math.round((e.today.questions / Math.max(1, e.today.goal)) * 100));
       return `<div class="engage">
-        <div class="stat streak"><div class="big">🔥 ${e.streakDays}</div><div class="lbl">day streak</div></div>
-        <div class="stat xp"><div class="big">⭐ ${e.level}</div><div class="lbl">Level · ${e.xpTotal} XP</div></div>
-        <div class="stat goal"><div class="big">${e.today.questions}/${e.today.goal}</div><div class="lbl">${e.today.goalMet ? "goal done! ✅" : "today's goal"}</div>
+        <div class="stat streak"><div class="big">🔥 ${e.streakDays}</div><div class="lbl">${t("engage.streak")}</div></div>
+        <div class="stat xp"><div class="big">⭐ ${e.level}</div><div class="lbl">${t("engage.level")} · ${e.xpTotal} XP</div></div>
+        <div class="stat goal"><div class="big">${e.today.questions}/${e.today.goal}</div><div class="lbl">${e.today.goalMet ? t("engage.goalDone") : t("engage.todayGoal")}</div>
           <div class="goalbar"><span style="width:${pct}%"></span></div></div>
       </div>`;
     }
@@ -383,8 +397,8 @@
         const dow = new Date(d.day + "T00:00:00Z").toLocaleDateString(undefined, { weekday: "narrow" });
         return `<div style="flex:1;text-align:center;"><div style="height:36px;display:flex;align-items:flex-end;justify-content:center;"><div style="width:60%;height:${Math.max(3,h)}px;border-radius:4px;background:${d.questions?"var(--accent2)":"rgba(255,255,255,0.12)"};"></div></div><div style="font-size:10px;color:var(--muted);margin-top:3px;">${dow}</div></div>`;
       }).join("");
-      return `<div class="mastery-card"><div style="font-weight:800;margin-bottom:2px;">This week</div>`
-        + `<div class="mastery-meta"><span><b>${w.questions}</b> questions</span><span><b>${w.accuracy}%</b> accuracy</span><span>active <b>${w.activeDays}</b>/7 days</span><span>+${w.xp} XP</span></div>`
+      return `<div class="mastery-card"><div style="font-weight:800;margin-bottom:2px;">${t("engage.thisWeek")}</div>`
+        + `<div class="mastery-meta"><span><b>${w.questions}</b> ${t("engage.questions")}</span><span><b>${w.accuracy}%</b> ${t("engage.accuracy")}</span><span>${t("engage.activeDays")} <b>${w.activeDays}</b>/7</span><span>+${w.xp} XP</span></div>`
         + `<div style="display:flex;gap:4px;margin-top:8px;">${bars}</div></div>`;
     }
 
@@ -443,7 +457,7 @@
         const weak = weakestSubject(subjects);
         if (weak) {
           const btn = document.createElement("button");
-          btn.textContent = "🎯 Practise your weakest: " + escapeHtml(weak.subjectLabel || weak.subject) + " (" + (weak.accuracy || 0) + "%)";
+          btn.textContent = "🎯 " + t("practice.weakest") + ": " + (weak.subjectLabel || weak.subject) + " (" + (weak.accuracy || 0) + "%)";
           btn.addEventListener("click", () => { window.location.href = practiceUrl(weak); });
           $("practiceRow").appendChild(btn);
         }
@@ -451,12 +465,12 @@
         if (best) {
           const cbtn = document.createElement("button");
           cbtn.className = "secondary";
-          cbtn.textContent = "🏅 Certificate: " + escapeHtml(best.subjectLabel || best.subject);
+          cbtn.textContent = "🏅 " + t("cert.button") + ": " + (best.subjectLabel || best.subject);
           cbtn.addEventListener("click", () => openCertificate(localStorage.getItem(NAME_KEY) || "Student", best.subjectLabel || best.subject, best.mastery.name, best.mastery.badge));
           $("practiceRow").appendChild(cbtn);
         }
         if (!subjects.length) {
-          host.innerHTML = "<p class='muted'>No progress yet — take a quiz to start growing your subject mastery. 🌱</p>";
+          host.innerHTML = `<p class='muted'>${t("student.noProgress")}</p>`;
           return;
         }
         host.innerHTML = subjects.map(masteryCardHTML).join("");
@@ -473,7 +487,7 @@
       try {
         const data = await apiGet("/student/mistakes");
         const items = data.mistakes || [];
-        if (!items.length) { host.innerHTML = "<p class='muted'>No mistakes to review — great job! 🎉</p>"; return; }
+        if (!items.length) { host.innerHTML = `<p class='muted'>${t("student.noMistakes")}</p>`; return; }
         host.innerHTML = items.map((m) => {
           const correct = (m.choices || []).find((c) => c.id === m.correctChoice);
           return `<div class="mistake-card">
@@ -489,6 +503,8 @@
     }
 
     // Boot
+    refreshLangToggle();
+    if (window.I18N) I18N.apply(document);
     if (token()) {
       showAuthed(localStorage.getItem(NAME_KEY) || "student");
     } else {

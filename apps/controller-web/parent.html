@@ -64,27 +64,30 @@
   <main>
     <div class="topbar">
       <div>
-        <h1>👪 Parent Portal</h1>
-        <p class="muted" id="subtitle">Follow your child's learning and set them tasks.</p>
+        <h1 data-i18n="parent.title">👪 Parent Portal</h1>
+        <p class="muted" id="subtitle" data-i18n="parent.subtitle">Follow your child's learning and set them tasks.</p>
       </div>
-      <button id="logoutBtn" class="secondary hidden" style="padding:10px 14px;">Log out</button>
+      <div style="display:flex; gap:8px; align-items:flex-start;">
+        <button id="langToggle" class="secondary" style="padding:10px 12px;">ខ្មែរ</button>
+        <button id="logoutBtn" class="secondary hidden" style="padding:10px 14px;" data-i18n="common.logout">Log out</button>
+      </div>
     </div>
 
     <section id="authPanel" class="panel">
       <div class="tabs">
-        <button class="tab active" id="tabLogin">Log in</button>
-        <button class="tab" id="tabRegister">Create account</button>
+        <button class="tab active" id="tabLogin" data-i18n="common.login">Log in</button>
+        <button class="tab" id="tabRegister" data-i18n="common.createAccount">Create account</button>
       </div>
       <div id="loginForm">
-        <label>Username<input id="loginUser" autocomplete="username" autocapitalize="none"></label>
-        <label>Password<input id="loginPass" type="password" autocomplete="current-password"></label>
-        <div class="row" style="margin-top:14px;"><button id="loginBtn">Log in</button></div>
+        <label><span data-i18n="common.username">Username</span><input id="loginUser" autocomplete="username" autocapitalize="none"></label>
+        <label><span data-i18n="common.password">Password</span><input id="loginPass" type="password" autocomplete="current-password"></label>
+        <div class="row" style="margin-top:14px;"><button id="loginBtn" data-i18n="common.login">Log in</button></div>
       </div>
       <div id="registerForm" class="hidden">
-        <label>Your name<input id="regName" placeholder="e.g. Sophea's mum" autocomplete="name"></label>
-        <label>Username<input id="regUser" autocomplete="username" autocapitalize="none"></label>
-        <label>Password (min 8)<input id="regPass" type="password" autocomplete="new-password"></label>
-        <div class="row" style="margin-top:14px;"><button id="registerBtn">Create account</button></div>
+        <label><span data-i18n="common.yourName">Your name</span><input id="regName" placeholder="e.g. Sophea's mum" autocomplete="name"></label>
+        <label><span data-i18n="common.username">Username</span><input id="regUser" autocomplete="username" autocapitalize="none"></label>
+        <label><span data-i18n="common.password">Password</span><input id="regPass" type="password" autocomplete="new-password"></label>
+        <div class="row" style="margin-top:14px;"><button id="registerBtn" data-i18n="common.createAccount">Create account</button></div>
       </div>
       <div class="status" id="authStatus"></div>
     </section>
@@ -92,64 +95,65 @@
     <section id="appPanel" class="panel hidden">
       <div class="row" style="justify-content:space-between;"><strong id="welcome"></strong></div>
 
-      <h2>Link a child</h2>
-      <p class="muted" style="font-size:13px; margin:0 0 8px;">Ask your child to open their Student Portal → "Link a parent" → generate a code, then enter it here with their username.</p>
+      <h2 data-i18n="parent.linkChild">Link a child</h2>
+      <p class="muted" style="font-size:13px; margin:0 0 8px;" data-i18n="parent.linkChildHint">Ask your child to open their Student Portal → "Link a parent" → generate a code, then enter it here with their username.</p>
       <div class="grid2">
-        <input id="childUser" placeholder="Child's username" autocapitalize="none">
-        <input id="linkCode" placeholder="Link code" autocapitalize="characters">
+        <input id="childUser" data-i18n-ph="parent.childUsername" placeholder="Child's username" autocapitalize="none">
+        <input id="linkCode" data-i18n-ph="parent.linkCode" placeholder="Link code" autocapitalize="characters">
       </div>
-      <div class="row" style="margin-top:10px;"><button id="linkBtn">Link child</button></div>
+      <div class="row" style="margin-top:10px;"><button id="linkBtn" data-i18n="parent.linkBtn">Link child</button></div>
       <div class="status" id="linkStatus"></div>
 
-      <h2 style="margin-top:20px;">Your children</h2>
+      <h2 style="margin-top:20px;" data-i18n="parent.children">Your children</h2>
       <div class="row" id="children" style="margin-top:6px;"></div>
 
       <div id="childView" class="hidden" style="margin-top:8px;">
         <h2 id="childTitle" style="margin-top:20px;"></h2>
 
-        <h3 style="margin:14px 0 0; font-size:15px; color:var(--accent);">Progress by subject</h3>
+        <h3 style="margin:14px 0 0; font-size:15px; color:var(--accent);" data-i18n="parent.progressBySubject">Progress by subject</h3>
         <div id="childProgress"></div>
 
-        <h3 style="margin:20px 0 0; font-size:15px; color:var(--accent);">Assign a task</h3>
-        <label>Type</label>
+        <h3 style="margin:20px 0 0; font-size:15px; color:var(--accent);" data-i18n="parent.assignTask">Assign a task</h3>
+        <label data-i18n="parent.type">Type</label>
         <select id="taskKind">
-          <option value="quiz">Practice quiz</option>
-          <option value="todo">To-do / goal</option>
+          <option value="quiz" data-i18n="parent.practiceQuiz">Practice quiz</option>
+          <option value="todo" data-i18n="parent.todo">To-do / goal</option>
         </select>
-        <label>Title<input id="taskTitle" placeholder="e.g. Practise multiplication"></label>
-        <label>Note (optional)<textarea id="taskNote" rows="2" maxlength="500" placeholder="A short message for your child"></textarea></label>
+        <label><span data-i18n="parent.title2">Title</span><input id="taskTitle" placeholder="e.g. Practise multiplication"></label>
+        <label><span data-i18n="parent.note">Note (optional)</span><textarea id="taskNote" rows="2" maxlength="500" placeholder="A short message for your child"></textarea></label>
         <div id="quizFields">
           <div class="grid2">
-            <div><label>Subject</label><select id="taskSubject"></select></div>
-            <div><label>Grade</label><select id="taskGrade"></select></div>
+            <div><label data-i18n="parent.subject">Subject</label><select id="taskSubject"></select></div>
+            <div><label data-i18n="parent.grade">Grade</label><select id="taskGrade"></select></div>
           </div>
           <div class="grid2">
-            <div><label>Curriculum</label><select id="taskCurriculum">
+            <div><label data-i18n="parent.curriculum">Curriculum</label><select id="taskCurriculum">
               <option value="cambodia_moeys">Cambodia MoEYS</option>
               <option value="cambridge_igcse">Cambridge IGCSE</option>
               <option value="international">International</option>
             </select></div>
-            <div><label>Language</label><select id="taskLanguage">
+            <div><label data-i18n="parent.language">Language</label><select id="taskLanguage">
               <option value="khmer">Khmer</option>
               <option value="english">English</option>
               <option value="bilingual">Bilingual</option>
             </select></div>
           </div>
           <div class="grid2">
-            <div><label>Questions</label><select id="taskCount"></select></div>
-            <div><label>Due (optional)</label><input id="taskDue" type="date"></div>
+            <div><label data-i18n="parent.questions">Questions</label><select id="taskCount"></select></div>
+            <div><label data-i18n="parent.due">Due (optional)</label><input id="taskDue" type="date"></div>
           </div>
         </div>
-        <div class="row" style="margin-top:12px;"><button id="assignBtn">Assign task</button></div>
+        <div class="row" style="margin-top:12px;"><button id="assignBtn" data-i18n="parent.assignBtn">Assign task</button></div>
         <div class="status" id="assignStatus"></div>
 
-        <h3 style="margin:20px 0 0; font-size:15px; color:var(--accent);">Assigned tasks</h3>
+        <h3 style="margin:20px 0 0; font-size:15px; color:var(--accent);" data-i18n="parent.assignedTasks">Assigned tasks</h3>
         <div id="childTasks"></div>
       </div>
     </section>
   </main>
 
   <script src="./config.js"></script>
+  <script src="./i18n.js"></script>
   <script src="./support-widget.js"></script>
   <script>
     const config = window.FRUIT_CATCHER_CONFIG || {};
@@ -166,8 +170,16 @@
     ];
 
     const $ = (id) => document.getElementById(id);
+    const t = (k) => (window.I18N ? I18N.t(k) : k);
     function token() { try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; } }
     function setStatus(el, msg, color) { el.textContent = msg || ""; el.style.color = color || "var(--muted)"; }
+    function refreshLangToggle() { $("langToggle").textContent = (window.I18N && I18N.getLang() === "km") ? "English" : "ខ្មែរ"; }
+    $("langToggle").addEventListener("click", () => { if (window.I18N) I18N.setLang(I18N.getLang() === "km" ? "en" : "km"); });
+    if (window.I18N) I18N.onChange(() => {
+      refreshLangToggle();
+      if (!$("appPanel").classList.contains("hidden")) { $("subtitle").textContent = t("parent.subtitleIn"); loadChildren(); }
+      else { $("subtitle").textContent = t("parent.subtitle"); }
+    });
     function escapeHtml(v) { return String(v == null ? "" : v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
     function labelSubject(s) { const m = SUBJECTS.find((x)=>x[0]===s); return m ? m[1] : String(s||"").replace(/_/g," "); }
 
@@ -198,7 +210,7 @@
       $("authPanel").classList.add("hidden");
       $("appPanel").classList.remove("hidden");
       $("logoutBtn").classList.remove("hidden");
-      $("subtitle").textContent = "Link your child, review progress, and assign tasks.";
+      $("subtitle").textContent = t("parent.subtitleIn");
       $("welcome").textContent = "Hi, " + (name || "parent") + " 👋";
       populateTaskSelectors();
       loadChildren();
@@ -318,9 +330,9 @@
       const cell = (big, lbl, color) => `<div style="flex:1;min-width:92px;text-align:center;border:1px solid var(--line);border-radius:14px;padding:12px 8px;background:rgba(255,255,255,0.04);">`
         + `<div style="font-size:22px;font-weight:800;color:${color};">${big}</div><div style="font-size:12px;color:var(--muted);margin-top:2px;">${lbl}</div></div>`;
       return `<div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 4px;">`
-        + cell("🔥 " + e.streakDays, "day streak", "#ff9b57")
+        + cell("🔥 " + e.streakDays, t("engage.streak"), "#ff9b57")
         + cell("⭐ " + e.level, e.xpTotal + " XP", "var(--accent)")
-        + cell(e.today.questions + "/" + e.today.goal, e.today.goalMet ? "goal done! ✅" : "today's goal", "var(--accent2)")
+        + cell(e.today.questions + "/" + e.today.goal, e.today.goalMet ? t("engage.goalDone") : t("engage.todayGoal"), "var(--accent2)")
         + `</div>`;
     }
 
@@ -332,8 +344,8 @@
         const dow = new Date(d.day + "T00:00:00Z").toLocaleDateString(undefined, { weekday: "narrow" });
         return `<div style="flex:1;text-align:center;"><div style="height:36px;display:flex;align-items:flex-end;justify-content:center;"><div style="width:60%;height:${Math.max(3,h)}px;border-radius:4px;background:${d.questions?"var(--accent2)":"rgba(255,255,255,0.12)"};"></div></div><div style="font-size:10px;color:var(--muted);margin-top:3px;">${dow}</div></div>`;
       }).join("");
-      return `<div class="mastery-card"><div style="font-weight:800;margin-bottom:2px;">This week</div>`
-        + `<div class="mastery-meta"><span><b>${w.questions}</b> questions</span><span><b>${w.accuracy}%</b> accuracy</span><span>active <b>${w.activeDays}</b>/7 days</span><span>+${w.xp} XP</span></div>`
+      return `<div class="mastery-card"><div style="font-weight:800;margin-bottom:2px;">${t("engage.thisWeek")}</div>`
+        + `<div class="mastery-meta"><span><b>${w.questions}</b> ${t("engage.questions")}</span><span><b>${w.accuracy}%</b> ${t("engage.accuracy")}</span><span>${t("engage.activeDays")} <b>${w.activeDays}</b>/7</span><span>+${w.xp} XP</span></div>`
         + `<div style="display:flex;gap:4px;margin-top:8px;">${bars}</div></div>`;
     }
 
@@ -447,6 +459,8 @@
     }
 
     // Boot
+    refreshLangToggle();
+    if (window.I18N) I18N.apply(document);
     if (token()) { showAuthed(localStorage.getItem(NAME_KEY) || "parent"); } else { showSignedOut(); }
   </script>
 </body>
