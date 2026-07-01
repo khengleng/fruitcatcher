@@ -45,6 +45,20 @@
     .pill.todo { background: rgba(255,211,79,0.16); color: var(--accent); }
     .hidden { display: none; }
     .topbar { display: flex; justify-content: space-between; align-items: center; }
+    .progress-title { font-weight: 800; color: var(--accent); margin: 4px 0 10px; }
+    .mastery-card { border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin-top: 12px; background: rgba(255,255,255,0.04); }
+    .mastery-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .mastery-subject { font-weight: 800; font-size: 16px; }
+    .mastery-badge { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; font-size: 14px; white-space: nowrap; }
+    .mastery-badge .ico { font-size: 22px; }
+    .mastery-meta { margin-top: 6px; font-size: 13px; color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .trend-up { color: var(--accent2); font-weight: 800; }
+    .trend-down { color: #ff9b7d; font-weight: 800; }
+    .trend-steady { color: var(--muted); font-weight: 700; }
+    .mastery-bar { margin-top: 9px; height: 8px; border-radius: 6px; background: rgba(255,255,255,0.10); overflow: hidden; }
+    .mastery-bar > span { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--accent2), var(--accent)); }
+    .mastery-next { margin-top: 6px; font-size: 12px; color: var(--muted); }
+    .mastery-maxed { margin-top: 6px; font-size: 12px; color: var(--accent2); font-weight: 700; }
   </style>
 </head>
 <body>
@@ -90,7 +104,11 @@
       </div>
       <div class="status" id="appStatus"></div>
 
-      <h2 style="font-size:18px; margin:18px 0 0;">Your quizzes</h2>
+      <h2 style="font-size:18px; margin:18px 0 6px;">My progress</h2>
+      <p class="muted" style="font-size:13px; margin:0 0 4px;">Your mastery grows as you practise. Keep answering to level up each subject.</p>
+      <div id="progress"></div>
+
+      <h2 style="font-size:18px; margin:22px 0 0;">Your quizzes</h2>
       <div id="assignments"></div>
     </section>
   </main>
@@ -129,6 +147,7 @@
       $("subtitle").textContent = "Tap a quiz to start. Your scores go to your teacher.";
       $("welcome").textContent = "Hi, " + (name || "student") + " 👋";
       loadAssignments();
+      loadProgress();
     }
     function showSignedOut() {
       $("appPanel").classList.add("hidden");
@@ -223,6 +242,49 @@
 
     function escapeHtml(v) { return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
     function labelSubject(s) { return String(s || "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()); }
+
+    function masteryCardHTML(s) {
+      const m = s.mastery || {};
+      const trend = s.trend === "up"
+        ? '<span class="trend-up">▲ improving</span>'
+        : s.trend === "down"
+          ? '<span class="trend-down">▼ keep practising</span>'
+          : s.trend === "steady"
+            ? '<span class="trend-steady">→ steady</span>'
+            : "";
+      const nextLine = m.isMax
+        ? '<div class="mastery-maxed">🏆 Top level reached — keep it up!</div>'
+        : (m.next
+            ? `<div class="mastery-bar"><span style="width:${Math.max(4, Number(m.progressPct) || 0)}%"></span></div>`
+              + `<div class="mastery-next">${Number(m.progressPct) || 0}% to ${escapeHtml(m.next.badge)} ${escapeHtml(m.next.name)} `
+              + `(needs ${m.next.minQuestions}+ questions at ${m.next.minAccuracy}%+)</div>`
+            : "");
+      return `<div class="mastery-card">`
+        + `<div class="mastery-top">`
+        + `<span class="mastery-subject">${escapeHtml(s.subjectLabel || s.subject)}</span>`
+        + `<span class="mastery-badge"><span class="ico">${escapeHtml(m.badge || "🌱")}</span>${escapeHtml(m.name || "Starter")}</span>`
+        + `</div>`
+        + `<div class="mastery-meta"><span><b>${s.accuracy || 0}%</b> accuracy</span><span>${s.questions || 0} questions</span>${trend}</div>`
+        + nextLine
+        + `</div>`;
+    }
+
+    async function loadProgress() {
+      const host = $("progress");
+      host.innerHTML = "<p class='muted'>Loading your progress…</p>";
+      try {
+        const data = await apiGet("/student/progress");
+        const subjects = data.subjects || [];
+        if (!subjects.length) {
+          host.innerHTML = "<p class='muted'>No progress yet — take a quiz to start growing your subject mastery. 🌱</p>";
+          return;
+        }
+        host.innerHTML = subjects.map(masteryCardHTML).join("");
+      } catch (e) {
+        if (/sign in/i.test(e.message)) { localStorage.removeItem(TOKEN_KEY); showSignedOut(); return; }
+        host.innerHTML = `<p class='muted' style='color:#ff9b7d;'>${escapeHtml(e.message)}</p>`;
+      }
+    }
 
     // Boot
     if (token()) {

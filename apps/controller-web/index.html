@@ -497,6 +497,29 @@
       .loading-spinner, .loading-dots i { animation: none; }
     }
 
+    /* Progress by subject: mastery levels + growth. */
+    .solo-progress { margin-top: 14px; }
+    .progress-title { font-size: 15px; font-weight: 800; color: var(--accent, #ffd34f); margin: 4px 0 10px; }
+    .mastery-card {
+      background: #16283f;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin-bottom: 10px;
+    }
+    .mastery-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .mastery-subject { font-weight: 800; font-size: 15px; }
+    .mastery-badge { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; font-size: 14px; white-space: nowrap; }
+    .mastery-badge .ico { font-size: 20px; }
+    .mastery-meta { margin-top: 6px; font-size: 13px; color: #9fb2c9; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .trend-up { color: #69e6a6; font-weight: 800; }
+    .trend-down { color: #ff9b7d; font-weight: 800; }
+    .trend-steady { color: #9fb2c9; font-weight: 700; }
+    .mastery-bar { margin-top: 9px; height: 8px; border-radius: 6px; background: rgba(255, 255, 255, 0.10); overflow: hidden; }
+    .mastery-bar > span { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, #69e6a6, #ffd34f); }
+    .mastery-next { margin-top: 6px; font-size: 12px; color: #9fb2c9; }
+    .mastery-maxed { margin-top: 6px; font-size: 12px; color: #69e6a6; font-weight: 700; }
+
     .leaderboard {
       margin-top: 16px;
       display: grid;
@@ -786,6 +809,7 @@
         <button id="nextButton" class="secondary" disabled>Next</button>
       </div>
       <div id="explanation" class="explanation"></div>
+      <div id="soloProgress" class="solo-progress"></div>
       <div id="results" class="results"></div>
       <div id="leaderboard" class="leaderboard"></div>
     </section>
@@ -835,6 +859,7 @@
     const questionTextEl = document.getElementById("questionText");
     const answersEl = document.getElementById("answers");
     const explanationEl = document.getElementById("explanation");
+    const progressEl = document.getElementById("soloProgress");
     const resultsEl = document.getElementById("results");
     const leaderboardEl = document.getElementById("leaderboard");
     const hostActionsEl = document.getElementById("hostActions");
@@ -1356,6 +1381,8 @@
       joinedRoomCode = "";
       joinedPlayerId = "";
       latestState = null;
+      progressShownFor = "";
+      if (progressEl) progressEl.innerHTML = "";
       setStatus("Choose a quiz and press Start.", "#69e6a6");
       renderState();
     }
@@ -1636,6 +1663,61 @@
       return stages[Math.min(loadingPhase, stages.length - 1)];
     }
 
+    // ---- Progress by subject (mastery levels + growth) ----
+    function escapeHtmlText(v) {
+      return String(v == null ? "" : v)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    }
+
+    function masteryCardHTML(s) {
+      const m = s.mastery || {};
+      const trend = s.trend === "up"
+        ? '<span class="trend-up">▲ improving</span>'
+        : s.trend === "down"
+          ? '<span class="trend-down">▼ keep practising</span>'
+          : s.trend === "steady"
+            ? '<span class="trend-steady">→ steady</span>'
+            : "";
+      const nextLine = m.isMax
+        ? '<div class="mastery-maxed">🏆 Top level reached — keep it up!</div>'
+        : (m.next
+            ? `<div class="mastery-bar"><span style="width:${Math.max(4, Number(m.progressPct) || 0)}%"></span></div>`
+              + `<div class="mastery-next">${Number(m.progressPct) || 0}% to ${escapeHtmlText(m.next.badge)} ${escapeHtmlText(m.next.name)} `
+              + `(needs ${m.next.minQuestions}+ questions at ${m.next.minAccuracy}%+)</div>`
+            : "");
+      return `<div class="mastery-card">`
+        + `<div class="mastery-top">`
+        + `<span class="mastery-subject">${escapeHtmlText(s.subjectLabel || s.subject)}</span>`
+        + `<span class="mastery-badge"><span class="ico">${escapeHtmlText(m.badge || "🌱")}</span>${escapeHtmlText(m.name || "Starter")}</span>`
+        + `</div>`
+        + `<div class="mastery-meta"><span><b>${s.accuracy || 0}%</b> accuracy</span><span>${s.questions || 0} questions</span>${trend}</div>`
+        + nextLine
+        + `</div>`;
+    }
+
+    function renderMasteryCards(host, subjects, title) {
+      if (!host) return;
+      if (!subjects || !subjects.length) { host.innerHTML = ""; return; }
+      host.innerHTML = `<div class="progress-title">${escapeHtmlText(title || "Your progress by subject")}</div>`
+        + subjects.map(masteryCardHTML).join("");
+    }
+
+    // Fetch + show this student's progress once, when the solo quiz finishes.
+    let progressShownFor = "";
+    async function loadSoloProgress() {
+      if (!isSoloMode || !soloSessionId || !progressEl) return;
+      if (progressShownFor === soloSessionId) return;
+      progressShownFor = soloSessionId;
+      progressEl.innerHTML = loadingBlock("Loading your progress", "Calculating your mastery by subject…");
+      try {
+        const data = await soloRequest(`/solo/sessions/${encodeURIComponent(soloSessionId)}/progress`);
+        renderMasteryCards(progressEl, data.subjects || [], "Your progress by subject");
+      } catch (e) {
+        progressEl.innerHTML = "";
+      }
+    }
+
     function renderState() {
       if (!latestState) {
         leadTextEl.textContent = isSoloMode
@@ -1666,6 +1748,11 @@
         : `Players ${latestState.playerCount || 0}`;
       if (!isSoloMode) {
         joinButton.textContent = joinedRoomCode ? "Joined" : "Join";
+      }
+
+      // Progress-by-subject only shows on the solo "quiz complete" screen.
+      if (progressEl && !(isSoloMode && latestState.status === "FINISHED")) {
+        progressEl.innerHTML = "";
       }
 
       if (latestState.status === "LOADING") {
@@ -1723,9 +1810,10 @@
           ? `Quiz complete. Your score: ${latestState.player?.score || latestState.score || 0}/${latestState.questionsPerRound}`
           : `Round complete. Correct answers this round: ${latestState.score}`;
         explanationEl.textContent = isSoloMode
-          ? "Review your recent answers below, or press New Quiz to start again."
+          ? "Here's your progress by subject. Review your recent answers below, or press New Quiz to start again."
           : "Press Start Quiz to generate a fresh set of questions.";
         answersEl.innerHTML = "";
+        if (isSoloMode) loadSoloProgress();
       } else {
         questionTextEl.textContent = isSoloMode ? "Press Next when you are ready to continue learning." : "Press Start Quiz when the TV is ready.";
         explanationEl.textContent = "";

@@ -2074,6 +2074,9 @@ async function initDatabase() {
   `);
   await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_solo_sessions_created_at ON solo_sessions(created_at DESC)");
   await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_solo_answers_session ON solo_answers(solo_session_id, question_index)");
+  // Per-student answer history, for the recent-accuracy trend in progress-by-subject.
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_solo_answers_student_time ON solo_answers(student_id, answered_at DESC)");
+  await dbQueryRequired("CREATE INDEX IF NOT EXISTS idx_solo_sessions_student_user ON solo_sessions(student_user_id)");
   
   // Admin users table for multi-admin support
   await dbQueryRequired(`
@@ -3503,6 +3506,108 @@ async function persistSoloAnswer(session, result) {
   await persistSoloSessionStatus(session);
 }
 
+// ===== Progress by subject: mastery levels + growth trend =====
+// Levels are reached by BOTH accuracy and practice volume, so a student can't
+// "master" a subject from one lucky answer — they grow the level by practising.
+const MASTERY_TIERS = [
+  { name: "Starter", badge: "🌱", minQuestions: 0, minAccuracy: 0 },
+  { name: "Bronze", badge: "🥉", minQuestions: 5, minAccuracy: 50 },
+  { name: "Silver", badge: "🥈", minQuestions: 12, minAccuracy: 68 },
+  { name: "Gold", badge: "🥇", minQuestions: 22, minAccuracy: 82 },
+  { name: "Master", badge: "🏆", minQuestions: 35, minAccuracy: 92 }
+];
+
+function computeMastery(questions, accuracy) {
+  let index = 0;
+  for (let i = 1; i < MASTERY_TIERS.length; i += 1) {
+    const t = MASTERY_TIERS[i];
+    if (questions >= t.minQuestions && accuracy >= t.minAccuracy) index = i;
+    else break;
+  }
+  const tier = MASTERY_TIERS[index];
+  const next = MASTERY_TIERS[index + 1] || null;
+  let progressPct = 100;
+  if (next) {
+    // Progress toward the next level is limited by whichever requirement (more
+    // practice or higher accuracy) is furthest away.
+    const qRatio = next.minQuestions ? Math.min(1, questions / next.minQuestions) : 1;
+    const aRatio = next.minAccuracy ? Math.min(1, accuracy / next.minAccuracy) : 1;
+    progressPct = Math.max(0, Math.min(99, Math.round(Math.min(qRatio, aRatio) * 100)));
+  }
+  return {
+    index,
+    name: tier.name,
+    badge: tier.badge,
+    isMax: !next,
+    next: next ? { name: next.name, badge: next.badge, minQuestions: next.minQuestions, minAccuracy: next.minAccuracy } : null,
+    progressPct
+  };
+}
+
+// Per-subject progress for one student (by students.id). Combines pre-aggregated
+// cumulative totals with a recent-window accuracy so growth is visible.
+async function getSubjectProgress(studentDbId) {
+  if (!db || !studentDbId) return [];
+  const totals = await dbQuery(
+    `SELECT subject,
+            SUM(total_questions)::int AS questions,
+            SUM(correct_answers)::int AS correct,
+            MAX(last_session_at) AS last_at
+     FROM student_progress
+     WHERE student_id = $1
+     GROUP BY subject`,
+    [studentDbId]
+  );
+  const rows = totals?.rows || [];
+  if (!rows.length) return [];
+
+  // Recent answers (bounded) for the "improving / steady" trend, grouped by subject.
+  const recent = await dbQuery(
+    `SELECT ss.subject AS subject, sa.is_correct AS is_correct
+     FROM solo_answers sa
+     JOIN solo_sessions ss ON ss.id = sa.solo_session_id
+     WHERE sa.student_id = $1
+     ORDER BY sa.answered_at DESC
+     LIMIT 400`,
+    [studentDbId]
+  );
+  const recentBySubject = new Map();
+  for (const r of (recent?.rows || [])) {
+    const list = recentBySubject.get(r.subject) || [];
+    if (list.length < 20) list.push(r.is_correct === true);
+    recentBySubject.set(r.subject, list);
+  }
+
+  const result = rows.map((row) => {
+    const questions = Number(row.questions) || 0;
+    const correct = Number(row.correct) || 0;
+    const accuracy = questions ? Math.round((correct / questions) * 100) : 0;
+    const recentList = recentBySubject.get(row.subject) || [];
+    const recentCount = recentList.length;
+    const recentCorrect = recentList.filter(Boolean).length;
+    const recentAccuracy = recentCount >= 5 ? Math.round((recentCorrect / recentCount) * 100) : null;
+    let trend = null;
+    if (recentAccuracy != null) {
+      const delta = recentAccuracy - accuracy;
+      trend = delta >= 6 ? "up" : delta <= -6 ? "down" : "steady";
+    }
+    return {
+      subject: row.subject,
+      subjectLabel: getSubjectLabel(row.subject),
+      questions,
+      correct,
+      accuracy,
+      recentAccuracy,
+      trend,
+      lastAt: row.last_at,
+      mastery: computeMastery(questions, accuracy)
+    };
+  });
+  // Most-practised subjects first.
+  result.sort((a, b) => b.questions - a.questions);
+  return result;
+}
+
 app.get("/solo/options", (_req, res) => {
   res.json({
     curriculums: SUPPORTED_CURRICULUMS,
@@ -3704,6 +3809,23 @@ app.post("/solo/sessions/:id/answer", async (req, res) => {
   } catch (error) {
     console.error("Solo answer failed:", error);
     res.status(500).json({ error: "Could not record your answer. Please try again." });
+  }
+});
+
+// Progress-by-subject (mastery levels + growth) for this session's student.
+app.get("/solo/sessions/:id/progress", async (req, res) => {
+  const session = getSoloSession(req.params.id);
+  if (!session) {
+    res.status(404).json({ error: "Solo session not found" });
+    return;
+  }
+  session.lastActivityAt = Date.now();
+  try {
+    const subjects = await getSubjectProgress(session.studentId);
+    res.json({ ok: true, subjects });
+  } catch (error) {
+    console.error("Solo progress failed:", error);
+    res.status(500).json({ error: "Could not load your progress." });
   }
 });
 
@@ -5409,6 +5531,22 @@ app.get("/student/assignments", requireStudent, async (req, res) => {
   } catch (error) {
     console.error("Student assignments failed:", error);
     res.status(500).json({ error: "Could not load assignments" });
+  }
+});
+
+// Progress-by-subject (mastery levels + growth) for the logged-in student. All
+// of a student's solo activity (free practice and assignments) aggregates under
+// one students row keyed by client_id "solo:student:<account id>".
+app.get("/student/progress", requireStudent, async (req, res) => {
+  if (!requireDatabase(res)) return;
+  try {
+    const row = await dbQuery("SELECT id FROM students WHERE client_id = $1", [`solo:student:${req.studentUser.sub}`]);
+    const studentDbId = row?.rows?.[0]?.id || null;
+    const subjects = studentDbId ? await getSubjectProgress(studentDbId) : [];
+    res.json({ ok: true, subjects });
+  } catch (error) {
+    console.error("Student progress failed:", error);
+    res.status(500).json({ error: "Could not load your progress" });
   }
 });
 
